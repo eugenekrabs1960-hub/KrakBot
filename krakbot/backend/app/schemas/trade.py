@@ -9,3 +9,12 @@ class TradeRow(BaseModel):
     exit_price: float | None = None
     realized_pnl_usd: float | None = None
     ts: str
+
+
+class PaperOrderRequest(BaseModel):
+    strategy_instance_id: str
+    market: str = 'SOL/USD'
+    side: str
+    qty: float
+    order_type: str = 'market'
+    limit_price: float | None = None

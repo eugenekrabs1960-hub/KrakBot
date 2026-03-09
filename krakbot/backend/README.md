@@ -1,6 +1,6 @@
 # Krakbot Backend
 
-FastAPI control plane scaffold + Phase 1 market ingestion.
+FastAPI control plane scaffold + Phase 1/2 foundations.
 
 ## Run locally
 
@@ -21,9 +21,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - Canonical persistence tables: `market_trades`, `orderbook_snapshots`, `candles`
 - Live websocket fanout endpoint: `ws://localhost:8010/api/ws`
 
+## Implemented in Phase 2
+- Strategy registry + strategy instance APIs
+- Isolated `paper_portfolios` (1 per strategy instance)
+- Durable bot state machine via `system_state`
+- Canonical execution normalization tables: `orders`, `executions`
+- Paper order submission through Freqtrade adapter boundary
+
 ## API endpoints
 - `GET /api/health`
 - `GET /api/market/snapshot`
 - `GET /api/market/trades?limit=100`
 - `GET /api/market/orderbook`
 - `GET /api/market/candles?limit=200`
+- `GET /api/control/bot`
+- `POST /api/control/bot`
+- `POST /api/control/strategy/toggle`
+- `POST /api/strategies/instances`
+- `GET /api/strategies`
+- `GET /api/trades`
+- `POST /api/trades/paper-order`
