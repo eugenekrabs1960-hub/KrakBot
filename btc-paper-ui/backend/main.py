@@ -25,6 +25,7 @@ store: dict[str, Any] = {
     "auto_scan": True,
     "notify_user": None,
     "last_candle_time": None,
+    "paper_execution_log": [],
 }
 
 
@@ -98,11 +99,28 @@ def build_scan_payload(candles, bid, ask, spread, spread_pct):
     }
 
 
+def normalize_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    status = decision.get("status", "INSUFFICIENT_DATA")
+    if status not in {"PROPOSE_TRADE", "WAIT", "REJECT", "INSUFFICIENT_DATA"}:
+        status = "INSUFFICIENT_DATA"
+    return {
+        "status": status,
+        "side": decision.get("side", ""),
+        "entry_price": decision.get("entry_price", 0),
+        "stop_loss": decision.get("stop_loss", 0),
+        "take_profit": decision.get("take_profit", 0),
+        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
+        "invalidation": decision.get("invalidation", ""),
+        "regime_label": decision.get("regime_label", ""),
+        "reason": decision.get("reason", ""),
+    }
+
+
 async def call_clawbot(scan_payload: dict[str, Any]) -> dict[str, Any]:
     prompt = (
-        "Analyze this BTC/USD 15m Kraken spot paper-trading payload and return JSON only in this shape: "
-        "{\"status\":\"PROPOSE_TRADE|WAIT|REJECT|INSUFFICIENT_DATA\",\"regime_label\":\"\",\"reason\":\"\",\"risk_reward_ratio\":0}. "
-        "Paper mode only. No live trading. No execution. Payload:\n"
+        "Analyze this BTC/USD 15m Kraken spot paper-trading payload and return JSON only in this exact shape: "
+        "{\"status\":\"PROPOSE_TRADE|WAIT|REJECT|INSUFFICIENT_DATA\",\"side\":\"BUY|SELL|\",\"entry_price\":0,\"stop_loss\":0,\"take_profit\":0,\"risk_reward_ratio\":0,\"invalidation\":\"\",\"regime_label\":\"\",\"reason\":\"\"}. "
+        "Paper mode only. No live trading. No execution. Do not invent missing values. Payload:\n"
         + json.dumps(scan_payload, separators=(",", ":"))
     )
 
@@ -113,34 +131,24 @@ async def call_clawbot(scan_payload: dict[str, Any]) -> dict[str, Any]:
     )
     out, _ = await proc.communicate()
     if proc.returncode != 0:
-        return {
+        return normalize_decision({
             "status": "INSUFFICIENT_DATA",
             "regime_label": "scan_error",
             "reason": "Failed to reach Clawbot scan path via Samy.",
-            "risk_reward_ratio": 0,
-        }
+        })
 
     try:
         wrapper = json.loads(out.decode("utf-8"))
         text = (wrapper.get("payloads") or [{}])[0].get("text", "{}")
         decision = json.loads(text)
     except Exception:
-        return {
+        return normalize_decision({
             "status": "INSUFFICIENT_DATA",
             "regime_label": "parse_error",
             "reason": "Clawbot response parse failed.",
-            "risk_reward_ratio": 0,
-        }
+        })
 
-    status = decision.get("status", "INSUFFICIENT_DATA")
-    if status not in {"PROPOSE_TRADE", "WAIT", "REJECT", "INSUFFICIENT_DATA"}:
-        status = "INSUFFICIENT_DATA"
-    return {
-        "status": status,
-        "regime_label": decision.get("regime_label", ""),
-        "reason": decision.get("reason", ""),
-        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
-    }
+    return normalize_decision(decision)
 
 
 async def build_state():
@@ -165,6 +173,7 @@ async def build_state():
         "triggers": {"upper": TRIGGER_UPPER, "lower": TRIGGER_LOWER},
         "paper_mode": True,
         "notify_user": store.get("notify_user"),
+        "paper_execution_log": store["paper_execution_log"][-10:],
     }
     return payload
 
@@ -178,9 +187,14 @@ async def execute_scan_store():
             "timestamp": s["timestamp"],
             "decision_time": s["latest_decision_time"],
             "status": s["latest_decision"]["status"],
+            "side": s["latest_decision"].get("side", ""),
+            "entry_price": s["latest_decision"].get("entry_price", 0),
+            "stop_loss": s["latest_decision"].get("stop_loss", 0),
+            "take_profit": s["latest_decision"].get("take_profit", 0),
             "regime_label": s["latest_decision"]["regime_label"],
             "reason": s["latest_decision"]["reason"],
             "risk_reward_ratio": s["latest_decision"]["risk_reward_ratio"],
+            "invalidation": s["latest_decision"].get("invalidation", ""),
         }
     )
     return s
@@ -195,7 +209,7 @@ async def get_state():
 
 @app.get("/api/history")
 async def get_history():
-    return {"history": store["history"][-25:]}
+    return {"history": store["history"][-50:]}
 
 
 @app.post("/api/run-scan")
@@ -215,6 +229,61 @@ async def ack_notify():
     if store.get("latest"):
         store["latest"]["notify_user"] = None
     return {"ok": True}
+
+
+@app.post("/api/proposal/approve")
+async def approve_proposal():
+    latest = store.get("latest") or {}
+    decision = latest.get("latest_decision") or {}
+    if decision.get("status") != "PROPOSE_TRADE":
+        return {"ok": False, "message": "No PROPOSE_TRADE to approve."}
+
+    execution_record = {
+        "timestamp": now_iso(),
+        "action": "APPROVED_FOR_PAPER_EXECUTOR",
+        "executor": "samy_paper_executor",
+        "execution_status": "submitted_to_executor_no_fill_confirmation",
+        "decision": decision,
+    }
+    store["paper_execution_log"].append(execution_record)
+    store["history"].append({
+        "timestamp": execution_record["timestamp"],
+        "decision_time": latest.get("latest_decision_time"),
+        "status": "APPROVED_PENDING_EXECUTOR",
+        "side": decision.get("side", ""),
+        "entry_price": decision.get("entry_price", 0),
+        "stop_loss": decision.get("stop_loss", 0),
+        "take_profit": decision.get("take_profit", 0),
+        "regime_label": decision.get("regime_label", ""),
+        "reason": "User approved signal for paper executor handoff; no auto-execution in UI/backend.",
+        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
+        "invalidation": decision.get("invalidation", ""),
+    })
+    return {"ok": True, "execution_record": execution_record}
+
+
+@app.post("/api/proposal/reject")
+async def reject_proposal():
+    latest = store.get("latest") or {}
+    decision = latest.get("latest_decision") or {}
+    timestamp = now_iso()
+    store["history"].append({
+        "timestamp": timestamp,
+        "decision_time": latest.get("latest_decision_time"),
+        "status": "USER_REJECTED_SIGNAL",
+        "side": decision.get("side", ""),
+        "entry_price": decision.get("entry_price", 0),
+        "stop_loss": decision.get("stop_loss", 0),
+        "take_profit": decision.get("take_profit", 0),
+        "regime_label": decision.get("regime_label", ""),
+        "reason": "User rejected PROPOSE_TRADE signal.",
+        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
+        "invalidation": decision.get("invalidation", ""),
+    })
+    store["notify_user"] = None
+    if store.get("latest"):
+        store["latest"]["notify_user"] = None
+    return {"ok": True, "status": "USER_REJECTED_SIGNAL", "timestamp": timestamp}
 
 
 @app.on_event("startup")

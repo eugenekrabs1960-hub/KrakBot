@@ -47,6 +47,16 @@ export default function App() {
     await load()
   }
 
+  const approveProposal = async () => {
+    await fetch(`${API}/api/proposal/approve`, { method: 'POST' })
+    await load()
+  }
+
+  const rejectProposal = async () => {
+    await fetch(`${API}/api/proposal/reject`, { method: 'POST' })
+    await load()
+  }
+
   useEffect(() => {
     load()
     const t = setInterval(load, 15000)
@@ -93,8 +103,24 @@ export default function App() {
         <h3>Latest Decision</h3>
         <p>Status: <strong style={{color:d.status==='PROPOSE_TRADE'?'#f85149':'#e6edf3'}}>{d.status}</strong></p>
         <p>Regime: {d.regime_label}</p>
+        <p>Reason: <span style={{fontSize:12}}>{d.reason}</span></p>
         <p>R:R: {d.risk_reward_ratio}</p>
-        <p style={{fontSize:12}}>{d.reason}</p>
+
+        {d.status === 'PROPOSE_TRADE' && (
+          <div style={{marginTop:10,padding:10,border:'1px solid #30363d',borderRadius:8}}>
+            <h4 style={{marginTop:0}}>Proposed Trade Details</h4>
+            <p>Side: {d.side || '-'}</p>
+            <p>Entry: {d.entry_price || 0}</p>
+            <p>Stop Loss: {d.stop_loss || 0}</p>
+            <p>Take Profit: {d.take_profit || 0}</p>
+            <p>Invalidation: {d.invalidation || '-'}</p>
+            <div style={{display:'flex',gap:8,marginTop:8}}>
+              <button style={{background:'#2ea043',color:'#fff'}} onClick={approveProposal}>Approve Paper Trade</button>
+              <button style={{background:'#d29922',color:'#111'}} onClick={rejectProposal}>Reject Signal</button>
+            </div>
+          </div>
+        )}
+
         <hr />
         <h3>Account</h3>
         <p>Equity: {state.account_state.account_equity}</p>
@@ -108,9 +134,9 @@ export default function App() {
     <div className='panel' style={{marginTop:12}}>
       <h3>Recent Scan History</h3>
       <table className='rows' style={{width:'100%'}}>
-        <thead><tr><th>Scan Time</th><th>Decision Time</th><th>Status</th><th>Regime</th><th>R:R</th><th>Reason</th></tr></thead>
+        <thead><tr><th>Scan Time</th><th>Decision Time</th><th>Status</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Regime</th><th>R:R</th></tr></thead>
         <tbody>
-          {history.slice().reverse().map((r,i)=><tr key={i}><td>{r.timestamp}</td><td>{r.decision_time || '-'}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td><td>{r.reason}</td></tr>)}
+          {history.slice().reverse().map((r,i)=><tr key={i}><td>{r.timestamp}</td><td>{r.decision_time || '-'}</td><td>{r.status}</td><td>{r.side || '-'}</td><td>{r.entry_price || 0}</td><td>{r.stop_loss || 0}</td><td>{r.take_profit || 0}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>)}
         </tbody>
       </table>
     </div>
