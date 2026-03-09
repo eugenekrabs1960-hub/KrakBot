@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.adapters.marketdata_kraken import ingestor
-from app.api.routes import health, control, strategies, market, trades, ws, reliability
+from app.api.routes import health, control, strategies, market, trades, ws, reliability, market_registry
 from app.core.config import settings
 
 
@@ -25,6 +25,7 @@ app.include_router(market.router, prefix="/api")
 app.include_router(trades.router, prefix="/api")
 app.include_router(ws.router, prefix="/api")
 app.include_router(reliability.router, prefix="/api")
+app.include_router(market_registry.router, prefix="/api")
 
 
 @app.get("/")

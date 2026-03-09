@@ -1,6 +1,6 @@
 # Krakbot Backend
 
-FastAPI control plane scaffold + Phase 1/2/3 foundations.
+FastAPI control plane scaffold + Phase 1/2/3/4/5 foundations.
 
 ## Run locally
 
@@ -40,6 +40,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - Worker checkpoint persistence for restart diagnostics
 - Reliability-oriented DB primitives for ongoing hardening
 
+## Implemented in Phase 5
+- Config-driven market registry (`market_registry`) for multi-coin activation
+- Strategy-to-market assignment table (`strategy_markets`)
+- Market registry APIs and enable/disable flow
+- Kraken ingestion subscription now driven by enabled market registry rows
+
 ## API endpoints
 - `GET /api/health`
 - `GET /api/market/snapshot`
@@ -57,3 +63,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - `POST /api/reliability/reconcile/all`
 - `POST /api/reliability/reconcile/{strategy_instance_id}`
 - `GET /api/reliability/reconciliations`
+- `GET /api/markets`
+- `POST /api/markets`
+- `POST /api/markets/{market_id}/toggle`
+- `POST /api/markets/assign`

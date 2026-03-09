@@ -6,6 +6,7 @@ import StrategyComparison from './pages/StrategyComparison';
 import TradeHistory from './pages/TradeHistory';
 import MarketData from './pages/MarketData';
 import Controls from './pages/Controls';
+import MarketRegistry from './pages/MarketRegistry';
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
       <TradeHistory />
       <MarketData />
       <Controls />
+      <MarketRegistry />
     </main>
   );
 }

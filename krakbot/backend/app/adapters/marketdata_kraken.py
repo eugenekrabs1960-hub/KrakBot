@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.checkpoints import load_checkpoint, save_checkpoint
+from app.services.market_registry import list_markets
 from app.services.ws_hub import ws_hub
 
 KRAKEN_WS_URL = "wss://ws.kraken.com/v2"
@@ -56,14 +57,14 @@ class KrakenMarketIngestor:
 
     async def _connect_and_stream(self):
         async with websockets.connect(KRAKEN_WS_URL, ping_interval=20, ping_timeout=20) as ws:
-            pair = settings.enabled_markets.split(",")[0].strip()
+            symbols = self._enabled_symbols()
             subscribe_trades = {
                 "method": "subscribe",
-                "params": {"channel": "trade", "symbol": [pair]},
+                "params": {"channel": "trade", "symbol": symbols},
             }
             subscribe_book = {
                 "method": "subscribe",
-                "params": {"channel": "book", "symbol": [pair], "depth": 25},
+                "params": {"channel": "book", "symbol": symbols, "depth": 25},
             }
             await ws.send(json.dumps(subscribe_trades))
             await ws.send(json.dumps(subscribe_book))
@@ -232,6 +233,21 @@ class KrakenMarketIngestor:
             save_checkpoint(db, 'kraken_ingestor', {'last_event_ts': int(ts)})
         finally:
             db.close()
+
+    def _enabled_symbols(self) -> list[str]:
+        db: Session = SessionLocal()
+        try:
+            markets = list_markets(db, enabled_only=True)
+            symbols = [m['symbol'] for m in markets if m.get('venue') == 'kraken']
+            if symbols:
+                return symbols
+        except Exception:
+            pass
+        finally:
+            db.close()
+
+        # fallback to env list for bootstrap compatibility
+        return [s.strip() for s in settings.enabled_markets.split(',') if s.strip()] or ['SOL/USD']
 
 
 ingestor = KrakenMarketIngestor()
