@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: krakbot
+      POSTGRES_PASSWORD: krakbot
+      POSTGRES_DB: krakbot
+    ports:
+      - '5433:5432'
+
+  redis:
+    image: redis:7
+    ports:
+      - '6380:6379'
+
+  backend:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../backend:/app
+    command: bash -lc "pip install -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload"
+    ports:
+      - '8010:8010'
+    depends_on:
+      - postgres
+      - redis
+
+  frontend:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ../frontend:/app
+    command: bash -lc "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
