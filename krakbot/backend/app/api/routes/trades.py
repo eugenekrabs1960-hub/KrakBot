@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -6,6 +6,7 @@ from app.adapters.execution.base import OrderIntent
 from app.adapters.execution.freqtrade_adapter import FreqtradeExecutionAdapter
 from app.db.session import get_db
 from app.schemas.trade import PaperOrderRequest
+from app.services.idempotency import check_or_store, update_response
 
 router = APIRouter(prefix='/trades', tags=['trades'])
 
@@ -32,7 +33,19 @@ def list_trades(limit: int = 100, db: Session = Depends(get_db)):
 
 
 @router.post('/paper-order')
-def paper_order(payload: PaperOrderRequest, db: Session = Depends(get_db)):
+def paper_order(
+    payload: PaperOrderRequest,
+    db: Session = Depends(get_db),
+    x_idempotency_key: str | None = Header(default=None),
+):
+    if not x_idempotency_key:
+        raise HTTPException(status_code=400, detail='missing x-idempotency-key header')
+
+    payload_dict = payload.model_dump()
+    check = check_or_store(db, key=x_idempotency_key, scope='paper-order', payload=payload_dict)
+    if check['replayed']:
+        return {'idempotent_replay': True, **(check['response'] or {})}
+
     adapter = FreqtradeExecutionAdapter(db)
     result = adapter.submit_order(
         OrderIntent(
@@ -44,4 +57,5 @@ def paper_order(payload: PaperOrderRequest, db: Session = Depends(get_db)):
             limit_price=payload.limit_price,
         )
     )
+    update_response(db, x_idempotency_key, result)
     return result

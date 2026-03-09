@@ -34,6 +34,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - Optional Freqtrade REST bridge with safe paper fallback
 - Strategy detail and richer comparison fields (position/equity)
 
+## Implemented in Phase 4
+- Idempotent paper order submission with request replay safety
+- Reconciliation service + reconciliation history APIs
+- Worker checkpoint persistence for restart diagnostics
+- Reliability-oriented DB primitives for ongoing hardening
+
 ## API endpoints
 - `GET /api/health`
 - `GET /api/market/snapshot`
@@ -47,4 +53,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - `GET /api/strategies`
 - `GET /api/strategies/{strategy_instance_id}`
 - `GET /api/trades`
-- `POST /api/trades/paper-order`
+- `POST /api/trades/paper-order` (requires `x-idempotency-key`)
+- `POST /api/reliability/reconcile/all`
+- `POST /api/reliability/reconcile/{strategy_instance_id}`
+- `GET /api/reliability/reconciliations`

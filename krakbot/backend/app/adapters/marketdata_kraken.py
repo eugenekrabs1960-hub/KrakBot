@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.services.checkpoints import load_checkpoint, save_checkpoint
 from app.services.ws_hub import ws_hub
 
 KRAKEN_WS_URL = "wss://ws.kraken.com/v2"
@@ -23,6 +24,16 @@ class KrakenMarketIngestor:
     async def start(self):
         if self._running:
             return
+        # restore checkpoint best-effort
+        db = SessionLocal()
+        try:
+            cp = load_checkpoint(db, 'kraken_ingestor')
+            if cp and isinstance(cp, dict):
+                # currently only informational, but retained for restart diagnostics
+                _ = cp.get('last_event_ts')
+        finally:
+            db.close()
+
         self._running = True
         self._task = asyncio.create_task(self._run_loop(), name="kraken-market-ingestor")
 
@@ -77,6 +88,7 @@ class KrakenMarketIngestor:
                 }
                 self._persist_trade(event)
                 self._update_candle(event)
+                self._save_checkpoint(event.get('ts'))
                 await ws_hub.broadcast(event)
         elif channel == "book" and data:
             snap = data[0]
@@ -89,6 +101,7 @@ class KrakenMarketIngestor:
                 "payload": snap,
             }
             self._persist_orderbook(event)
+            self._save_checkpoint(event.get('ts'))
             await ws_hub.broadcast(event)
 
     def _persist_trade(self, event: dict):
@@ -208,6 +221,15 @@ class KrakenMarketIngestor:
             db.commit()
         except Exception:
             db.rollback()
+        finally:
+            db.close()
+
+    def _save_checkpoint(self, ts: int | None):
+        if ts is None:
+            return
+        db: Session = SessionLocal()
+        try:
+            save_checkpoint(db, 'kraken_ingestor', {'last_event_ts': int(ts)})
         finally:
             db.close()
 
