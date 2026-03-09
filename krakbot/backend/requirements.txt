@@ -6,3 +6,4 @@ sqlalchemy==2.0.43
 alembic==1.16.4
 redis==6.4.0
 psycopg[binary]==3.2.10
+websockets==15.0.1

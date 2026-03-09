@@ -1,6 +1,6 @@
 # Krakbot Backend
 
-FastAPI control plane scaffold.
+FastAPI control plane scaffold + Phase 1 market ingestion.
 
 ## Run locally
 
@@ -9,10 +9,21 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# Ensure postgres/redis are running (see ../deploy/docker-compose.yml)
+python -m app.db.migrate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 ```
 
-## Contract direction
-- Canonical domain APIs (engine-neutral)
-- Freqtrade integration only via adapter module
-- Per-strategy isolated paper portfolios
+## Implemented in Phase 1
+- Kraken v2 websocket ingestion for SOL/USD trades + orderbook snapshots
+- 1m candle aggregation from trade stream
+- Canonical persistence tables: `market_trades`, `orderbook_snapshots`, `candles`
+- Live websocket fanout endpoint: `ws://localhost:8010/api/ws`
+
+## API endpoints
+- `GET /api/health`
+- `GET /api/market/snapshot`
+- `GET /api/market/trades?limit=100`
+- `GET /api/market/orderbook`
+- `GET /api/market/candles?limit=200`

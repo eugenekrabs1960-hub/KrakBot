@@ -1,15 +1,19 @@
-# Krakbot Build Next Steps
+# Krakbot Progress + Next Steps
 
-## Immediate next actions (Phase 1)
+## Phase 1 status (completed)
 
-1. Implement Kraken market ingestion service (trades + orderbook + candles).
-2. Add canonical DB migrations for market data tables.
-3. Add websocket endpoint `/api/ws` for live UI fanout.
-4. Implement strategy registry and seed 3 MVP strategies:
-   - trend_following
-   - mean_reversion
-   - breakout
-5. Wire control commands into orchestrator state machine + persistence.
+- [x] Kraken market ingestion service (trade + orderbook)
+- [x] Canonical market tables + SQL migration (`app/db/migrations/0001_market_data.sql`)
+- [x] Live websocket endpoint for UI fanout (`/api/ws`)
+- [x] 1m candle aggregation from trade stream
+
+## Phase 2 immediate actions
+
+1. Add strategy registry persistence (`strategies`, `strategy_instances`).
+2. Implement orchestrator command state machine with durable state transitions.
+3. Wire Freqtrade adapter to paper execution callbacks and order/fill normalization.
+4. Build dashboard widgets against real market endpoints.
+5. Add integration tests for ingest + candle formation.
 
 ## Guardrails
 - Keep all execution calls behind `ExecutionEngine`.
