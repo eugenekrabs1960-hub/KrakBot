@@ -35,9 +35,14 @@ def list_strategies(db: Session = Depends(get_db)):
                    COALESCE(ps.pnl_usd, 0) as pnl_usd,
                    COALESCE(ps.drawdown_pct, 0) as drawdown_pct,
                    COALESCE(ps.win_rate_pct, 0) as win_rate_pct,
-                   COALESCE(ps.trade_count, 0) as trade_count
+                   COALESCE(ps.trade_count, 0) as trade_count,
+                   COALESCE(pos.qty, 0) as current_position_qty,
+                   COALESCE(pos.avg_entry_price, 0) as current_avg_entry,
+                   COALESCE(pp.equity_usd, 0) as equity_usd
             FROM strategy_instances si
             JOIN strategies s ON s.id = si.strategy_id
+            LEFT JOIN paper_portfolios pp ON pp.strategy_instance_id = si.id
+            LEFT JOIN positions pos ON pos.strategy_instance_id = si.id AND pos.market = si.market
             LEFT JOIN LATERAL (
                 SELECT pnl_usd, drawdown_pct, win_rate_pct, trade_count
                 FROM performance_snapshots p
@@ -50,3 +55,31 @@ def list_strategies(db: Session = Depends(get_db)):
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+@router.get('/{strategy_instance_id}')
+def strategy_detail(strategy_instance_id: str, db: Session = Depends(get_db)):
+    row = db.execute(
+        text(
+            """
+            SELECT si.id as strategy_instance_id,
+                   s.name,
+                   si.enabled,
+                   si.status,
+                   si.market,
+                   si.params,
+                   COALESCE(pp.equity_usd,0) as equity_usd,
+                   COALESCE(pos.qty,0) as current_position_qty,
+                   COALESCE(pos.avg_entry_price,0) as avg_entry_price,
+                   COALESCE(pos.realized_pnl_usd,0) as realized_pnl_usd
+            FROM strategy_instances si
+            JOIN strategies s ON s.id = si.strategy_id
+            LEFT JOIN paper_portfolios pp ON pp.strategy_instance_id = si.id
+            LEFT JOIN positions pos ON pos.strategy_instance_id = si.id AND pos.market = si.market
+            WHERE si.id = :sid
+            LIMIT 1
+            """
+        ),
+        {'sid': strategy_instance_id},
+    ).mappings().first()
+    return {'item': dict(row) if row else None}

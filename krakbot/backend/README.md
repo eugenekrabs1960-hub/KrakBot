@@ -1,6 +1,6 @@
 # Krakbot Backend
 
-FastAPI control plane scaffold + Phase 1/2 foundations.
+FastAPI control plane scaffold + Phase 1/2/3 foundations.
 
 ## Run locally
 
@@ -28,6 +28,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - Canonical execution normalization tables: `orders`, `executions`
 - Paper order submission through Freqtrade adapter boundary
 
+## Implemented in Phase 3
+- Position and portfolio balance tracking per strategy instance
+- Performance snapshot updates after each fill
+- Optional Freqtrade REST bridge with safe paper fallback
+- Strategy detail and richer comparison fields (position/equity)
+
 ## API endpoints
 - `GET /api/health`
 - `GET /api/market/snapshot`
@@ -39,5 +45,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - `POST /api/control/strategy/toggle`
 - `POST /api/strategies/instances`
 - `GET /api/strategies`
+- `GET /api/strategies/{strategy_instance_id}`
 - `GET /api/trades`
 - `POST /api/trades/paper-order`
