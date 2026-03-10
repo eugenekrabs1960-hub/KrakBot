@@ -39,7 +39,7 @@ class OrchestratorService:
             text(
                 """
                 INSERT INTO system_state(key, value, updated_at)
-                VALUES ('bot', jsonb_build_object('state', :state, 'last_command', :cmd), NOW())
+                VALUES ('bot', jsonb_build_object('state', CAST(:state AS text), 'last_command', CAST(:cmd AS text)), NOW())
                 ON CONFLICT (key)
                 DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
                 """
