@@ -24,12 +24,18 @@ function Chart({ candles, upper, lower }) {
 export default function App() {
   const [state, setState] = useState(null)
   const [history, setHistory] = useState([])
+  const [uiError, setUiError] = useState('')
 
   const load = async () => {
-    const s = await fetch(`${API}/api/state`).then(r => r.json())
-    const h = await fetch(`${API}/api/history`).then(r => r.json())
-    setState(s)
-    setHistory(h.history || [])
+    try {
+      const s = await fetch(`${API}/api/state`).then(r => r.json())
+      const h = await fetch(`${API}/api/history`).then(r => r.json())
+      setState(s)
+      setHistory(h.history || [])
+      setUiError('')
+    } catch (e) {
+      setUiError('Failed to load dashboard state.')
+    }
   }
 
   const runScan = async () => {
@@ -38,8 +44,21 @@ export default function App() {
   }
 
   const setMode = async (mode) => {
-    await fetch(`${API}/api/mode/${mode}`, { method: 'POST' })
-    await load()
+    try {
+      const res = await fetch(`${API}/api/mode/${mode}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.message || 'Mode switch failed')
+      }
+      if (data.state) {
+        setState(data.state)
+      }
+      const h = await fetch(`${API}/api/history`).then(r => r.json())
+      setHistory(h.history || [])
+      setUiError('')
+    } catch (e) {
+      setUiError(`Mode switch failed: ${e.message}`)
+    }
   }
 
   const toggle = async () => {
@@ -65,6 +84,9 @@ export default function App() {
   if (!state || !md) return <div className='wrap'>Loading...</div>
 
   return <div className='wrap'>
+    {uiError && (
+      <div className='panel' style={{borderColor:'#f85149', marginBottom:12, color:'#f85149'}}>{uiError}</div>
+    )}
     {state.notify_user && (
       <div className='panel' style={{borderColor:'#f85149', marginBottom:12}}>
         <strong style={{color:'#f85149'}}>{state.notify_user.message}</strong>
@@ -86,8 +108,8 @@ export default function App() {
           AUTO: {d.status || 'INSUFFICIENT_DATA'}
         </span>
         <span style={{fontSize:12,opacity:.85}}>at {state.latest_decision_time || '-'}</span>
-        <button onClick={() => setMode('btc_15m_conservative')}>BTC/USD 15m conservative</button>
-        <button onClick={() => setMode('btc_5m_aggressive')}>BTC/USD 5m aggressive</button>
+        <button style={{background:state.active_mode==='btc_15m_conservative'?'#1f6feb':'', color:state.active_mode==='btc_15m_conservative'?'#fff':''}} onClick={() => setMode('btc_15m_conservative')}>BTC/USD 15m conservative</button>
+        <button style={{background:state.active_mode==='btc_5m_aggressive'?'#1f6feb':'', color:state.active_mode==='btc_5m_aggressive'?'#fff':''}} onClick={() => setMode('btc_5m_aggressive')}>BTC/USD 5m aggressive</button>
         <button onClick={runScan}>Run Scan</button>
         <button onClick={toggle}>{state.auto_scan ? 'Pause Auto Scan' : 'Resume Auto Scan'}</button>
       </div>

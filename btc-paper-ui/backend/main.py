@@ -628,8 +628,21 @@ async def set_mode(mode: str):
     if mode not in MODE_CONFIGS:
         return {"ok": False, "message": "Unknown mode", "active_mode": store["active_mode"]}
     store["active_mode"] = mode
-    store["latest"] = None
-    return {"ok": True, "active_mode": mode, "label": MODE_CONFIGS[mode]["label"]}
+    # Force immediate mode-refresh state so frontend sees switch instantly
+    latest = await execute_scan_store(mode)
+    return {
+        "ok": True,
+        "active_mode": mode,
+        "label": MODE_CONFIGS[mode]["label"],
+        "timeframe": latest.get("timeframe"),
+        "aggressive_profile_active": MODE_CONFIGS[mode]["aggressive"],
+        "state": {
+            **latest,
+            "active_mode": store["active_mode"],
+            "available_modes": MODE_CONFIGS,
+            "auto_scan": store["auto_scan"],
+        },
+    }
 
 
 @app.post("/api/ack-notify")
