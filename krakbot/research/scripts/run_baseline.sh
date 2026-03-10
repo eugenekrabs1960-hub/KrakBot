@@ -29,4 +29,37 @@ python3 scripts/build_features.py --config "${CONFIG_PATH}"
 python3 scripts/train_baseline.py --config "${CONFIG_PATH}"
 python3 scripts/evaluate.py --config "${CONFIG_PATH}"
 
-echo "Baseline pipeline complete. See ${RESEARCH_DIR}/reports/"
+METRICS_PATH="$(python3 - <<'PY' "${CONFIG_PATH}"
+import sys, yaml
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f)
+reports_dir = cfg.get('artifacts', {}).get('reports_dir', 'reports')
+print(f"{reports_dir}/metrics.json")
+PY
+)"
+
+GATE_CONFIG_PATH="${GATE_CONFIG_PATH:-configs/eval_gate.yaml}"
+GATE_REPORT_PATH="$(python3 - <<'PY' "${CONFIG_PATH}"
+import sys, yaml
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f)
+reports_dir = cfg.get('artifacts', {}).get('reports_dir', 'reports')
+print(f"{reports_dir}/gate_verdict.md")
+PY
+)"
+GATE_JSON_PATH="$(python3 - <<'PY' "${CONFIG_PATH}"
+import sys, yaml
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    cfg = yaml.safe_load(f)
+reports_dir = cfg.get('artifacts', {}).get('reports_dir', 'reports')
+print(f"{reports_dir}/gate_verdict.json")
+PY
+)"
+
+python3 scripts/eval_gate.py \
+  --metrics "${METRICS_PATH}" \
+  --gate-config "${GATE_CONFIG_PATH}" \
+  --report "${GATE_REPORT_PATH}" \
+  --json-out "${GATE_JSON_PATH}"
+
+echo "Baseline pipeline complete. Metrics: ${METRICS_PATH} | Gate: ${GATE_REPORT_PATH}"

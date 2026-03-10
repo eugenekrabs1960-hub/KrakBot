@@ -1,0 +1,10 @@
+# Baseline v2 GO/NO-GO gate thresholds
+min_balanced_accuracy: 0.51
+min_mcc: 0.02
+min_signal_count: 100
+# Optional floor for model max_drawdown (set to null to disable check)
+max_drawdown_floor: -0.20
+require_outperform_always_long: true
+require_outperform_always_short: true
+# If walk_forward.enabled=true and folds exist, require at least this many passing folds
+min_folds_passing: 3

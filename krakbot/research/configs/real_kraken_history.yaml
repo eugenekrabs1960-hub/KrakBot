@@ -1,0 +1,51 @@
+dataset:
+  source: external_csv
+  market: SOL/USD
+  timeframe: 1m
+  min_rows: 5000
+  external_csv:
+    path: data/raw/kraken_solusd_1m_history.csv
+    timezone: UTC
+    column_mapping:
+      timestamp: timestamp
+      open: open
+      high: high
+      low: low
+      close: close
+      volume: volume
+
+features:
+  return_periods: [1, 2, 5]
+  volatility_window: 30
+  momentum_window: 8
+  rsi_window: 14
+  volume_change_window: 1
+  label_horizon: 5
+  label_neutral_band_bps: 3
+  neutral_handling: drop
+  dropna: true
+
+split:
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+walk_forward:
+  enabled: true
+  n_folds: 8
+  min_train_ratio: 0.5
+
+model:
+  type: logistic_regression
+  class_weight: balanced
+  C: 1.0
+  max_iter: 1000
+  random_state: 42
+
+artifacts:
+  dataset_path: data/real_kraken_candles.parquet
+  featured_path: data/real_kraken_features.parquet
+  model_path: data/real_kraken_model.joblib
+  metadata_path: data/real_kraken_training_metadata.json
+  predictions_path: data/real_kraken_test_predictions.parquet
+  reports_dir: reports/real_kraken
