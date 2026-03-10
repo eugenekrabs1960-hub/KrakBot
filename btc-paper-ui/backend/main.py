@@ -114,6 +114,7 @@ def normalize_decision(decision: dict[str, Any]) -> dict[str, Any]:
         "invalidation": decision.get("invalidation", ""),
         "regime_label": decision.get("regime_label", ""),
         "reason": decision.get("reason", ""),
+        "signal_id": decision.get("signal_id", ""),
     }
 
     if normalized["status"] == "PROPOSE_TRADE":
@@ -288,6 +289,8 @@ async def build_state():
         if fallback.get("status") == "PROPOSE_TRADE":
             decision = fallback
     decision_time = now_iso()
+    if not decision.get("signal_id"):
+        decision["signal_id"] = f"{scan_payload['timestamp']}|{candles[-1]['time']}"
 
     if decision["status"] == "PROPOSE_TRADE":
         store["notify_user"] = {
@@ -368,7 +371,12 @@ async def approve_proposal():
     latest = store.get("latest") or {}
     decision = latest.get("latest_decision") or {}
     if decision.get("status") != "PROPOSE_TRADE":
-        return {"ok": False, "message": "No PROPOSE_TRADE to approve."}
+        return {"ok": False, "message": "No active PROPOSE_TRADE to approve."}
+
+    signal_id = decision.get("signal_id", "")
+    already = any((r.get("decision", {}).get("signal_id") == signal_id) for r in store["paper_execution_log"])
+    if already:
+        return {"ok": True, "duplicate": True, "message": "Signal already approved.", "latest_decision": latest.get("latest_decision")}
 
     execution_record = {
         "timestamp": now_iso(),
@@ -391,13 +399,28 @@ async def approve_proposal():
         "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
         "invalidation": decision.get("invalidation", ""),
     })
-    return {"ok": True, "execution_record": execution_record}
+
+    # Clear actionable alert and switch latest decision state
+    latest["notify_user"] = None
+    store["notify_user"] = None
+    latest["latest_decision"] = {
+        **decision,
+        "status": "APPROVED_PENDING_EXECUTOR",
+        "reason": "Approved by user; pending paper executor. No auto-execution by UI/backend.",
+    }
+    latest["latest_decision_time"] = execution_record["timestamp"]
+    store["latest"] = latest
+
+    return {"ok": True, "execution_record": execution_record, "latest_decision": latest["latest_decision"]}
 
 
 @app.post("/api/proposal/reject")
 async def reject_proposal():
     latest = store.get("latest") or {}
     decision = latest.get("latest_decision") or {}
+    if decision.get("status") != "PROPOSE_TRADE":
+        return {"ok": False, "message": "No active PROPOSE_TRADE to reject."}
+
     timestamp = now_iso()
     store["history"].append({
         "timestamp": timestamp,
@@ -413,9 +436,15 @@ async def reject_proposal():
         "invalidation": decision.get("invalidation", ""),
     })
     store["notify_user"] = None
-    if store.get("latest"):
-        store["latest"]["notify_user"] = None
-    return {"ok": True, "status": "USER_REJECTED_SIGNAL", "timestamp": timestamp}
+    latest["notify_user"] = None
+    latest["latest_decision"] = {
+        **decision,
+        "status": "WAIT",
+        "reason": "Signal rejected by user.",
+    }
+    latest["latest_decision_time"] = timestamp
+    store["latest"] = latest
+    return {"ok": True, "status": "USER_REJECTED_SIGNAL", "timestamp": timestamp, "latest_decision": latest["latest_decision"]}
 
 
 @app.on_event("startup")
