@@ -21,7 +21,7 @@ def create_market(db: Session, payload: dict):
         text(
             """
             INSERT INTO market_registry(id, venue, symbol, base_asset, quote_asset, instrument_type, enabled, metadata)
-            VALUES (:id, :venue, :symbol, :base_asset, :quote_asset, :instrument_type, :enabled, :metadata::jsonb)
+            VALUES (:id, :venue, :symbol, :base_asset, :quote_asset, :instrument_type, :enabled, CAST(:metadata AS jsonb))
             """
         ),
         {

@@ -113,7 +113,7 @@ class KrakenMarketIngestor:
                 text(
                     """
                     INSERT INTO market_trades(venue, market, instrument_type, side, price, qty, event_ts, raw)
-                    VALUES (:venue, :market, :instrument_type, :side, :price, :qty, :event_ts, :raw::jsonb)
+                    VALUES (:venue, :market, :instrument_type, :side, :price, :qty, :event_ts, CAST(:raw AS jsonb))
                     """
                 ),
                 {
@@ -141,7 +141,7 @@ class KrakenMarketIngestor:
                 text(
                     """
                     INSERT INTO orderbook_snapshots(venue, market, instrument_type, event_ts, bids, asks, raw)
-                    VALUES (:venue, :market, :instrument_type, :event_ts, :bids::jsonb, :asks::jsonb, :raw::jsonb)
+                    VALUES (:venue, :market, :instrument_type, :event_ts, CAST(:bids AS jsonb), CAST(:asks AS jsonb), CAST(:raw AS jsonb))
                     """
                 ),
                 {

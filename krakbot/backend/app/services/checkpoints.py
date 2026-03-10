@@ -8,7 +8,7 @@ def save_checkpoint(db: Session, worker_name: str, checkpoint: dict):
         text(
             """
             INSERT INTO worker_checkpoints(worker_name, checkpoint, updated_at)
-            VALUES (:worker_name, :checkpoint::jsonb, NOW())
+            VALUES (:worker_name, CAST(:checkpoint AS jsonb), NOW())
             ON CONFLICT (worker_name)
             DO UPDATE SET checkpoint = EXCLUDED.checkpoint, updated_at = NOW()
             """

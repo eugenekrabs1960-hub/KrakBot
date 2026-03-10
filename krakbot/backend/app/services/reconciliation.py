@@ -27,7 +27,7 @@ class ReconciliationService:
             text(
                 """
                 INSERT INTO reconciliations(strategy_instance_id, kind, status, details, ts)
-                VALUES (:sid, 'strategy', :status, :details::jsonb, :ts)
+                VALUES (:sid, 'strategy', :status, CAST(:details AS jsonb), :ts)
                 """
             ),
             {'sid': strategy_instance_id, 'status': status, 'details': __import__('json').dumps(details), 'ts': ts},

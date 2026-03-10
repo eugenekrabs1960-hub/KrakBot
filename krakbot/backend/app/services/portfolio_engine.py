@@ -95,7 +95,7 @@ def apply_fill(db: Session, strategy_instance_id: str, market: str, side: str, q
         text(
             """
             INSERT INTO strategy_events(strategy_instance_id, event_type, payload, ts)
-            VALUES (:sid, 'fill_applied', :payload::jsonb, :ts)
+            VALUES (:sid, 'fill_applied', CAST(:payload AS jsonb), :ts)
             """
         ),
         {
