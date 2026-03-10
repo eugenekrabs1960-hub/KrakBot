@@ -8,6 +8,17 @@ function ModePanel({ modeKey, m, onAck }) {
   const openPos = (m?.open_positions || [])[0]
   const latestClosed = (m?.closed_trades || []).slice(-1)[0]
   const tradeAge = openPos?.open_time ? Math.max(0, Math.floor((Date.now() - new Date(openPos.open_time).getTime()) / 60000)) : null
+  const bid = m?.market_data?.[0]?.bid ?? 0
+  const ask = m?.market_data?.[0]?.ask ?? 0
+  const spread = m?.market_data?.[0]?.spread ?? 0
+  const spreadPct = m?.market_data?.[0]?.spread_pct ?? 0
+  const realized = m?.current_pnl?.realized ?? 0
+  const unrealized = m?.current_pnl?.unrealized ?? 0
+  const totalPnl = Number(realized) + Number(unrealized)
+  const equity = 10000 + totalPnl
+  const cash = 10000 + realized
+  const posQty = openPos?.qty ?? 0
+  const notional = openPos ? (openPos.qty * openPos.entry_fill_price) : 0
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
@@ -21,7 +32,23 @@ function ModePanel({ modeKey, m, onAck }) {
       <p>Status: <strong>{d.status}</strong> | Regime: {d.regime_label}</p>
       <p>Side: {d.side || '-'} | Entry: {d.entry_price || 0} | SL: {d.stop_loss || 0} | TP: {d.take_profit || 0} | R:R: {d.risk_reward_ratio || 0}</p>
       <p style={{ fontSize: 12 }}>Reason: {d.reason}</p>
-      <p>PnL (R/U): {m?.current_pnl?.realized ?? 0} / {m?.current_pnl?.unrealized ?? 0}</p>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,margin:'8px 0',fontSize:12}}>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Cash</strong><div>{cash.toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Equity</strong><div>{equity.toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Realized PnL</strong><div>{Number(realized).toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Unrealized PnL</strong><div>{Number(unrealized).toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Total PnL</strong><div>{Number(totalPnl).toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Max Drawdown</strong><div>{Number(m?.mode_stats?.max_drawdown ?? 0).toFixed(2)}</div></div>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8,fontSize:12}}>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Open Size / Notional</strong><div>{posQty} / {Number(notional).toFixed(2)}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Latest Fill</strong><div>{openPos?.entry_fill_price ?? '-'}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Bid / Ask</strong><div>{bid} / {ask}</div></div>
+        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Spread / %</strong><div>{Number(spread).toFixed(4)} / {Number(spreadPct).toFixed(6)}%</div></div>
+      </div>
+
       <p>Open: {(m?.open_positions || []).length} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
       <div style={{ fontSize: 12 }}>
         WinRate: {m?.mode_stats?.win_rate ?? 0}% | AvgWin: {m?.mode_stats?.average_win ?? 0} | AvgLoss: {m?.mode_stats?.average_loss ?? 0} | MaxDD: {m?.mode_stats?.max_drawdown ?? 0}
