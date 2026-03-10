@@ -146,8 +146,57 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
     ranges = [c["high"] - c["low"] for c in candles[-8:]]
     avg_range = max(0.1, sum(ranges) / len(ranges))
 
+    # 5m aggressive is intentionally a different strategy family: mean-reversion in chop only.
+    if aggressive:
+        highs10 = [c["high"] for c in candles[-10:]]
+        lows10 = [c["low"] for c in candles[-10:]]
+        closes10 = [c["close"] for c in candles[-10:]]
+        hi10, lo10 = max(highs10), min(lows10)
+        width = max(0.1, hi10 - lo10)
+        width_pct = (width / max(last["close"], 1)) * 100
+        drift_pct = abs(closes10[-1] - closes10[0]) / max(closes10[0], 1) * 100
+
+        # chop-only regime: tight range, low net drift
+        if width_pct <= 0.70 and drift_pct <= 0.35:
+            lower_band = lo10 + 0.25 * width
+            upper_band = hi10 - 0.25 * width
+
+            # long reversion from lower band with bullish confirmation
+            if last["close"] <= lower_band and last["close"] >= last["open"] and prev["close"] <= prev["open"]:
+                e = round(last["high"] + 0.5, 1)
+                st = round(min(lows5) - 0.5, 1)
+                r = e - st
+                tp = round(lo10 + 0.65 * width, 1)
+                rr = round((tp - e) / r, 2) if r > 0 else 0
+                if rr >= rr_min:
+                    return normalize_decision({
+                        "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                        "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {round(lo10,1)}",
+                        "regime_label": "aggr_chop_mean_reversion_long",
+                        "reason": "5m family: mean reversion long inside confirmed chop regime.",
+                    }, rr_min)
+
+            # short reversion from upper band with bearish confirmation
+            if last["close"] >= upper_band and last["close"] <= last["open"] and prev["close"] >= prev["open"]:
+                e = round(last["low"] - 0.5, 1)
+                st = round(max(highs5) + 0.5, 1)
+                r = st - e
+                tp = round(hi10 - 0.65 * width, 1)
+                rr = round((e - tp) / r, 2) if r > 0 else 0
+                if rr >= rr_min:
+                    return normalize_decision({
+                        "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                        "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {round(hi10,1)}",
+                        "regime_label": "aggr_chop_mean_reversion_short",
+                        "reason": "5m family: mean reversion short inside confirmed chop regime.",
+                    }, rr_min)
+
+            return normalize_decision({"status": "WAIT", "regime_label": "aggr_chop_no_edge", "reason": "Chop regime detected but no qualified mean-reversion entry."}, rr_min)
+
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_not_chop", "reason": "5m strategy family blocks non-chop regime."}, rr_min)
+
     # Frozen baseline behavior for 15m conservative (strict confirmation)
-    conf = 1 if aggressive else 2
+    conf = 2
 
     # 1) bearish breakdown continuation
     if last["close"] < TRIGGER_LOWER and (conf == 1 or prev["close"] < TRIGGER_LOWER):
@@ -383,9 +432,16 @@ async def execute_mode_scan(mode: str):
         "executor_state": {"confirmation_source": "samy_paper_executor", "fills_are_executor_confirmed_only": True, "paper_mode": True},
     }
     d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+
+    # 5m experiment must remain a different family from 15m baseline.
+    if mode == "btc_5m_aggressive" and d.get("status") == "PROPOSE_TRADE":
+        if not str(d.get("regime_label", "")).startswith("aggr_"):
+            d = normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_family_mismatch", "reason": "5m family gate blocked non-aggressive regime proposal."}, cfg["rr_min"])
+
     if d["status"] == "WAIT":
         fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
-        if fb["status"] == "PROPOSE_TRADE": d = fb
+        if fb["status"] == "PROPOSE_TRADE" or mode == "btc_5m_aggressive":
+            d = fb
 
     # Tightening applies ONLY to 5m aggressive mode; 15m baseline remains frozen.
     if mode == "btc_5m_aggressive" and d.get("status") == "PROPOSE_TRADE":
