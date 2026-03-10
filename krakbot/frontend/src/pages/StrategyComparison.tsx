@@ -34,11 +34,9 @@ export default function StrategyComparison() {
     setError('');
     try {
       const [strategyData, flags, stratSummary] = await Promise.all([listStrategies(), getEifFlags(), getStrategySummary()]);
-       const strategyRows = Array.isArray(strategyData) ? strategyData : [];
-       setRows(strategyRows);
-+      setSummary(stratSummary?.item || null);
       const strategyRows = Array.isArray(strategyData) ? strategyData : [];
       setRows(strategyRows);
+      setSummary(stratSummary?.item || null);
 
       const analyticsEnabled = Boolean(flags?.eif?.analytics?.api?.enabled);
       setEifEnabled(analyticsEnabled);
