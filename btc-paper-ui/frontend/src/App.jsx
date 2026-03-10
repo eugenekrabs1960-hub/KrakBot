@@ -98,6 +98,8 @@ function SharedChart({ state, theme }) {
   )
 }
 
+function fmt2(x) { return Number(x ?? 0).toFixed(2) }
+
 function ModePanel({ modeKey, m, onAck, theme }) {
   const d = m?.latest_decision || {}
   const openPos = (m?.open_positions || [])[0]
@@ -109,6 +111,12 @@ function ModePanel({ modeKey, m, onAck, theme }) {
   const spreadPct = m?.market_data?.[0]?.spread_pct ?? 0
   const realized = m?.current_pnl?.realized ?? 0
   const unrealized = m?.current_pnl?.unrealized ?? 0
+  const grossRealized = m?.current_pnl?.gross_realized ?? m?.mode_stats?.gross_realized_pnl ?? realized
+  const grossUnrealized = m?.current_pnl?.gross_unrealized ?? m?.mode_stats?.gross_unrealized_pnl ?? unrealized
+  const totalFees = m?.current_pnl?.total_fees ?? m?.mode_stats?.total_fees ?? 0
+  const feeModel = m?.current_pnl?.fee_model ?? m?.mode_stats?.fee_model ?? '-'
+  const feePct = m?.current_pnl?.fee_pct ?? m?.mode_stats?.fee_pct ?? 0
+  const feeDragPct = m?.current_pnl?.fee_drag_pct_of_gross_pnl ?? m?.mode_stats?.fee_drag_pct_of_gross_pnl ?? 0
   const totalPnl = Number(realized) + Number(unrealized)
   const equity = 10000 + totalPnl
   const cash = 10000 + realized
@@ -129,12 +137,17 @@ function ModePanel({ modeKey, m, onAck, theme }) {
       <p style={{ fontSize: 12 }}>Reason: {d.reason}</p>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,margin:'8px 0',fontSize:12}}>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Cash</strong><div>{cash.toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Equity</strong><div>{equity.toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Realized PnL</strong><div>{Number(realized).toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Unrealized PnL</strong><div>{Number(unrealized).toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total PnL</strong><div>{Number(totalPnl).toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Max Drawdown</strong><div>{Number(m?.mode_stats?.max_drawdown ?? 0).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Cash</strong><div>{fmt2(cash)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Equity</strong><div>{fmt2(equity)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Gross Realized PnL</strong><div>{fmt2(grossRealized)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Net Realized PnL</strong><div>{fmt2(realized)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Gross Unrealized PnL</strong><div>{fmt2(grossUnrealized)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Net Unrealized PnL</strong><div>{fmt2(unrealized)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total Fees Paid</strong><div>{fmt2(totalFees)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Fee Model / %</strong><div>{feeModel} / {fmt2(feePct)}%</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Fee Drag % Gross PnL</strong><div>{fmt2(feeDragPct)}%</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total PnL (Net)</strong><div>{fmt2(totalPnl)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Max Drawdown</strong><div>{fmt2(m?.mode_stats?.max_drawdown ?? 0)}</div></div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8,fontSize:12}}>
@@ -167,7 +180,10 @@ function ModePanel({ modeKey, m, onAck, theme }) {
           {openPos ? (
             <>
               <div>Fill price: {openPos.entry_fill_price}</div>
-              <div>Unrealized PnL: {openPos.unrealized_pnl}</div>
+              <div>Entry fee: {openPos.entry_fee ?? '-'}</div>
+              <div>Gross unrealized PnL: {openPos.gross_unrealized_pnl ?? '-'}</div>
+              <div>Net unrealized PnL: {openPos.net_unrealized_pnl ?? openPos.unrealized_pnl ?? '-'}</div>
+              <div>Unrealized PnL (net): {openPos.unrealized_pnl}</div>
               <div>Open time: {openPos.open_time}</div>
               <div>Age: {tradeAge} min</div>
             </>
@@ -178,7 +194,11 @@ function ModePanel({ modeKey, m, onAck, theme }) {
             <>
               <div>Entry: {latestClosed.entry_fill_price}</div>
               <div>Exit: {latestClosed.close_fill_price}</div>
-              <div>Realized PnL: {latestClosed.realized_pnl}</div>
+              <div>Gross realized PnL: {latestClosed.gross_realized_pnl ?? '-'}</div>
+              <div>Net realized PnL: {latestClosed.net_realized_pnl ?? latestClosed.realized_pnl}</div>
+              <div>Entry fee: {latestClosed.entry_fee ?? '-'}</div>
+              <div>Close fee: {latestClosed.close_fee ?? '-'}</div>
+              <div>Total fees: {latestClosed.total_fees ?? '-'}</div>
               <div>Close reason: {latestClosed.close_reason}</div>
             </>
           ) : <div>None</div>}
