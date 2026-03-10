@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -32,7 +32,8 @@ def eif_summary(db: Session = Depends(get_db)):
 
 
 @router.get('/events/recent')
-def eif_recent_events(limit: int = 50, db: Session = Depends(get_db)):
+def eif_recent_events(limit: int = Query(default=50), db: Session = Depends(get_db)):
+    limit = max(1, min(int(limit), 500))
     rows = db.execute(
         text(
             """

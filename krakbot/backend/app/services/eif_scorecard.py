@@ -21,6 +21,8 @@ class EIFScorecardService:
         payload = {
             "rolling": window,
             "baseline": baseline,
+            # Phase 1 placeholder: expectancy currently mirrors pnl_per_trade.
+            "expectancy_semantics": "placeholder_equals_pnl_per_trade",
         }
         ts = int(time.time() * 1000)
         db.execute(
@@ -78,7 +80,9 @@ class EIFScorecardService:
             "sample_size": int((row or {}).get("sample_size") or 0),
             "pnl_per_trade": float((row or {}).get("pnl_per_trade") or 0.0),
             "win_rate": float((row or {}).get("win_rate") or 0.0),
+            # Phase 1 placeholder: expectancy currently mirrors pnl_per_trade.
             "expectancy": float((row or {}).get("expectancy") or 0.0),
+            "expectancy_is_placeholder": True,
         }
 
 

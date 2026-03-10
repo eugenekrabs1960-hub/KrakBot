@@ -1,11 +1,29 @@
+import json
 from pathlib import Path
 
 import pytest
 from sqlalchemy import text
-
 from app.core.config import settings
 from app.services.eif_capture import EIFCaptureService
 from app.services.live_paper_test_mode import LivePaperTestModeService
+
+
+class _FakeResult:
+    def __init__(self, row=None, scalar=None):
+        self._row = row or {"sample_size": 0}
+        self._scalar = scalar
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+    def all(self):
+        return [self._row]
+
+    def scalar_one(self):
+        return self._scalar
 
 
 class _FakeDB:
@@ -14,16 +32,13 @@ class _FakeDB:
         self.commits = 0
 
     def execute(self, stmt, params=None):
-        self.calls.append((str(stmt), params or {}))
+        sql = str(stmt)
+        params = params or {}
+        self.calls.append((sql, params))
 
-        class _R:
-            def mappings(self):
-                return self
-
-            def first(self):
-                return {"sample_size": 0}
-
-        return _R()
+        if "INSERT INTO eif_regime_snapshots" in sql:
+            return _FakeResult(scalar=101)
+        return _FakeResult()
 
     def commit(self):
         self.commits += 1
@@ -84,6 +99,98 @@ def test_eif_capture_writes_when_enabled(monkeypatch):
     assert "INSERT INTO eif_filter_decisions" in sql
     assert "INSERT INTO eif_trade_context_events" in sql
     assert db.commits == 2
+
+
+def test_eif_capture_normalizes_invalid_taxonomy(monkeypatch):
+    db = _FakeDB()
+    svc = EIFCaptureService()
+
+    monkeypatch.setattr(settings, "eif_capture_enabled", True)
+    monkeypatch.setattr(
+        svc._regime_builder,
+        "build",
+        lambda *_a, **_k: {
+            "strategy_instance_id": "inst_1",
+            "market": "SOL/USD",
+            "regime_version": "v1",
+            "trend": "unknown",
+            "volatility": "unknown",
+            "liquidity": "unknown",
+            "session_structure": "unknown",
+            "sample_size": 0,
+            "features": {},
+            "captured_ts": 1,
+        },
+    )
+
+    svc.capture_filter_decision(
+        db,
+        strategy_instance_id="inst_1",
+        market="SOL/USD",
+        event_type="not_a_real_type",
+        decision="random_decision",
+        reason_code="not_a_real_reason",
+        allowed=False,
+        tags=["mode:paper", "event:wat", "freeform:value"],
+    )
+
+    _, filter_params = next((c for c in db.calls if "INSERT INTO eif_filter_decisions" in c[0]), (None, None))
+    assert filter_params is not None
+    assert filter_params["event_type"] == "decision"
+    assert filter_params["decision"] == "unknown"
+    assert filter_params["reason_code"] == "unknown"
+    assert json.loads(filter_params["tags"]) == ["mode:paper", "risk:unknown"]
+
+
+def test_eif_capture_writes_regime_snapshot_fk_id(monkeypatch):
+    db = _FakeDB()
+    svc = EIFCaptureService()
+
+    monkeypatch.setattr(settings, "eif_capture_enabled", True)
+    monkeypatch.setattr(
+        svc._regime_builder,
+        "build",
+        lambda *_a, **_k: {
+            "strategy_instance_id": "inst_1",
+            "market": "SOL/USD",
+            "regime_version": "v1",
+            "trend": "unknown",
+            "volatility": "unknown",
+            "liquidity": "unknown",
+            "session_structure": "unknown",
+            "sample_size": 0,
+            "features": {},
+            "captured_ts": 1,
+        },
+    )
+
+    svc.capture_filter_decision(
+        db,
+        strategy_instance_id="inst_1",
+        market="SOL/USD",
+        event_type="decision",
+        decision="enter",
+        reason_code="ok",
+        allowed=True,
+    )
+
+    _, filter_params = next((c for c in db.calls if "INSERT INTO eif_filter_decisions" in c[0]), (None, None))
+    assert filter_params is not None
+    assert filter_params["regime_snapshot_id"] == 101
+
+
+def test_eif_recent_events_limit_validation():
+    from app.api.routes.eif import eif_recent_events
+
+    fake_db = _FakeDB()
+
+    resp = eif_recent_events(limit=0, db=fake_db)
+    assert resp["limit"] == 1
+    assert fake_db.calls[-1][1]["limit"] == 1
+
+    resp = eif_recent_events(limit=999, db=fake_db)
+    assert resp["limit"] == 500
+    assert fake_db.calls[-1][1]["limit"] == 500
 
 
 def test_live_paper_flow_unchanged_when_eif_disabled(monkeypatch):
@@ -147,3 +254,29 @@ def test_migration_0007_applies_if_database_available():
     assert ctx == 'eif_trade_context_events'
     assert dec == 'eif_filter_decisions'
     assert sc == 'eif_scorecard_snapshots'
+
+
+def test_migration_0008_adds_regime_snapshot_fk_if_database_available():
+    from app.db.session import engine
+
+    migration_path = Path(__file__).resolve().parents[1] / "app" / "db" / "migrations" / "0008_eif_phase1_1_integrity.sql"
+    sql = migration_path.read_text()
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+            col = conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'eif_filter_decisions'
+                      AND column_name = 'regime_snapshot_id'
+                    """
+                )
+            ).scalar()
+    except Exception as exc:  # pragma: no cover - environment guard
+        pytest.skip(f"DB not available for migration apply test: {exc}")
+
+    assert col == 'regime_snapshot_id'

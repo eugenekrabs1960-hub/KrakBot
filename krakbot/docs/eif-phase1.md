@@ -33,7 +33,9 @@ Implemented in `backend/app/services/eif_vocab.py`.
 
 ## New tables
 
-Migration: `backend/app/db/migrations/0007_eif_phase1_foundation.sql`
+Migrations:
+- `backend/app/db/migrations/0007_eif_phase1_foundation.sql`
+- `backend/app/db/migrations/0008_eif_phase1_1_integrity.sql` (adds `eif_filter_decisions.regime_snapshot_id` FK to `eif_regime_snapshots(id)`)
 
 - `eif_regime_snapshots`
 - `eif_trade_context_events`
@@ -45,6 +47,11 @@ All tables are append-only and indexed for recent-by-strategy / recent-by-market
 ## Phase 1 endpoints
 
 - `GET /api/eif/summary`
-- `GET /api/eif/events/recent?limit=50`
+- `GET /api/eif/events/recent?limit=50` (`limit` constrained to `1..500`, default `50`)
 
 Endpoints are read-only and safe when empty/disabled.
+
+## Scorecard note (Phase 1 placeholder)
+
+In Phase 1, `expectancy` is a placeholder and currently equals `pnl_per_trade`.
+The scorecard payload includes `expectancy_semantics=placeholder_equals_pnl_per_trade` and `expectancy_is_placeholder=true` to make this explicit.

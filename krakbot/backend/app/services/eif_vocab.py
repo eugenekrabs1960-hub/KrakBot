@@ -11,6 +11,10 @@ REGIME_DIMENSIONS = {
     "session_structure": ["active", "quiet", "unknown"],
 }
 
+FILTER_EVENT_TYPES = ["decision"]
+FILTER_DECISIONS = ["enter", "exit", "hold", "unknown"]
+TRADE_CONTEXT_EVENT_TYPES = ["decision", "entry", "exit", "skip", "order_attempt", "order_result", "unknown"]
+
 FILTER_REASON_CODES = {
     "decision": [
         "ok",
@@ -38,3 +42,9 @@ TRADE_CONTEXT_TAGS = {
     "source": ["live_paper_test_mode", "api_paper_order", "system"],
     "risk": ["guarded", "normal", "unknown"],
 }
+
+SAFE_UNKNOWN_REASON_CODE = "unknown"
+SAFE_UNKNOWN_DECISION = "unknown"
+SAFE_FILTER_EVENT_TYPE = "decision"
+SAFE_TRADE_EVENT_TYPE = "unknown"
+SAFE_UNKNOWN_TAG = "risk:unknown"
