@@ -18,6 +18,9 @@ TRIGGER_LOWER = 68698.6
 PAPER_FEE_MODEL = "fixed_percent_taker"
 PAPER_FEE_PCT = 0.40
 
+# 5m experiment controls (change one variable at a time)
+AGGR_MAX_SPREAD_PCT = 0.05
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_5m_aggressive": {"label": "BTC/USD 5m aggressive", "interval": 5, "rr_min": 1.25, "aggressive": True},
@@ -108,8 +111,8 @@ def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
         return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_invalid_fields", "reason": "Aggressive gate blocked: invalid trade fields."}, 1.25)
 
     # 1) tighter regime / execution quality filter
-    if spread_pct > 0.08:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_spread", "reason": "Aggressive gate blocked: spread too wide for 5m execution quality."}, 1.25)
+    if spread_pct > AGGR_MAX_SPREAD_PCT:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_spread", "reason": f"Aggressive gate blocked: spread too wide for 5m execution quality (>{AGGR_MAX_SPREAD_PCT}%)."}, 1.25)
 
     # 2) tighter trade construction: bounded stop distance + stronger R:R floor
     risk_pct = abs(entry - stop) / max(entry, 1) * 100
