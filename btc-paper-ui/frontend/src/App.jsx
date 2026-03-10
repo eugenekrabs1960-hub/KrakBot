@@ -6,53 +6,75 @@ const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_aggressive']
 
 function SharedChart({ state, theme }) {
   const ref = useRef(null)
+  const [chartError, setChartError] = useState('')
   const baseMode = state?.modes?.btc_5m_aggressive?.market_data?.[0]?.ohlcv?.length
     ? state?.modes?.btc_5m_aggressive
     : state?.modes?.btc_15m_conservative
 
   useEffect(() => {
     const candles = baseMode?.market_data?.[0]?.ohlcv || []
-    if (!ref.current || candles.length === 0) return
-    ref.current.innerHTML = ''
+    if (!ref.current || candles.length === 0) {
+      setChartError('No candle data available.')
+      return
+    }
+
+    const container = ref.current
+    container.innerHTML = ''
 
     const isLight = theme === 'light'
-    const chart = createChart(ref.current, {
-      height: 300,
-      layout: { background: { color: isLight ? '#ffffff' : '#161b22' }, textColor: isLight ? '#111827' : '#e6edf3' },
-      grid: { vertLines: { color: isLight ? '#e5e7eb' : '#30363d' }, horzLines: { color: isLight ? '#e5e7eb' : '#30363d' } }
-    })
-    const s = chart.addCandlestickSeries()
-    s.setData(candles.map(c => ({
-      time: Math.floor(new Date(c.time).getTime() / 1000),
-      open: c.open, high: c.high, low: c.low, close: c.close
-    })))
+    const danger = isLight ? '#b91c1c' : '#f85149'
+    try {
+      const chart = createChart(container, {
+        width: container.clientWidth || 900,
+        height: 320,
+        layout: { background: { color: isLight ? '#ffffff' : '#161b22' }, textColor: isLight ? '#111827' : '#e6edf3' },
+        grid: { vertLines: { color: isLight ? '#e5e7eb' : '#30363d' }, horzLines: { color: isLight ? '#e5e7eb' : '#30363d' } }
+      })
+      const s = chart.addCandlestickSeries()
+      s.setData(candles.map(c => ({
+        time: Math.floor(new Date(c.time).getTime() / 1000),
+        open: c.open, high: c.high, low: c.low, close: c.close
+      })))
 
-    const markers = []
-    MODE_ORDER.forEach((mk) => {
-      const m = state?.modes?.[mk]
-      ;(m?.open_positions || []).forEach((p) => {
-        const t = Math.floor(new Date(p.open_time).getTime() / 1000)
-        markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: '#1f6feb', shape: 'circle', text: `${mk}:OPEN` })
-        s.createPriceLine({ price: p.entry_fill_price, color: '#1f6feb', lineStyle: 2, lineWidth: 1, title: `${mk} entry` })
-        s.createPriceLine({ price: p.stop_loss, color: 'var(--danger)', lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
-        s.createPriceLine({ price: p.take_profit, color: '#2ea043', lineStyle: 2, lineWidth: 1, title: `${mk} TP` })
+      const markers = []
+      MODE_ORDER.forEach((mk) => {
+        const m = state?.modes?.[mk]
+        ;(m?.open_positions || []).forEach((p) => {
+          const t = Math.floor(new Date(p.open_time).getTime() / 1000)
+          markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: '#1f6feb', shape: 'circle', text: `${mk}:OPEN` })
+          s.createPriceLine({ price: p.entry_fill_price, color: '#1f6feb', lineStyle: 2, lineWidth: 1, title: `${mk} entry` })
+          s.createPriceLine({ price: p.stop_loss, color: danger, lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
+          s.createPriceLine({ price: p.take_profit, color: '#2ea043', lineStyle: 2, lineWidth: 1, title: `${mk} TP` })
+        })
+        ;(m?.closed_trades || []).slice(-8).forEach((t) => {
+          if (!t.close_time) return
+          const tt = Math.floor(new Date(t.close_time).getTime() / 1000)
+          if (!Number.isFinite(tt)) return
+          markers.push({ time: tt, position: t.side === 'BUY' ? 'aboveBar' : 'belowBar', color: '#d29922', shape: 'square', text: `${mk}:CLOSE` })
+        })
+        const tr = m?.triggers
+        if (tr) {
+          s.createPriceLine({ price: tr.upper, color: danger, lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
+          s.createPriceLine({ price: tr.lower, color: '#2ea043', lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
+        }
       })
-      ;(m?.closed_trades || []).slice(-8).forEach((t) => {
-        if (!t.close_time) return
-        const tt = Math.floor(new Date(t.close_time).getTime() / 1000)
-        if (!Number.isFinite(tt)) return
-        markers.push({ time: tt, position: t.side === 'BUY' ? 'aboveBar' : 'belowBar', color: '#d29922', shape: 'square', text: `${mk}:CLOSE` })
+
+      if (markers.length) s.setMarkers(markers)
+      chart.timeScale().fitContent()
+      setChartError('')
+
+      const ro = new ResizeObserver(() => {
+        chart.applyOptions({ width: container.clientWidth || 900 })
       })
-      const tr = m?.triggers
-      if (tr) {
-        s.createPriceLine({ price: tr.upper, color: 'var(--danger)', lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
-        s.createPriceLine({ price: tr.lower, color: '#2ea043', lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
+      ro.observe(container)
+
+      return () => {
+        ro.disconnect()
+        chart.remove()
       }
-    })
-
-    if (markers.length) s.setMarkers(markers)
-    chart.timeScale().fitContent()
-    return () => chart.remove()
+    } catch (e) {
+      setChartError('Chart render failed.')
+    }
   }, [state, baseMode, theme])
 
   const bid = baseMode?.market_data?.[0]?.bid
@@ -63,7 +85,8 @@ function SharedChart({ state, theme }) {
       <div style={{ fontSize: 12, marginBottom: 6 }}>
         BTC live: <strong>{last ?? '-'}</strong> | Bid/Ask: {bid ?? '-'} / {ask ?? '-'}
       </div>
-      <div ref={ref} />
+      <div ref={ref} style={{ minHeight: 320, width: '100%' }} />
+      {chartError && <div style={{ marginTop: 8, color: 'var(--danger)' }}>{chartError}</div>}
     </div>
   )
 }
