@@ -95,16 +95,71 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
     last, prev = candles[-1], candles[-2]
     highs5 = [c["high"] for c in candles[-5:]]
     lows5 = [c["low"] for c in candles[-5:]]
+    ranges = [c["high"] - c["low"] for c in candles[-8:]]
+    avg_range = max(0.1, sum(ranges) / len(ranges))
     conf = 1 if aggressive else 2
 
+    # Conservative/Shared templates
     if last["close"] < TRIGGER_LOWER and (conf == 1 or prev["close"] < TRIGGER_LOWER):
-        e = round(min(last["low"], prev["low"]) - 1, 1); st = round(max(highs5) + 1, 1); r = st - e; tp = round(e - 2 * r, 1); rr = round((e - tp) / r, 2) if r > 0 else 0
-        if rr >= rr_min: return normalize_decision({"status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp, "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {TRIGGER_LOWER}", "regime_label": "bearish_breakdown_continuation", "reason": "Breakdown continuation."}, rr_min)
+        e = round(min(last["low"], prev["low"]) - 1, 1)
+        st = round(max(highs5) + 1, 1)
+        r = st - e
+        tp = round(e - 2 * r, 1)
+        rr = round((e - tp) / r, 2) if r > 0 else 0
+        if rr >= rr_min:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {TRIGGER_LOWER}",
+                "regime_label": "bearish_breakdown_continuation", "reason": "Bounded template: breakdown continuation.",
+            }, rr_min)
 
     low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
     if low_below and last["close"] > TRIGGER_LOWER and (conf == 1 or prev["close"] > TRIGGER_LOWER):
-        e = round(max(highs5) + 1, 1); st = round(min(lows5) - 1, 1); r = e - st; tp = round(e + 2 * r, 1); rr = round((tp - e) / r, 2) if r > 0 else 0
-        if rr >= rr_min: return normalize_decision({"status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp, "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {TRIGGER_LOWER}", "regime_label": "bullish_reclaim_recovery", "reason": "Reclaim recovery."}, rr_min)
+        e = round(max(highs5) + 1, 1)
+        st = round(min(lows5) - 1, 1)
+        r = e - st
+        tp = round(e + 2 * r, 1)
+        rr = round((tp - e) / r, 2) if r > 0 else 0
+        if rr >= rr_min:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {TRIGGER_LOWER}",
+                "regime_label": "bullish_reclaim_recovery", "reason": "Bounded template: reclaim recovery.",
+            }, rr_min)
+
+    # Additional aggressive-only bounded templates (strong structure only)
+    if aggressive:
+        up_break = last["close"] > max(highs5[:-1]) and last["close"] > last["open"] and prev["close"] > prev["open"]
+        dn_break = last["close"] < min(lows5[:-1]) and last["close"] < last["open"] and prev["close"] < prev["open"]
+        strong_candle = (last["high"] - last["low"]) >= 1.1 * avg_range
+
+        if up_break and strong_candle:
+            e = round(last["high"] + 0.5, 1)
+            st = round(min(lows5) - 0.5, 1)
+            r = e - st
+            tp = round(e + 1.6 * r, 1)
+            rr = round((tp - e) / r, 2) if r > 0 else 0
+            if rr >= rr_min:
+                return normalize_decision({
+                    "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                    "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {round(min(lows5),1)}",
+                    "regime_label": "aggr_breakout_continuation_long",
+                    "reason": "Aggressive bounded template: strong breakout continuation long.",
+                }, rr_min)
+
+        if dn_break and strong_candle:
+            e = round(last["low"] - 0.5, 1)
+            st = round(max(highs5) + 0.5, 1)
+            r = st - e
+            tp = round(e - 1.6 * r, 1)
+            rr = round((e - tp) / r, 2) if r > 0 else 0
+            if rr >= rr_min:
+                return normalize_decision({
+                    "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                    "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {round(max(highs5),1)}",
+                    "regime_label": "aggr_breakout_continuation_short",
+                    "reason": "Aggressive bounded template: strong breakout continuation short.",
+                }, rr_min)
 
     return normalize_decision({"status": "WAIT", "regime_label": "structure_no_executable_plan", "reason": "No executable setup."}, rr_min)
 
