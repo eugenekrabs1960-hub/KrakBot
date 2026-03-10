@@ -1,0 +1,36 @@
+dataset:
+  market: "SOL/USD"
+  timeframe: "1m"
+  start_ts: null       # unix ms; null = full history
+  end_ts: null         # unix ms; null = latest
+  use_market_trades: true
+  min_rows: 500
+
+features:
+  return_periods: [1, 5, 15]
+  volatility_window: 20
+  momentum_window: 10
+  rsi_window: 14
+  volume_change_window: 1
+  label_horizon: 1
+  dropna: true
+
+split:
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+model:
+  type: "logistic_regression"
+  class_weight: "balanced"
+  C: 1.0
+  max_iter: 1000
+  random_state: 42
+
+artifacts:
+  dataset_path: "data/solusd_candles.parquet"
+  featured_path: "data/solusd_features.parquet"
+  model_path: "data/baseline_model.joblib"
+  metadata_path: "data/training_metadata.json"
+  predictions_path: "data/test_predictions.parquet"
+  reports_dir: "reports"

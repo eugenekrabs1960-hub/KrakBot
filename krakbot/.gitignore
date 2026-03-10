@@ -16,3 +16,13 @@ dist/
 *.log
 coverage/
 .DS_Store
+
+# Research sidecar artifacts
+research/.venv/
+research/data/*
+!research/data/.gitkeep
+research/reports/*
+!research/reports/.gitkeep
+!research/reports/plots/
+research/reports/plots/*
+!research/reports/plots/.gitkeep
