@@ -14,6 +14,10 @@ PAIR = "XBTUSD"
 TRIGGER_UPPER = 69513.0
 TRIGGER_LOWER = 68698.6
 
+# Paper fee model: fixed percent per fill (taker-style simulation)
+PAPER_FEE_MODEL = "fixed_percent_taker"
+PAPER_FEE_PCT = 0.40
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_5m_aggressive": {"label": "BTC/USD 5m aggressive", "interval": 5, "rr_min": 1.25, "aggressive": True},
@@ -218,7 +222,23 @@ async def call_clawbot(scan_payload: dict[str, Any], timeframe: str, rr_min: flo
 
 
 def compute_unrealized(p, bid, ask):
-    return round2((bid - p["entry_fill_price"]) * p["qty"] if p["side"] == "BUY" else (p["entry_fill_price"] - ask) * p["qty"])
+    qty = p["qty"]
+    entry = p["entry_fill_price"]
+    fee_pct = p.get("fee_pct", PAPER_FEE_PCT)
+    if p["side"] == "BUY":
+        mark = bid
+        gross = (mark - entry) * qty
+    else:
+        mark = ask
+        gross = (entry - mark) * qty
+    exit_fee_est = mark * qty * (fee_pct / 100)
+    total_fee_est = p.get("entry_fee", 0.0) + exit_fee_est
+    net = gross - total_fee_est
+    return {
+        "gross_unrealized_pnl": round2(gross),
+        "net_unrealized_pnl": round2(net),
+        "estimated_total_fees": round2(total_fee_est),
+    }
 
 
 def maybe_close(p, candle, slip):
@@ -230,7 +250,7 @@ def maybe_close(p, candle, slip):
             price = p["take_profit"] * (1 - slip / 100); reason = "TAKE_PROFIT"
         else:
             return None
-        realized = round2((price - p["entry_fill_price"]) * p["qty"])
+        gross_realized = (price - p["entry_fill_price"]) * p["qty"]
     else:
         if candle["high"] >= p["stop_loss"]:
             price = p["stop_loss"] * (1 + slip / 100); reason = "STOP_LOSS"
@@ -238,8 +258,31 @@ def maybe_close(p, candle, slip):
             price = p["take_profit"] * (1 + slip / 100); reason = "TAKE_PROFIT"
         else:
             return None
-        realized = round2((p["entry_fill_price"] - price) * p["qty"])
-    return {**p, "status": "PAPER_TRADE_CLOSED", "close_reason": reason, "close_fill_price": round2(price), "realized_pnl": realized, "unrealized_pnl": 0, "close_time": now_iso()}
+        gross_realized = (p["entry_fill_price"] - price) * p["qty"]
+
+    close_fill_price = round2(price)
+    close_notional = close_fill_price * p["qty"]
+    fee_pct = p.get("fee_pct", PAPER_FEE_PCT)
+    close_fee = close_notional * (fee_pct / 100)
+    total_fees = p.get("entry_fee", 0.0) + close_fee
+    net_realized = gross_realized - total_fees
+
+    return {
+        **p,
+        "status": "PAPER_TRADE_CLOSED",
+        "close_reason": reason,
+        "close_fill_price": close_fill_price,
+        "close_notional": round2(close_notional),
+        "close_fee": round2(close_fee),
+        "total_fees": round2(total_fees),
+        "gross_realized_pnl": round2(gross_realized),
+        "net_realized_pnl": round2(net_realized),
+        "realized_pnl": round2(net_realized),
+        "unrealized_pnl": 0,
+        "gross_unrealized_pnl": 0,
+        "net_unrealized_pnl": 0,
+        "close_time": now_iso(),
+    }
 
 
 def mode_stats(bucket):
@@ -247,7 +290,9 @@ def mode_stats(bucket):
     wins = [x["realized_pnl"] for x in closed if x["realized_pnl"] > 0]
     losses = [x["realized_pnl"] for x in closed if x["realized_pnl"] < 0]
     realized = round2(sum(x["realized_pnl"] for x in closed))
+    gross_realized = round2(sum(x.get("gross_realized_pnl", x["realized_pnl"]) for x in closed))
     unrealized = round2(sum(x.get("unrealized_pnl", 0) for x in openp))
+    gross_unrealized = round2(sum(x.get("gross_unrealized_pnl", x.get("unrealized_pnl", 0)) for x in openp))
     eq, run = [0], 0
     for t in closed:
         run += t["realized_pnl"]; eq.append(run)
@@ -265,7 +310,11 @@ def mode_stats(bucket):
         "average_win": round2(sum(wins) / len(wins)) if wins else 0,
         "average_loss": round2(sum(losses) / len(losses)) if losses else 0,
         "realized_pnl": realized,
+        "gross_realized_pnl": gross_realized,
         "unrealized_pnl": unrealized,
+        "gross_unrealized_pnl": gross_unrealized,
+        "fee_model": PAPER_FEE_MODEL,
+        "fee_pct": PAPER_FEE_PCT,
         "max_drawdown": round2(mdd),
         "performance_by_regime": by,
     }
@@ -315,16 +364,20 @@ async def execute_mode_scan(mode: str):
         if d["signal_id"] not in bucket["executed_signal_ids"] and len(bucket["open_positions"]) == 0:
             slip = payload["market_data"][0]["slippage_assumption_pct"]
             fill = round2((ask * (1 + slip / 100)) if d["side"] == "BUY" else (bid * (1 - slip / 100)))
+            qty = 1.0
+            entry_notional = fill * qty
+            entry_fee = entry_notional * (PAPER_FEE_PCT / 100)
             pos = {
-                "mode": mode, "signal_id": d["signal_id"], "symbol": "BTC/USD", "timeframe": timeframe, "side": d["side"], "qty": 1.0,
-                "entry_fill_price": fill, "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
+                "mode": mode, "signal_id": d["signal_id"], "symbol": "BTC/USD", "timeframe": timeframe, "side": d["side"], "qty": qty,
+                "entry_fill_price": fill, "entry_notional": round2(entry_notional), "entry_fee": round2(entry_fee), "fee_model": PAPER_FEE_MODEL, "fee_pct": PAPER_FEE_PCT,
+                "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
                 "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
-                "status": "PAPER_TRADE_OPEN", "unrealized_pnl": 0, "realized_pnl": 0,
+                "status": "PAPER_TRADE_OPEN", "unrealized_pnl": round2(-entry_fee), "gross_unrealized_pnl": 0, "net_unrealized_pnl": round2(-entry_fee), "realized_pnl": 0,
             }
             bucket["pending_orders"].append({"timestamp": now_iso(), "mode": mode, "signal_id": d["signal_id"], "status": "QUEUED_TO_PAPER_EXECUTOR", "decision": d})
             bucket["open_positions"].append(pos)
             bucket["executed_signal_ids"].add(d["signal_id"])
-            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "AUTO_EXECUTED_PAPER", "execution_status": "opened_paper_position", "decision": d, "entry_fill_price": fill})
+            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "AUTO_EXECUTED_PAPER", "execution_status": "opened_paper_position", "decision": d, "entry_fill_price": fill, "entry_fee": round2(entry_fee), "fee_pct": PAPER_FEE_PCT, "fee_model": PAPER_FEE_MODEL})
             bucket["pending_orders"] = [o for o in bucket["pending_orders"] if o.get("signal_id") != d["signal_id"]]
             history_events.append(make_history_row({"status": "PAPER_TRADE_OPEN", "side": pos["side"], "entry_price": fill, "stop_loss": pos["stop_loss"], "take_profit": pos["take_profit"], "regime_label": pos["regime_label"], "reason": "Auto paper open", "risk_reward_ratio": pos["risk_reward_ratio"], "invalidation": pos["invalidation"], "signal_id": pos["signal_id"]}))
             d = {**d, "status": "PAPER_TRADE_OPEN", "reason": "Auto-executed in paper mode."}
@@ -337,13 +390,17 @@ async def execute_mode_scan(mode: str):
         c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"])
         if c:
             bucket["closed_trades"].append(c)
-            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "realized_pnl": c["realized_pnl"]})
+            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "gross_realized_pnl": c["gross_realized_pnl"], "net_realized_pnl": c["net_realized_pnl"], "realized_pnl": c["realized_pnl"], "total_fees": c["total_fees"]})
             bucket["pending_orders"] = [o for o in bucket["pending_orders"] if o.get("signal_id") != c["signal_id"]]
             history_events.append(make_history_row({"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']}", "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "signal_id": c["signal_id"]}))
             d = {"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']} with realized PnL {c['realized_pnl']}", "signal_id": c["signal_id"]}
             bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_CLOSED", "decision": d}
         else:
-            p["unrealized_pnl"] = compute_unrealized(p, bid, ask)
+            u = compute_unrealized(p, bid, ask)
+            p["gross_unrealized_pnl"] = u["gross_unrealized_pnl"]
+            p["net_unrealized_pnl"] = u["net_unrealized_pnl"]
+            p["unrealized_pnl"] = u["net_unrealized_pnl"]
+            p["estimated_total_fees"] = u["estimated_total_fees"]
             still.append(p)
     bucket["open_positions"] = still
 
@@ -363,7 +420,14 @@ async def execute_mode_scan(mode: str):
         "open_positions": bucket["open_positions"],
         "closed_trades": bucket["closed_trades"][-25:],
         "paper_execution_log": bucket["paper_execution_log"][-10:],
-        "current_pnl": {"realized": round2(sum(t.get("realized_pnl", 0) for t in bucket["closed_trades"])), "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in bucket["open_positions"]))},
+        "current_pnl": {
+            "realized": round2(sum(t.get("realized_pnl", 0) for t in bucket["closed_trades"])),
+            "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in bucket["open_positions"])),
+            "gross_realized": round2(sum(t.get("gross_realized_pnl", t.get("realized_pnl", 0)) for t in bucket["closed_trades"])),
+            "gross_unrealized": round2(sum(p.get("gross_unrealized_pnl", p.get("unrealized_pnl", 0)) for p in bucket["open_positions"])),
+            "fee_model": PAPER_FEE_MODEL,
+            "fee_pct": PAPER_FEE_PCT,
+        },
         "mode_stats": mode_stats(bucket),
     }
     bucket["latest"] = latest
