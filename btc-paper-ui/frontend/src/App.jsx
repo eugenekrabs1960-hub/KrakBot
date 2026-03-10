@@ -1,7 +1,71 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { createChart } from 'lightweight-charts'
 
 const API = 'http://127.0.0.1:8000'
 const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_aggressive']
+
+function SharedChart({ state }) {
+  const ref = useRef(null)
+  const baseMode = state?.modes?.btc_5m_aggressive?.market_data?.[0]?.ohlcv?.length
+    ? state?.modes?.btc_5m_aggressive
+    : state?.modes?.btc_15m_conservative
+
+  useEffect(() => {
+    const candles = baseMode?.market_data?.[0]?.ohlcv || []
+    if (!ref.current || candles.length === 0) return
+    ref.current.innerHTML = ''
+
+    const chart = createChart(ref.current, {
+      height: 300,
+      layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
+      grid: { vertLines: { color: '#30363d' }, horzLines: { color: '#30363d' } }
+    })
+    const s = chart.addCandlestickSeries()
+    s.setData(candles.map(c => ({
+      time: Math.floor(new Date(c.time).getTime() / 1000),
+      open: c.open, high: c.high, low: c.low, close: c.close
+    })))
+
+    const markers = []
+    MODE_ORDER.forEach((mk) => {
+      const m = state?.modes?.[mk]
+      ;(m?.open_positions || []).forEach((p) => {
+        const t = Math.floor(new Date(p.open_time).getTime() / 1000)
+        markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: '#1f6feb', shape: 'circle', text: `${mk}:OPEN` })
+        s.createPriceLine({ price: p.entry_fill_price, color: '#1f6feb', lineStyle: 2, lineWidth: 1, title: `${mk} entry` })
+        s.createPriceLine({ price: p.stop_loss, color: '#f85149', lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
+        s.createPriceLine({ price: p.take_profit, color: '#2ea043', lineStyle: 2, lineWidth: 1, title: `${mk} TP` })
+      })
+      ;(m?.closed_trades || []).slice(-8).forEach((t) => {
+        if (!t.close_time) return
+        const tt = Math.floor(new Date(t.close_time).getTime() / 1000)
+        if (!Number.isFinite(tt)) return
+        markers.push({ time: tt, position: t.side === 'BUY' ? 'aboveBar' : 'belowBar', color: '#d29922', shape: 'square', text: `${mk}:CLOSE` })
+      })
+      const tr = m?.triggers
+      if (tr) {
+        s.createPriceLine({ price: tr.upper, color: '#f85149', lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
+        s.createPriceLine({ price: tr.lower, color: '#2ea043', lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
+      }
+    })
+
+    if (markers.length) s.setMarkers(markers)
+    chart.timeScale().fitContent()
+    return () => chart.remove()
+  }, [state, baseMode])
+
+  const bid = baseMode?.market_data?.[0]?.bid
+  const ask = baseMode?.market_data?.[0]?.ask
+  const last = baseMode?.market_data?.[0]?.ohlcv?.slice(-1)[0]?.close
+  return (
+    <div className='panel' style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, marginBottom: 6 }}>
+        BTC live: <strong>{last ?? '-'}</strong> | Bid/Ask: {bid ?? '-'} / {ask ?? '-'}
+      </div>
+      <div ref={ref} />
+    </div>
+  )
+}
 
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
@@ -148,6 +212,7 @@ export default function App() {
         </div>
       </div>
       {err && <div className='panel' style={{ color: '#f85149', borderColor: '#f85149' }}>{err}</div>}
+      <SharedChart state={state} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
         {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
       </div>
