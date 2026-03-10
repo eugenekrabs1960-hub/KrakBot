@@ -95,6 +95,45 @@ def normalize_decision(d: dict[str, Any], rr_min: float):
     return n
 
 
+def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
+    """Extra safety/quality gates for 5m aggressive mode only."""
+    if d.get("status") != "PROPOSE_TRADE":
+        return d
+
+    side = d.get("side")
+    entry = float(d.get("entry_price") or 0)
+    stop = float(d.get("stop_loss") or 0)
+    rr = float(d.get("risk_reward_ratio") or 0)
+    if side not in {"BUY", "SELL"} or entry <= 0 or stop <= 0:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_invalid_fields", "reason": "Aggressive gate blocked: invalid trade fields."}, 1.25)
+
+    # 1) tighter regime / execution quality filter
+    if spread_pct > 0.08:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_spread", "reason": "Aggressive gate blocked: spread too wide for 5m execution quality."}, 1.25)
+
+    # 2) tighter trade construction: bounded stop distance + stronger R:R floor
+    risk_pct = abs(entry - stop) / max(entry, 1) * 100
+    if risk_pct < 0.20 or risk_pct > 0.80:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_risk_band", "reason": "Aggressive gate blocked: stop distance outside 0.20%-0.80% risk band."}, 1.25)
+    if rr < 1.40:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_rr", "reason": "Aggressive gate blocked: risk/reward below tightened 5m threshold (1.40)."}, 1.25)
+
+    # 3) better entry confirmation: momentum + avoid chasing too far from planned entry
+    last, prev = candles[-1], candles[-2]
+    if side == "BUY":
+        if not (last["close"] >= prev["close"]):
+            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_confirmation", "reason": "Aggressive gate blocked: missing bullish 2-candle confirmation."}, 1.25)
+        if ask > entry * 1.0015:
+            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_entry_chase", "reason": "Aggressive gate blocked: buy fill would chase too far above planned entry."}, 1.25)
+    else:
+        if not (last["close"] <= prev["close"]):
+            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_confirmation", "reason": "Aggressive gate blocked: missing bearish 2-candle confirmation."}, 1.25)
+        if bid < entry * 0.9985:
+            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_entry_chase", "reason": "Aggressive gate blocked: sell fill would chase too far below planned entry."}, 1.25)
+
+    return d
+
+
 def fallback_construct(candles, rr_min, aggressive, timeframe):
     last, prev = candles[-1], candles[-2]
     highs5 = [c["high"] for c in candles[-5:]]
@@ -344,6 +383,11 @@ async def execute_mode_scan(mode: str):
     if d["status"] == "WAIT":
         fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
         if fb["status"] == "PROPOSE_TRADE": d = fb
+
+    # Tightening applies ONLY to 5m aggressive mode; 15m baseline remains frozen.
+    if mode == "btc_5m_aggressive" and d.get("status") == "PROPOSE_TRADE":
+        d = aggressive_quality_gate(candles, d, bid, ask, spread_pct)
+
     d["signal_id"] = d.get("signal_id") or f"{mode}|{payload['timestamp']}|{candles[-1]['time']}"
 
     history_events: list[dict[str, Any]] = []
