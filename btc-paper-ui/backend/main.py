@@ -103,7 +103,8 @@ def normalize_decision(decision: dict[str, Any]) -> dict[str, Any]:
     status = decision.get("status", "INSUFFICIENT_DATA")
     if status not in {"PROPOSE_TRADE", "WAIT", "REJECT", "INSUFFICIENT_DATA"}:
         status = "INSUFFICIENT_DATA"
-    return {
+
+    normalized = {
         "status": status,
         "side": decision.get("side", ""),
         "entry_price": decision.get("entry_price", 0),
@@ -115,11 +116,138 @@ def normalize_decision(decision: dict[str, Any]) -> dict[str, Any]:
         "reason": decision.get("reason", ""),
     }
 
+    if normalized["status"] == "PROPOSE_TRADE":
+        required_ok = all([
+            normalized["side"] in {"BUY", "SELL"},
+            isinstance(normalized["entry_price"], (int, float)) and normalized["entry_price"] > 0,
+            isinstance(normalized["stop_loss"], (int, float)) and normalized["stop_loss"] > 0,
+            isinstance(normalized["take_profit"], (int, float)) and normalized["take_profit"] > 0,
+            isinstance(normalized["risk_reward_ratio"], (int, float)) and normalized["risk_reward_ratio"] >= 1.5,
+            isinstance(normalized["invalidation"], str) and normalized["invalidation"].strip() != "",
+            isinstance(normalized["regime_label"], str) and normalized["regime_label"].strip() != "",
+            isinstance(normalized["reason"], str) and normalized["reason"].strip() != "",
+        ])
+        if not required_ok:
+            normalized["status"] = "WAIT"
+            normalized["reason"] = "Clawbot did not provide full executable trade fields; keeping WAIT."
+            normalized["side"] = ""
+            normalized["entry_price"] = 0
+            normalized["stop_loss"] = 0
+            normalized["take_profit"] = 0
+            normalized["risk_reward_ratio"] = 0
+            normalized["invalidation"] = ""
+
+    return normalized
+
+
+def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(candles) < 8:
+        return normalize_decision({"status": "WAIT", "regime_label": "insufficient_structure", "reason": "Not enough candles for setup construction."})
+
+    last = candles[-1]
+    prev = candles[-2]
+    highs5 = [c["high"] for c in candles[-5:]]
+    lows5 = [c["low"] for c in candles[-5:]]
+    highs6 = [c["high"] for c in candles[-6:]]
+    lows6 = [c["low"] for c in candles[-6:]]
+
+    # 1) Bearish breakdown continuation
+    if last["close"] < TRIGGER_LOWER and prev["close"] < TRIGGER_LOWER:
+        entry = round(min(last["low"], prev["low"]) - 1.0, 1)
+        stop = round(max(highs5) + 1.0, 1)
+        risk = stop - entry
+        tp = round(entry - (2.0 * risk), 1)
+        rr = round((entry - tp) / risk, 2) if risk > 0 else 0
+        if risk > 0 and rr >= 1.5:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE",
+                "side": "SELL",
+                "entry_price": entry,
+                "stop_loss": stop,
+                "take_profit": tp,
+                "risk_reward_ratio": rr,
+                "invalidation": f"15m close above {TRIGGER_LOWER}",
+                "regime_label": "bearish_breakdown_continuation",
+                "reason": "Two consecutive closes below breakdown trigger with continuation structure.",
+            })
+
+    # 2) Bullish reclaim recovery
+    recent_low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
+    if recent_low_below and last["close"] > TRIGGER_LOWER and prev["close"] > TRIGGER_LOWER:
+        entry = round(max(highs5) + 1.0, 1)
+        stop = round(min(lows5) - 1.0, 1)
+        risk = entry - stop
+        tp = round(entry + (2.0 * risk), 1)
+        rr = round((tp - entry) / risk, 2) if risk > 0 else 0
+        if risk > 0 and rr >= 1.5:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE",
+                "side": "BUY",
+                "entry_price": entry,
+                "stop_loss": stop,
+                "take_profit": tp,
+                "risk_reward_ratio": rr,
+                "invalidation": f"15m close back below {TRIGGER_LOWER}",
+                "regime_label": "bullish_reclaim_recovery",
+                "reason": "Reclaim above breakdown level with follow-through closes.",
+            })
+
+    # 3) Rebound into resistance (short fade)
+    if prev["high"] >= TRIGGER_UPPER * 0.997 and last["close"] < prev["close"]:
+        entry = round(last["low"] - 1.0, 1)
+        stop = round(max(highs5) + 1.0, 1)
+        risk = stop - entry
+        tp = round(entry - (1.8 * risk), 1)
+        rr = round((entry - tp) / risk, 2) if risk > 0 else 0
+        if risk > 0 and rr >= 1.5:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE",
+                "side": "SELL",
+                "entry_price": entry,
+                "stop_loss": stop,
+                "take_profit": tp,
+                "risk_reward_ratio": rr,
+                "invalidation": f"15m close above {TRIGGER_UPPER}",
+                "regime_label": "rebound_into_resistance",
+                "reason": "Rejection after rebound toward resistance zone.",
+            })
+
+    # 4) Consolidation breakout
+    rng = max(highs6) - min(lows6)
+    if last["close"] > max(highs6[:-1]) and rng / max(last["close"], 1) < 0.006:
+        entry = round(max(highs6) + 1.0, 1)
+        stop = round(min(lows6) - 1.0, 1)
+        risk = entry - stop
+        tp = round(entry + (1.8 * risk), 1)
+        rr = round((tp - entry) / risk, 2) if risk > 0 else 0
+        if risk > 0 and rr >= 1.5:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE",
+                "side": "BUY",
+                "entry_price": entry,
+                "stop_loss": stop,
+                "take_profit": tp,
+                "risk_reward_ratio": rr,
+                "invalidation": f"15m close below {round(min(lows6),1)}",
+                "regime_label": "consolidation_breakout",
+                "reason": "Compression followed by upside breakout trigger.",
+            })
+
+    return normalize_decision({
+        "status": "WAIT",
+        "regime_label": "structure_no_executable_plan",
+        "reason": "Structure detected but executable trade levels could not be derived with required R:R.",
+    })
+
 
 async def call_clawbot(scan_payload: dict[str, Any]) -> dict[str, Any]:
     prompt = (
         "Analyze this BTC/USD 15m Kraken spot paper-trading payload and return JSON only in this exact shape: "
         "{\"status\":\"PROPOSE_TRADE|WAIT|REJECT|INSUFFICIENT_DATA\",\"side\":\"BUY|SELL|\",\"entry_price\":0,\"stop_loss\":0,\"take_profit\":0,\"risk_reward_ratio\":0,\"invalidation\":\"\",\"regime_label\":\"\",\"reason\":\"\"}. "
+        "PROPOSE_TRADE is allowed only when all executable fields are present and risk_reward_ratio >= 1.5. "
+        "If structure exists but executable fields cannot be derived, return WAIT. "
+        "Use explicit BTC/USD 15m trade-construction rules: bearish breakdown continuation, bullish reclaim recovery, rebound into resistance, consolidation breakout. "
+        "For each setup, provide exact entry trigger, stop rule, take-profit rule, and invalidation rule. "
         "Paper mode only. No live trading. No execution. Do not invent missing values. Payload:\n"
         + json.dumps(scan_payload, separators=(",", ":"))
     )
@@ -155,6 +283,10 @@ async def build_state():
     candles, bid, ask, spread, spread_pct = await fetch_market()
     scan_payload = build_scan_payload(candles, bid, ask, spread, spread_pct)
     decision = await call_clawbot(scan_payload)
+    if decision.get("status") == "WAIT":
+        fallback = construct_trade_from_structure(candles)
+        if fallback.get("status") == "PROPOSE_TRADE":
+            decision = fallback
     decision_time = now_iso()
 
     if decision["status"] == "PROPOSE_TRADE":
