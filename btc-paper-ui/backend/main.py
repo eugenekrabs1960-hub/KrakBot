@@ -8,34 +8,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="BTC Paper Backend")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+PAIR = "XBTUSD"
 TRIGGER_UPPER = 69513.0
 TRIGGER_LOWER = 68698.6
-PAIR = "XBTUSD"
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_5m_aggressive": {"label": "BTC/USD 5m aggressive", "interval": 5, "rr_min": 1.25, "aggressive": True},
-}
-
-store: dict[str, Any] = {
-    "latest": None,
-    "history": [],
-    "auto_scan": True,
-    "notify_user": None,
-    "last_candle_time": None,
-    "paper_execution_log": [],
-    "executed_signal_ids": set(),
-    "pending_orders": [],
-    "open_positions": [],
-    "closed_trades": [],
-    "active_mode": "btc_15m_conservative",
 }
 
 
@@ -47,574 +28,259 @@ def round2(x: float) -> float:
     return round(float(x), 2)
 
 
+def mode_bucket() -> dict[str, Any]:
+    return {
+        "latest": None,
+        "last_candle_time": None,
+        "notify_user": None,
+        "history": [],
+        "pending_orders": [],
+        "open_positions": [],
+        "closed_trades": [],
+        "paper_execution_log": [],
+        "executed_signal_ids": set(),
+    }
+
+
+store: dict[str, Any] = {
+    "auto_scan": True,
+    "modes": {k: mode_bucket() for k in MODE_CONFIGS.keys()},
+}
+
+
 async def fetch_market(interval: int):
-    async with httpx.AsyncClient(timeout=20) as client:
-        ohlc_r = await client.get(f"https://api.kraken.com/0/public/OHLC?pair={PAIR}&interval={interval}")
-        ticker_r = await client.get(f"https://api.kraken.com/0/public/Ticker?pair={PAIR}")
-
-    ohlc_json = ohlc_r.json()
-    ticker_json = ticker_r.json()
-    key = next(k for k in ohlc_json["result"].keys() if k != "last")
-    rows = ohlc_json["result"][key][-20:]
-
-    candles = []
-    for r in rows:
-        t = datetime.fromtimestamp(int(r[0]), timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        candles.append(
-            {
-                "time": t,
-                "open": float(r[1]),
-                "high": float(r[2]),
-                "low": float(r[3]),
-                "close": float(r[4]),
-                "volume": float(r[6]),
-            }
-        )
-
-    tk = next(iter(ticker_json["result"].values()))
-    bid = float(tk["b"][0])
-    ask = float(tk["a"][0])
+    async with httpx.AsyncClient(timeout=20) as c:
+        o = (await c.get(f"https://api.kraken.com/0/public/OHLC?pair={PAIR}&interval={interval}")).json()
+        t = (await c.get(f"https://api.kraken.com/0/public/Ticker?pair={PAIR}")).json()
+    k = next(x for x in o["result"].keys() if x != "last")
+    rows = o["result"][k][-20:]
+    candles = [{
+        "time": datetime.fromtimestamp(int(r[0]), timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[6])
+    } for r in rows]
+    tk = next(iter(t["result"].values()))
+    bid, ask = float(tk["b"][0]), float(tk["a"][0])
     spread = ask - bid
     spread_pct = (spread / ((ask + bid) / 2)) * 100
-
     return candles, bid, ask, spread, spread_pct
 
 
-def build_scan_payload(candles, bid, ask, spread, spread_pct, timeframe: str):
-    return {
-        "timestamp": now_iso(),
-        "market_data": [{
-            "symbol": "BTC/USD",
-            "timeframe": timeframe,
-            "ohlcv": candles,
-            "bid": bid,
-            "ask": ask,
-            "spread": spread,
-            "spread_pct": spread_pct,
-            "slippage_assumption_pct": 0.01,
-        }],
-        "account_state": {
-            "account_equity": 10000,
-            "cash_available": 10000,
-            "open_positions": [],
-            "active_orders": [],
-        },
-        "risk_state": {
-            "max_risk_per_trade_pct": 1.0,
-            "max_total_open_risk_pct": 2.0,
-            "max_capital_allocation_pct": 10.0,
-            "stacking_allowed": False,
-        },
-        "executor_state": {
-            "confirmation_source": "samy_paper_executor",
-            "fills_are_executor_confirmed_only": True,
-            "paper_mode": True,
-        },
+def normalize_decision(d: dict[str, Any], rr_min: float):
+    s = d.get("status", "INSUFFICIENT_DATA")
+    if s not in {"PROPOSE_TRADE", "WAIT", "REJECT", "INSUFFICIENT_DATA"}:
+        s = "INSUFFICIENT_DATA"
+    n = {
+        "status": s,
+        "side": d.get("side", ""),
+        "entry_price": d.get("entry_price", 0),
+        "stop_loss": d.get("stop_loss", 0),
+        "take_profit": d.get("take_profit", 0),
+        "risk_reward_ratio": d.get("risk_reward_ratio", 0),
+        "invalidation": d.get("invalidation", ""),
+        "regime_label": d.get("regime_label", ""),
+        "reason": d.get("reason", ""),
+        "signal_id": d.get("signal_id", ""),
     }
-
-
-def normalize_decision(decision: dict[str, Any], rr_min: float = 1.5) -> dict[str, Any]:
-    status = decision.get("status", "INSUFFICIENT_DATA")
-    if status not in {"PROPOSE_TRADE", "WAIT", "REJECT", "INSUFFICIENT_DATA"}:
-        status = "INSUFFICIENT_DATA"
-
-    normalized = {
-        "status": status,
-        "side": decision.get("side", ""),
-        "entry_price": decision.get("entry_price", 0),
-        "stop_loss": decision.get("stop_loss", 0),
-        "take_profit": decision.get("take_profit", 0),
-        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
-        "invalidation": decision.get("invalidation", ""),
-        "regime_label": decision.get("regime_label", ""),
-        "reason": decision.get("reason", ""),
-        "signal_id": decision.get("signal_id", ""),
-    }
-
-    if normalized["status"] == "PROPOSE_TRADE":
-        required_ok = all([
-            normalized["side"] in {"BUY", "SELL"},
-            isinstance(normalized["entry_price"], (int, float)) and normalized["entry_price"] > 0,
-            isinstance(normalized["stop_loss"], (int, float)) and normalized["stop_loss"] > 0,
-            isinstance(normalized["take_profit"], (int, float)) and normalized["take_profit"] > 0,
-            isinstance(normalized["risk_reward_ratio"], (int, float)) and normalized["risk_reward_ratio"] >= rr_min,
-            isinstance(normalized["invalidation"], str) and normalized["invalidation"].strip() != "",
-            isinstance(normalized["regime_label"], str) and normalized["regime_label"].strip() != "",
-            isinstance(normalized["reason"], str) and normalized["reason"].strip() != "",
+    if n["status"] == "PROPOSE_TRADE":
+        ok = all([
+            n["side"] in {"BUY", "SELL"}, n["entry_price"] > 0, n["stop_loss"] > 0, n["take_profit"] > 0,
+            n["risk_reward_ratio"] >= rr_min, n["invalidation"], n["regime_label"], n["reason"],
         ])
-        if not required_ok:
-            normalized.update({
-                "status": "WAIT",
-                "reason": "Clawbot did not provide full executable trade fields; keeping WAIT.",
-                "side": "",
-                "entry_price": 0,
-                "stop_loss": 0,
-                "take_profit": 0,
-                "risk_reward_ratio": 0,
-                "invalidation": "",
-            })
-
-    return normalized
+        if not ok:
+            n.update({"status": "WAIT", "side": "", "entry_price": 0, "stop_loss": 0, "take_profit": 0, "risk_reward_ratio": 0, "invalidation": "", "reason": "Missing executable trade fields."})
+    return n
 
 
-def construct_trade_from_structure(candles: list[dict[str, Any]], rr_min: float, aggressive: bool, timeframe: str) -> dict[str, Any]:
-    if len(candles) < 8:
-        return normalize_decision({"status": "WAIT", "regime_label": "insufficient_structure", "reason": "Not enough candles for setup construction."}, rr_min)
-
-    last = candles[-1]
-    prev = candles[-2]
-    conf = 1 if aggressive else 2
+def fallback_construct(candles, rr_min, aggressive, timeframe):
+    last, prev = candles[-1], candles[-2]
     highs5 = [c["high"] for c in candles[-5:]]
     lows5 = [c["low"] for c in candles[-5:]]
-    highs6 = [c["high"] for c in candles[-6:]]
-    lows6 = [c["low"] for c in candles[-6:]]
+    conf = 1 if aggressive else 2
 
     if last["close"] < TRIGGER_LOWER and (conf == 1 or prev["close"] < TRIGGER_LOWER):
-        entry = round(min(last["low"], prev["low"]) - 1.0, 1)
-        stop = round(max(highs5) + 1.0, 1)
-        risk = stop - entry
-        tp = round(entry - (2.0 * risk), 1)
-        rr = round((entry - tp) / risk, 2) if risk > 0 else 0
-        if risk > 0 and rr >= rr_min:
-            return normalize_decision({
-                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": entry,
-                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
-                "invalidation": f"{timeframe} close above {TRIGGER_LOWER}",
-                "regime_label": "bearish_breakdown_continuation",
-                "reason": "Two consecutive closes below breakdown trigger with continuation structure.",
-            }, rr_min)
+        e = round(min(last["low"], prev["low"]) - 1, 1); st = round(max(highs5) + 1, 1); r = st - e; tp = round(e - 2 * r, 1); rr = round((e - tp) / r, 2) if r > 0 else 0
+        if rr >= rr_min: return normalize_decision({"status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp, "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {TRIGGER_LOWER}", "regime_label": "bearish_breakdown_continuation", "reason": "Breakdown continuation."}, rr_min)
 
-    recent_low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
-    if recent_low_below and last["close"] > TRIGGER_LOWER and (conf == 1 or prev["close"] > TRIGGER_LOWER):
-        entry = round(max(highs5) + 1.0, 1)
-        stop = round(min(lows5) - 1.0, 1)
-        risk = entry - stop
-        tp = round(entry + (2.0 * risk), 1)
-        rr = round((tp - entry) / risk, 2) if risk > 0 else 0
-        if risk > 0 and rr >= rr_min:
-            return normalize_decision({
-                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": entry,
-                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
-                "invalidation": f"{timeframe} close back below {TRIGGER_LOWER}",
-                "regime_label": "bullish_reclaim_recovery",
-                "reason": "Reclaim above breakdown level with follow-through closes.",
-            }, rr_min)
+    low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
+    if low_below and last["close"] > TRIGGER_LOWER and (conf == 1 or prev["close"] > TRIGGER_LOWER):
+        e = round(max(highs5) + 1, 1); st = round(min(lows5) - 1, 1); r = e - st; tp = round(e + 2 * r, 1); rr = round((tp - e) / r, 2) if r > 0 else 0
+        if rr >= rr_min: return normalize_decision({"status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp, "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {TRIGGER_LOWER}", "regime_label": "bullish_reclaim_recovery", "reason": "Reclaim recovery."}, rr_min)
 
-    if prev["high"] >= TRIGGER_UPPER * 0.997 and last["close"] < prev["close"]:
-        entry = round(last["low"] - 1.0, 1)
-        stop = round(max(highs5) + 1.0, 1)
-        risk = stop - entry
-        tp = round(entry - (1.8 * risk), 1)
-        rr = round((entry - tp) / risk, 2) if risk > 0 else 0
-        if risk > 0 and rr >= rr_min:
-            return normalize_decision({
-                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": entry,
-                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
-                "invalidation": f"{timeframe} close above {TRIGGER_UPPER}",
-                "regime_label": "rebound_into_resistance",
-                "reason": "Rejection after rebound toward resistance zone.",
-            }, rr_min)
-
-    rng = max(highs6) - min(lows6)
-    if last["close"] > max(highs6[:-1]) and rng / max(last["close"], 1) < 0.006:
-        entry = round(max(highs6) + 1.0, 1)
-        stop = round(min(lows6) - 1.0, 1)
-        risk = entry - stop
-        tp = round(entry + (1.8 * risk), 1)
-        rr = round((tp - entry) / risk, 2) if risk > 0 else 0
-        if risk > 0 and rr >= rr_min:
-            return normalize_decision({
-                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": entry,
-                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
-                "invalidation": f"{timeframe} close below {round(min(lows6),1)}",
-                "regime_label": "consolidation_breakout",
-                "reason": "Compression followed by upside breakout trigger.",
-            }, rr_min)
-
-    return normalize_decision({
-        "status": "WAIT",
-        "regime_label": "structure_no_executable_plan",
-        "reason": "Structure detected but executable trade levels could not be derived with required R:R.",
-    }, rr_min)
+    return normalize_decision({"status": "WAIT", "regime_label": "structure_no_executable_plan", "reason": "No executable setup."}, rr_min)
 
 
-async def call_clawbot(scan_payload: dict[str, Any], timeframe: str, rr_min: float) -> dict[str, Any]:
+async def call_clawbot(scan_payload: dict[str, Any], timeframe: str, rr_min: float):
     prompt = (
-        f"Analyze this BTC/USD {timeframe} Kraken spot paper-trading payload and return JSON only in this exact shape: "
+        f"Analyze BTC/USD {timeframe} payload and return JSON only: "
         "{\"status\":\"PROPOSE_TRADE|WAIT|REJECT|INSUFFICIENT_DATA\",\"side\":\"BUY|SELL|\",\"entry_price\":0,\"stop_loss\":0,\"take_profit\":0,\"risk_reward_ratio\":0,\"invalidation\":\"\",\"regime_label\":\"\",\"reason\":\"\"}. "
-        f"PROPOSE_TRADE is allowed only when all executable fields are present and risk_reward_ratio >= {rr_min}. "
-        "If structure exists but executable fields cannot be derived, return WAIT. "
-        "Paper mode only. No live trading. No execution. Do not invent missing values. Payload:\n"
+        f"PROPOSE_TRADE requires all fields and rr >= {rr_min}. Paper only.\n"
         + json.dumps(scan_payload, separators=(",", ":"))
     )
-
-    proc = await asyncio.create_subprocess_exec(
-        "openclaw", "agent", "--agent", "samy", "--local", "--json", "--message", prompt,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    proc = await asyncio.create_subprocess_exec("openclaw", "agent", "--agent", "samy", "--local", "--json", "--message", prompt, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     out, _ = await proc.communicate()
     if proc.returncode != 0:
-        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "scan_error", "reason": "Failed to reach Clawbot scan path via Samy."}, rr_min)
-
+        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "scan_error", "reason": "Scan call failed."}, rr_min)
     try:
-        wrapper = json.loads(out.decode("utf-8"))
-        text = (wrapper.get("payloads") or [{}])[0].get("text", "{}")
-        decision = json.loads(text)
+        txt = (json.loads(out.decode()).get("payloads") or [{}])[0].get("text", "{}")
+        d = json.loads(txt)
     except Exception:
-        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "parse_error", "reason": "Clawbot response parse failed."}, rr_min)
-
-    return normalize_decision(decision, rr_min)
-
-
-def compute_unrealized(position: dict[str, Any], bid: float, ask: float) -> float:
-    qty = position["qty"]
-    entry = position["entry_fill_price"]
-    if position["side"] == "BUY":
-        return round2((bid - entry) * qty)
-    return round2((entry - ask) * qty)
+        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "parse_error", "reason": "Parse failed."}, rr_min)
+    return normalize_decision(d, rr_min)
 
 
-def maybe_close_position(position: dict[str, Any], candle: dict[str, Any], bid: float, ask: float, slip_pct: float):
-    side = position["side"]
-    hit = None
-    close_price = None
+def compute_unrealized(p, bid, ask):
+    return round2((bid - p["entry_fill_price"]) * p["qty"] if p["side"] == "BUY" else (p["entry_fill_price"] - ask) * p["qty"])
 
+
+def maybe_close(p, candle, slip):
+    side = p["side"]
     if side == "BUY":
-        if candle["low"] <= position["stop_loss"]:
-            hit = "STOP_LOSS"
-            close_price = position["stop_loss"] * (1 - slip_pct / 100)
-        elif candle["high"] >= position["take_profit"]:
-            hit = "TAKE_PROFIT"
-            close_price = position["take_profit"] * (1 - slip_pct / 100)
-    else:
-        if candle["high"] >= position["stop_loss"]:
-            hit = "STOP_LOSS"
-            close_price = position["stop_loss"] * (1 + slip_pct / 100)
-        elif candle["low"] <= position["take_profit"]:
-            hit = "TAKE_PROFIT"
-            close_price = position["take_profit"] * (1 + slip_pct / 100)
-
-    if not hit:
-        return None
-
-    close_fill = round2(close_price)
-    qty = position["qty"]
-    if side == "BUY":
-        realized = round2((close_fill - position["entry_fill_price"]) * qty)
-    else:
-        realized = round2((position["entry_fill_price"] - close_fill) * qty)
-
-    closed = {
-        **position,
-        "status": "PAPER_TRADE_CLOSED",
-        "close_reason": hit,
-        "close_fill_price": close_fill,
-        "realized_pnl": realized,
-        "close_time": now_iso(),
-        "unrealized_pnl": 0,
-    }
-    return closed
-
-
-def auto_execute_proposed_trade(latest: dict[str, Any]):
-    decision = latest.get("latest_decision", {})
-    if decision.get("status") != "PROPOSE_TRADE":
-        return latest
-
-    signal_id = decision.get("signal_id")
-    if not signal_id:
-        return latest
-    if signal_id in store["executed_signal_ids"]:
-        return latest
-    # Single open BTC/USD position across modes unless explicitly enabled later
-    if store["open_positions"]:
-        return latest
-
-    md = latest["market_data"][0]
-    bid, ask = md["bid"], md["ask"]
-    slip = md.get("slippage_assumption_pct", 0.01)
-
-    qty = 1.0
-    if decision["side"] == "BUY":
-        entry_fill = round2(ask * (1 + slip / 100))
-    else:
-        entry_fill = round2(bid * (1 - slip / 100))
-
-    position = {
-        "signal_id": signal_id,
-        "mode": latest.get("mode"),
-        "symbol": "BTC/USD",
-        "timeframe": latest.get("timeframe", "15m"),
-        "side": decision["side"],
-        "qty": qty,
-        "entry_fill_price": entry_fill,
-        "stop_loss": decision["stop_loss"],
-        "take_profit": decision["take_profit"],
-        "invalidation": decision["invalidation"],
-        "regime_label": decision["regime_label"],
-        "reason": decision["reason"],
-        "risk_reward_ratio": decision["risk_reward_ratio"],
-        "open_time": now_iso(),
-        "close_time": None,
-        "status": "PAPER_TRADE_OPEN",
-        "unrealized_pnl": 0,
-        "realized_pnl": 0,
-    }
-
-    store["pending_orders"].append({
-        "timestamp": now_iso(),
-        "signal_id": signal_id,
-        "status": "QUEUED_TO_PAPER_EXECUTOR",
-        "decision": decision,
-        "mode": latest.get("mode"),
-    })
-    store["open_positions"].append(position)
-    store["executed_signal_ids"].add(signal_id)
-    store["paper_execution_log"].append({
-        "timestamp": now_iso(),
-        "action": "AUTO_EXECUTED_PAPER",
-        "executor": "samy_paper_executor",
-        "execution_status": "opened_paper_position",
-        "decision": decision,
-        "mode": latest.get("mode"),
-        "entry_fill_price": entry_fill,
-    })
-    store["history"].append({
-        "timestamp": now_iso(),
-        "decision_time": latest.get("latest_decision_time"),
-        "status": "PAPER_TRADE_OPEN",
-        "mode": latest.get("mode"),
-        "side": position["side"],
-        "entry_price": position["entry_fill_price"],
-        "stop_loss": position["stop_loss"],
-        "take_profit": position["take_profit"],
-        "regime_label": position["regime_label"],
-        "reason": "Auto-handled from PROPOSE_TRADE to paper executor open.",
-        "risk_reward_ratio": position["risk_reward_ratio"],
-        "invalidation": position["invalidation"],
-    })
-
-    latest["latest_decision"] = {
-        **decision,
-        "status": "PAPER_TRADE_OPEN",
-        "reason": "Auto-executed in paper mode via paper executor flow.",
-    }
-    latest["latest_decision_time"] = now_iso()
-    store["notify_user"] = {
-        "timestamp": now_iso(),
-        "message": "PAPER_TRADE_OPEN",
-        "decision": latest["latest_decision"],
-    }
-    latest["notify_user"] = store["notify_user"]
-    return latest
-
-
-def update_positions_with_latest_candle(latest: dict[str, Any], mode: str):
-    md = latest["market_data"][0]
-    candle = md["ohlcv"][-1]
-    bid, ask = md["bid"], md["ask"]
-    slip = md.get("slippage_assumption_pct", 0.01)
-
-    still_open = []
-    for pos in store["open_positions"]:
-        if pos.get("mode") != mode:
-            still_open.append(pos)
-            continue
-        closed = maybe_close_position(pos, candle, bid, ask, slip)
-        if closed:
-            store["closed_trades"].append(closed)
-            store["paper_execution_log"].append({
-                "timestamp": now_iso(),
-                "action": "PAPER_TRADE_CLOSED",
-                "signal_id": pos["signal_id"],
-                "close_reason": closed["close_reason"],
-                "realized_pnl": closed["realized_pnl"],
-            })
-            store["history"].append({
-                "timestamp": now_iso(),
-                "decision_time": latest.get("latest_decision_time"),
-                "status": "PAPER_TRADE_CLOSED",
-                "mode": closed.get("mode"),
-                "side": closed["side"],
-                "entry_price": closed["entry_fill_price"],
-                "stop_loss": closed["stop_loss"],
-                "take_profit": closed["take_profit"],
-                "regime_label": closed["regime_label"],
-                "reason": f"Closed by {closed['close_reason']}",
-                "risk_reward_ratio": closed["risk_reward_ratio"],
-                "invalidation": closed["invalidation"],
-            })
-            latest["latest_decision"] = {
-                "status": "PAPER_TRADE_CLOSED",
-                "mode": closed.get("mode"),
-                "side": closed["side"],
-                "entry_price": closed["entry_fill_price"],
-                "stop_loss": closed["stop_loss"],
-                "take_profit": closed["take_profit"],
-                "risk_reward_ratio": closed["risk_reward_ratio"],
-                "invalidation": closed["invalidation"],
-                "regime_label": closed["regime_label"],
-                "reason": f"Closed by {closed['close_reason']} with realized PnL {closed['realized_pnl']}",
-                "signal_id": closed["signal_id"],
-            }
-            latest["latest_decision_time"] = now_iso()
-            store["notify_user"] = {
-                "timestamp": now_iso(),
-                "message": "PAPER_TRADE_CLOSED",
-                "decision": latest["latest_decision"],
-            }
-            latest["notify_user"] = store["notify_user"]
+        if candle["low"] <= p["stop_loss"]:
+            price = p["stop_loss"] * (1 - slip / 100); reason = "STOP_LOSS"
+        elif candle["high"] >= p["take_profit"]:
+            price = p["take_profit"] * (1 - slip / 100); reason = "TAKE_PROFIT"
         else:
-            pos["unrealized_pnl"] = compute_unrealized(pos, bid, ask)
-            still_open.append(pos)
-
-    store["open_positions"] = still_open
-    latest["open_positions"] = [p for p in store["open_positions"] if p.get("mode") == mode]
-    latest["closed_trades"] = [t for t in store["closed_trades"] if t.get("mode") == mode][-25:]
-    latest["pending_orders"] = [o for o in store["pending_orders"] if o.get("mode") == mode][-25:]
-    latest["current_pnl"] = {
-        "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in store["open_positions"] if p.get("mode") == mode)),
-        "realized": round2(sum(t.get("realized_pnl", 0) for t in store["closed_trades"] if t.get("mode") == mode)),
-    }
-    latest["mode_stats"] = compute_mode_stats(mode)
-    return latest
+            return None
+        realized = round2((price - p["entry_fill_price"]) * p["qty"])
+    else:
+        if candle["high"] >= p["stop_loss"]:
+            price = p["stop_loss"] * (1 + slip / 100); reason = "STOP_LOSS"
+        elif candle["low"] <= p["take_profit"]:
+            price = p["take_profit"] * (1 + slip / 100); reason = "TAKE_PROFIT"
+        else:
+            return None
+        realized = round2((p["entry_fill_price"] - price) * p["qty"])
+    return {**p, "status": "PAPER_TRADE_CLOSED", "close_reason": reason, "close_fill_price": round2(price), "realized_pnl": realized, "unrealized_pnl": 0, "close_time": now_iso()}
 
 
-def compute_mode_stats(mode: str) -> dict[str, Any]:
-    closed = [t for t in store["closed_trades"] if t.get("mode") == mode]
-    openp = [p for p in store["open_positions"] if p.get("mode") == mode]
-    wins = [t["realized_pnl"] for t in closed if t.get("realized_pnl", 0) > 0]
-    losses = [t["realized_pnl"] for t in closed if t.get("realized_pnl", 0) < 0]
-    realized = round2(sum(t.get("realized_pnl", 0) for t in closed))
-    unrealized = round2(sum(p.get("unrealized_pnl", 0) for p in openp))
-    equity = [0]
-    running = 0.0
+def mode_stats(bucket):
+    closed, openp = bucket["closed_trades"], bucket["open_positions"]
+    wins = [x["realized_pnl"] for x in closed if x["realized_pnl"] > 0]
+    losses = [x["realized_pnl"] for x in closed if x["realized_pnl"] < 0]
+    realized = round2(sum(x["realized_pnl"] for x in closed))
+    unrealized = round2(sum(x.get("unrealized_pnl", 0) for x in openp))
+    eq, run = [0], 0
     for t in closed:
-        running += t.get("realized_pnl", 0)
-        equity.append(running)
-    peak = equity[0]
-    max_dd = 0.0
-    for e in equity:
-        peak = max(peak, e)
-        max_dd = min(max_dd, e - peak)
-    by_regime = {}
+        run += t["realized_pnl"]; eq.append(run)
+    peak, mdd = 0, 0
+    for e in eq:
+        peak = max(peak, e); mdd = min(mdd, e - peak)
+    by = {}
     for t in closed:
         rg = t.get("regime_label", "unknown")
-        by_regime.setdefault(rg, {"count": 0, "pnl": 0.0})
-        by_regime[rg]["count"] += 1
-        by_regime[rg]["pnl"] = round2(by_regime[rg]["pnl"] + t.get("realized_pnl", 0))
-    total_closed = len(closed)
+        by.setdefault(rg, {"count": 0, "pnl": 0.0}); by[rg]["count"] += 1; by[rg]["pnl"] = round2(by[rg]["pnl"] + t["realized_pnl"])
     return {
-        "total_opened": len([h for h in store["history"] if h.get("mode") == mode and h.get("status") == "PAPER_TRADE_OPEN"]),
-        "total_closed": total_closed,
-        "win_rate": round2((len(wins) / total_closed * 100) if total_closed else 0),
+        "total_opened": len([h for h in bucket["history"] if h.get("status") == "PAPER_TRADE_OPEN"]),
+        "total_closed": len(closed),
+        "win_rate": round2((len(wins) / len(closed) * 100) if closed else 0),
         "average_win": round2(sum(wins) / len(wins)) if wins else 0,
         "average_loss": round2(sum(losses) / len(losses)) if losses else 0,
         "realized_pnl": realized,
         "unrealized_pnl": unrealized,
-        "max_drawdown": round2(max_dd),
-        "performance_by_regime": by_regime,
+        "max_drawdown": round2(mdd),
+        "performance_by_regime": by,
     }
 
 
-async def build_state(mode: str | None = None):
-    mode = mode or store["active_mode"]
-    cfg = MODE_CONFIGS.get(mode, MODE_CONFIGS["btc_15m_conservative"])
+async def execute_mode_scan(mode: str):
+    cfg = MODE_CONFIGS[mode]
+    bucket = store["modes"][mode]
     timeframe = f"{cfg['interval']}m"
     candles, bid, ask, spread, spread_pct = await fetch_market(cfg["interval"])
-    scan_payload = build_scan_payload(candles, bid, ask, spread, spread_pct, timeframe)
-    decision = await call_clawbot(scan_payload, timeframe, cfg["rr_min"])
-    if decision.get("status") == "WAIT":
-        fallback = construct_trade_from_structure(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
-        if fallback.get("status") == "PROPOSE_TRADE":
-            decision = fallback
-    decision_time = now_iso()
-    if not decision.get("signal_id"):
-        decision["signal_id"] = f"{mode}|{scan_payload['timestamp']}|{candles[-1]['time']}"
-
-    if decision["status"] == "PROPOSE_TRADE":
-        store["notify_user"] = {
-            "timestamp": decision_time,
-            "message": "PROPOSE_TRADE returned. Auto paper-execution flow will process.",
-            "decision": decision,
-        "mode": latest.get("mode"),
-        }
-
     payload = {
-        **scan_payload,
+        "timestamp": now_iso(),
+        "market_data": [{"symbol": "BTC/USD", "timeframe": timeframe, "ohlcv": candles, "bid": bid, "ask": ask, "spread": spread, "spread_pct": spread_pct, "slippage_assumption_pct": 0.01}],
+        "account_state": {"account_equity": 10000, "cash_available": 10000, "open_positions": [], "active_orders": []},
+        "risk_state": {"max_risk_per_trade_pct": 1.0, "max_total_open_risk_pct": 2.0, "max_capital_allocation_pct": 10.0, "stacking_allowed": False},
+        "executor_state": {"confirmation_source": "samy_paper_executor", "fills_are_executor_confirmed_only": True, "paper_mode": True},
+    }
+    d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+    if d["status"] == "WAIT":
+        fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
+        if fb["status"] == "PROPOSE_TRADE": d = fb
+    d["signal_id"] = d.get("signal_id") or f"{mode}|{payload['timestamp']}|{candles[-1]['time']}"
+
+    # auto execution per-mode lock only
+    if d["status"] == "PROPOSE_TRADE":
+        bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PROPOSE_TRADE", "decision": d}
+        if d["signal_id"] not in bucket["executed_signal_ids"] and len(bucket["open_positions"]) == 0:
+            slip = payload["market_data"][0]["slippage_assumption_pct"]
+            fill = round2((ask * (1 + slip / 100)) if d["side"] == "BUY" else (bid * (1 - slip / 100)))
+            pos = {
+                "mode": mode, "signal_id": d["signal_id"], "symbol": "BTC/USD", "timeframe": timeframe, "side": d["side"], "qty": 1.0,
+                "entry_fill_price": fill, "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
+                "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
+                "status": "PAPER_TRADE_OPEN", "unrealized_pnl": 0, "realized_pnl": 0,
+            }
+            bucket["pending_orders"].append({"timestamp": now_iso(), "mode": mode, "signal_id": d["signal_id"], "status": "QUEUED_TO_PAPER_EXECUTOR", "decision": d})
+            bucket["open_positions"].append(pos)
+            bucket["executed_signal_ids"].add(d["signal_id"])
+            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "AUTO_EXECUTED_PAPER", "execution_status": "opened_paper_position", "decision": d, "entry_fill_price": fill})
+            bucket["history"].append({"timestamp": now_iso(), "decision_time": now_iso(), "mode": mode, "status": "PAPER_TRADE_OPEN", "side": pos["side"], "entry_price": fill, "stop_loss": pos["stop_loss"], "take_profit": pos["take_profit"], "regime_label": pos["regime_label"], "reason": "Auto paper open", "risk_reward_ratio": pos["risk_reward_ratio"], "invalidation": pos["invalidation"], "signal_id": pos["signal_id"]})
+            d = {**d, "status": "PAPER_TRADE_OPEN", "reason": "Auto-executed in paper mode."}
+            bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_OPEN", "decision": d}
+
+    # close checks
+    candle = candles[-1]
+    still = []
+    for p in bucket["open_positions"]:
+        c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"])
+        if c:
+            bucket["closed_trades"].append(c)
+            bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "realized_pnl": c["realized_pnl"]})
+            bucket["history"].append({"timestamp": now_iso(), "decision_time": now_iso(), "mode": mode, "status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']}", "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "signal_id": c["signal_id"]})
+            d = {"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']} with realized PnL {c['realized_pnl']}", "signal_id": c["signal_id"]}
+            bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_CLOSED", "decision": d}
+        else:
+            p["unrealized_pnl"] = compute_unrealized(p, bid, ask)
+            still.append(p)
+    bucket["open_positions"] = still
+
+    latest = {
+        **payload,
         "mode": mode,
         "mode_label": cfg["label"],
         "timeframe": timeframe,
         "latest_market_data_time": candles[-1]["time"],
-        "latest_scan_time": scan_payload["timestamp"],
-        "latest_decision_time": decision_time,
-        "latest_decision": decision,
+        "latest_scan_time": payload["timestamp"],
+        "latest_decision_time": now_iso(),
+        "latest_decision": d,
         "triggers": {"upper": TRIGGER_UPPER, "lower": TRIGGER_LOWER},
         "paper_mode": True,
-        "notify_user": store.get("notify_user"),
-        "paper_execution_log": store["paper_execution_log"][-10:],
-        "pending_orders": store["pending_orders"][-25:],
-        "open_positions": store["open_positions"],
-        "closed_trades": store["closed_trades"][-25:],
-        "current_pnl": {
-            "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in store["open_positions"] if p.get("mode") == mode)),
-            "realized": round2(sum(t.get("realized_pnl", 0) for t in store["closed_trades"] if t.get("mode") == mode)),
-        },
-        "mode_stats": compute_mode_stats(mode),
+        "notify_user": bucket["notify_user"],
+        "pending_orders": bucket["pending_orders"][-25:],
+        "open_positions": bucket["open_positions"],
+        "closed_trades": bucket["closed_trades"][-25:],
+        "paper_execution_log": bucket["paper_execution_log"][-10:],
+        "current_pnl": {"realized": round2(sum(t.get("realized_pnl", 0) for t in bucket["closed_trades"])), "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in bucket["open_positions"]))},
+        "mode_stats": mode_stats(bucket),
     }
-
-    payload = auto_execute_proposed_trade(payload)
-    payload = update_positions_with_latest_candle(payload, mode)
-    return payload
-
-
-async def execute_scan_store(mode: str | None = None):
-    mode = mode or store["active_mode"]
-    s = await build_state(mode)
-    store["latest"] = s
-    store["last_candle_time"] = s["latest_market_data_time"]
-    store["history"].append(
-        {
-            "timestamp": s["timestamp"],
-            "decision_time": s["latest_decision_time"],
-            "status": s["latest_decision"]["status"],
-            "side": s["latest_decision"].get("side", ""),
-            "entry_price": s["latest_decision"].get("entry_price", 0),
-            "stop_loss": s["latest_decision"].get("stop_loss", 0),
-            "take_profit": s["latest_decision"].get("take_profit", 0),
-            "regime_label": s["latest_decision"].get("regime_label", ""),
-            "reason": s["latest_decision"].get("reason", ""),
-            "risk_reward_ratio": s["latest_decision"].get("risk_reward_ratio", 0),
-            "invalidation": s["latest_decision"].get("invalidation", ""),
-            "signal_id": s["latest_decision"].get("signal_id", ""),
-            "mode": s.get("mode"),
-        }
-    )
-    return s
+    bucket["latest"] = latest
+    bucket["last_candle_time"] = candles[-1]["time"]
+    bucket["history"].append({"timestamp": latest["latest_scan_time"], "decision_time": latest["latest_decision_time"], "mode": mode, "status": latest["latest_decision"].get("status"), "side": latest["latest_decision"].get("side", ""), "entry_price": latest["latest_decision"].get("entry_price", 0), "stop_loss": latest["latest_decision"].get("stop_loss", 0), "take_profit": latest["latest_decision"].get("take_profit", 0), "regime_label": latest["latest_decision"].get("regime_label", ""), "reason": latest["latest_decision"].get("reason", ""), "risk_reward_ratio": latest["latest_decision"].get("risk_reward_ratio", 0), "invalidation": latest["latest_decision"].get("invalidation", ""), "signal_id": latest["latest_decision"].get("signal_id", "")})
+    return latest
 
 
 @app.get("/api/state")
 async def get_state():
-    if not store["latest"]:
-        await execute_scan_store(store["active_mode"])
-    return {
-        **store["latest"],
-        "auto_scan": store["auto_scan"],
-        "active_mode": store["active_mode"],
-        "available_modes": MODE_CONFIGS,
-    }
+    for m in MODE_CONFIGS.keys():
+        if store["modes"][m]["latest"] is None:
+            await execute_mode_scan(m)
+    return {"auto_scan": store["auto_scan"], "paper_mode": True, "modes": {m: store["modes"][m]["latest"] for m in MODE_CONFIGS.keys()}, "available_modes": MODE_CONFIGS}
 
 
 @app.get("/api/history")
-async def get_history():
-    mode = store["active_mode"]
-    return {"history": [h for h in store["history"] if h.get("mode") == mode][-100:]}
+async def get_history(mode: str | None = None):
+    if mode and mode in store["modes"]:
+        return {"history": store["modes"][mode]["history"][-100:]}
+    return {"history": {m: store["modes"][m]["history"][-100:] for m in MODE_CONFIGS.keys()}}
 
 
 @app.post("/api/run-scan")
-async def run_scan():
-    return await execute_scan_store(store["active_mode"])
+async def run_scan(mode: str | None = None):
+    if mode and mode in MODE_CONFIGS:
+        return {"mode": mode, "state": await execute_mode_scan(mode)}
+    return {"modes": {m: await execute_mode_scan(m) for m in MODE_CONFIGS.keys()}}
 
 
 @app.post("/api/auto-scan")
@@ -623,59 +289,27 @@ async def toggle_auto_scan():
     return {"auto_scan": store["auto_scan"]}
 
 
-@app.post("/api/mode/{mode}")
-async def set_mode(mode: str):
-    if mode not in MODE_CONFIGS:
-        return {"ok": False, "message": "Unknown mode", "active_mode": store["active_mode"]}
-    store["active_mode"] = mode
-    # Force immediate mode-refresh state so frontend sees switch instantly
-    latest = await execute_scan_store(mode)
-    return {
-        "ok": True,
-        "active_mode": mode,
-        "label": MODE_CONFIGS[mode]["label"],
-        "timeframe": latest.get("timeframe"),
-        "aggressive_profile_active": MODE_CONFIGS[mode]["aggressive"],
-        "state": {
-            **latest,
-            "active_mode": store["active_mode"],
-            "available_modes": MODE_CONFIGS,
-            "auto_scan": store["auto_scan"],
-        },
-    }
-
-
-@app.post("/api/ack-notify")
-async def ack_notify():
-    store["notify_user"] = None
-    if store.get("latest"):
-        store["latest"]["notify_user"] = None
+@app.post("/api/ack-notify/{mode}")
+async def ack_notify(mode: str):
+    if mode in store["modes"]:
+        store["modes"][mode]["notify_user"] = None
+        if store["modes"][mode]["latest"]:
+            store["modes"][mode]["latest"]["notify_user"] = None
     return {"ok": True}
-
-
-@app.post("/api/proposal/approve")
-async def approve_proposal():
-    return {"ok": False, "message": "Manual approve disabled: auto paper execution flow is enabled."}
-
-
-@app.post("/api/proposal/reject")
-async def reject_proposal():
-    return {"ok": False, "message": "Manual reject disabled: auto paper execution flow is enabled."}
 
 
 @app.on_event("startup")
 async def start_auto_scanner():
-    async def scanner_loop():
+    async def loop():
         while True:
             try:
                 if store["auto_scan"]:
-                    cfg = MODE_CONFIGS.get(store["active_mode"], MODE_CONFIGS["btc_15m_conservative"])
-                    candles, _, _, _, _ = await fetch_market(cfg["interval"])
-                    latest_candle_time = candles[-1]["time"]
-                    if store["last_candle_time"] != latest_candle_time:
-                        await execute_scan_store(store["active_mode"])
+                    for m, cfg in MODE_CONFIGS.items():
+                        candles, *_ = await fetch_market(cfg["interval"])
+                        ct = candles[-1]["time"]
+                        if store["modes"][m]["last_candle_time"] != ct:
+                            await execute_mode_scan(m)
             except Exception:
                 pass
-            await asyncio.sleep(30)
-
-    asyncio.create_task(scanner_loop())
+            await asyncio.sleep(20)
+    asyncio.create_task(loop())
