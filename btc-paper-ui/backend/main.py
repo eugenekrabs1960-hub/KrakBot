@@ -293,6 +293,10 @@ def mode_stats(bucket):
     gross_realized = round2(sum(x.get("gross_realized_pnl", x["realized_pnl"]) for x in closed))
     unrealized = round2(sum(x.get("unrealized_pnl", 0) for x in openp))
     gross_unrealized = round2(sum(x.get("gross_unrealized_pnl", x.get("unrealized_pnl", 0)) for x in openp))
+    total_fees = round2(sum(x.get("total_fees", x.get("entry_fee", 0.0)) for x in closed) + sum(x.get("entry_fee", 0.0) for x in openp))
+    gross_total_pnl = round2(gross_realized + gross_unrealized)
+    net_total_pnl = round2(realized + unrealized)
+    fee_drag_pct_of_gross = round2((total_fees / abs(gross_total_pnl) * 100) if gross_total_pnl != 0 else 0)
     eq, run = [0], 0
     for t in closed:
         run += t["realized_pnl"]; eq.append(run)
@@ -313,6 +317,10 @@ def mode_stats(bucket):
         "gross_realized_pnl": gross_realized,
         "unrealized_pnl": unrealized,
         "gross_unrealized_pnl": gross_unrealized,
+        "net_total_pnl": net_total_pnl,
+        "gross_total_pnl": gross_total_pnl,
+        "total_fees": total_fees,
+        "fee_drag_pct_of_gross_pnl": fee_drag_pct_of_gross,
         "fee_model": PAPER_FEE_MODEL,
         "fee_pct": PAPER_FEE_PCT,
         "max_drawdown": round2(mdd),
@@ -404,6 +412,7 @@ async def execute_mode_scan(mode: str):
             still.append(p)
     bucket["open_positions"] = still
 
+    stats = mode_stats(bucket)
     latest = {
         **payload,
         "mode": mode,
@@ -425,10 +434,12 @@ async def execute_mode_scan(mode: str):
             "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in bucket["open_positions"])),
             "gross_realized": round2(sum(t.get("gross_realized_pnl", t.get("realized_pnl", 0)) for t in bucket["closed_trades"])),
             "gross_unrealized": round2(sum(p.get("gross_unrealized_pnl", p.get("unrealized_pnl", 0)) for p in bucket["open_positions"])),
+            "total_fees": round2(sum(t.get("total_fees", t.get("entry_fee", 0.0)) for t in bucket["closed_trades"]) + sum(p.get("entry_fee", 0.0) for p in bucket["open_positions"])),
+            "fee_drag_pct_of_gross_pnl": stats["fee_drag_pct_of_gross_pnl"],
             "fee_model": PAPER_FEE_MODEL,
             "fee_pct": PAPER_FEE_PCT,
         },
-        "mode_stats": mode_stats(bucket),
+        "mode_stats": stats,
     }
     bucket["latest"] = latest
     bucket["last_candle_time"] = candles[-1]["time"]
