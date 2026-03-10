@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     enabled_markets: str = "SOL/USD"
     instrument_type: str = "spot"
 
+    # Live paper test mode (safe defaults: off)
+    live_paper_test_mode_enabled: bool = False
+    live_paper_test_market: str = "SOL/USD"
+    live_paper_test_loop_interval_sec: float = 5.0
+    live_paper_test_order_qty: float = 0.05
+    live_paper_test_max_orders_per_minute: int = 6
+    live_paper_test_min_seconds_between_orders: float = 5.0
+    live_paper_test_force_paper_only: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
