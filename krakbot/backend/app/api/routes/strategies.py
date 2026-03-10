@@ -57,6 +57,25 @@ def list_strategies(db: Session = Depends(get_db)):
     return [dict(r) for r in rows]
 
 
+@router.get('/summary')
+def strategy_summary(db: Session = Depends(get_db)):
+    row = db.execute(
+        text(
+            """
+            SELECT
+              COUNT(*)::int AS total_strategies,
+              COUNT(*) FILTER (WHERE si.enabled = TRUE)::int AS enabled_strategies,
+              COALESCE(SUM(pp.equity_usd), 0)::double precision AS aggregate_equity_usd,
+              COALESCE(SUM(pp.starting_equity_usd), 0)::double precision AS aggregate_starting_equity_usd,
+              (COALESCE(SUM(pp.equity_usd), 0) - COALESCE(SUM(pp.starting_equity_usd), 0))::double precision AS aggregate_pnl_usd
+            FROM strategy_instances si
+            LEFT JOIN paper_portfolios pp ON pp.strategy_instance_id = si.id
+            """
+        )
+    ).mappings().first()
+    return {'item': dict(row) if row else None}
+
+
 @router.get('/{strategy_instance_id}')
 def strategy_detail(strategy_instance_id: str, db: Session = Depends(get_db)):
     row = db.execute(

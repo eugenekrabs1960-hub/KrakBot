@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     live_paper_test_max_orders_per_minute: int = 6
     live_paper_test_min_seconds_between_orders: float = 5.0
     live_paper_test_force_paper_only: bool = True
+    live_paper_test_max_active_strategies: int = 3
 
     # Wallet Intelligence Benchmark (WIB) phase-2 settings
     wallet_intel_helius_api_key: str = ""

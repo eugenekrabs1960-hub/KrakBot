@@ -42,6 +42,11 @@ export async function getStrategyDetail(strategyInstanceId: string) {
   return parseJsonOrThrow(res);
 }
 
+export async function getStrategySummary() {
+  const res = await fetch(`${API_BASE}/strategies/summary`);
+  return parseJsonOrThrow(res);
+}
+
 export async function listTrades(limit = 100) {
   const bounded = Math.max(1, Math.min(limit, 200));
   const res = await fetch(`${API_BASE}/trades?limit=${bounded}`);

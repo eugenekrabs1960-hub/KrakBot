@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getEifFilterDecisions, getEifFlags, getEifRegimes, getEifScorecards, getStrategyDetail, listStrategies } from '../services/api';
+import { getEifFilterDecisions, getEifFlags, getEifRegimes, getEifScorecards, getStrategyDetail, getStrategySummary, listStrategies } from '../services/api';
 
 type StrategyRow = {
   strategy_instance_id: string;
@@ -27,12 +27,16 @@ export default function StrategyComparison() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [eifEnabled, setEifEnabled] = useState<boolean>(false);
+  const [summary, setSummary] = useState<any>(null);
 
   async function refresh() {
     setLoading(true);
     setError('');
     try {
-      const [strategyData, flags] = await Promise.all([listStrategies(), getEifFlags()]);
+      const [strategyData, flags, stratSummary] = await Promise.all([listStrategies(), getEifFlags(), getStrategySummary()]);
+       const strategyRows = Array.isArray(strategyData) ? strategyData : [];
+       setRows(strategyRows);
++      setSummary(stratSummary?.item || null);
       const strategyRows = Array.isArray(strategyData) ? strategyData : [];
       setRows(strategyRows);
 
@@ -114,6 +118,14 @@ export default function StrategyComparison() {
 
       {loading && <p>Loading strategy/eif data…</p>}
       {!loading && error && <p style={{ color: '#b00020' }}>Error: {error}</p>}
+      {!loading && summary && (
+        <p>
+          Aggregate equity: {Number(summary.aggregate_equity_usd || 0).toFixed(2)} |
+          Starting equity: {Number(summary.aggregate_starting_equity_usd || 0).toFixed(2)} |
+          Aggregate PnL: {Number(summary.aggregate_pnl_usd || 0).toFixed(4)} |
+          Enabled strategies: {summary.enabled_strategies}/{summary.total_strategies}
+        </p>
+      )}
 
       {!loading && rows.length === 0 ? (
         <p>No strategy instances yet.</p>

@@ -196,9 +196,13 @@ class LivePaperTestModeService:
                 WHERE si.enabled = TRUE
                   AND si.market = :market
                 ORDER BY si.created_at ASC
+                LIMIT :max_active
                 """
             ),
-            {'market': settings.live_paper_test_market},
+            {
+                'market': settings.live_paper_test_market,
+                'max_active': max(1, settings.live_paper_test_max_active_strategies),
+            },
         ).mappings().all()
         return [dict(r) for r in rows]
 
