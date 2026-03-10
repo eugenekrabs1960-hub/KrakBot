@@ -42,9 +42,13 @@ def paper_order(
         raise HTTPException(status_code=400, detail='missing x-idempotency-key header')
 
     payload_dict = payload.model_dump()
-    check = check_or_store(db, key=x_idempotency_key, scope='paper-order', payload=payload_dict)
+    try:
+        check = check_or_store(db, key=x_idempotency_key, scope='paper-order', payload=payload_dict)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     if check['replayed']:
-        return {'idempotent_replay': True, **(check['response'] or {})}
+        return check['response'] or {}
 
     adapter = FreqtradeExecutionAdapter(db)
     result = adapter.submit_order(

@@ -1,5 +1,4 @@
-import random
-
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.adapters.execution.base import ExecutionEngine, OrderIntent
@@ -18,7 +17,33 @@ class FreqtradeExecutionAdapter(ExecutionEngine):
         self.db = db
         self.bridge = FreqtradeBridge()
 
+    def _latest_market_trade_price(self, market: str) -> float | None:
+        row = self.db.execute(
+            text(
+                """
+                SELECT price
+                FROM market_trades
+                WHERE market = :market
+                ORDER BY event_ts DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {'market': market},
+        ).mappings().first()
+        if not row:
+            return None
+        return float(row['price'])
+
     def submit_order(self, intent: OrderIntent) -> dict:
+        fill_price = self._latest_market_trade_price(intent.market)
+        if fill_price is None:
+            return {
+                'accepted': False,
+                'error_code': 'no_market_trade_price',
+                'message': 'No market trade price available for fill',
+                'market': intent.market,
+            }
+
         order = create_order(self.db, intent, engine='freqtrade')
 
         bridge_resp = self.bridge.place_order(
@@ -28,17 +53,6 @@ class FreqtradeExecutionAdapter(ExecutionEngine):
             order_type=intent.order_type,
             price=intent.limit_price,
         )
-
-        # MVP fallback: simulated paper fill if bridge unavailable
-        fill_price = intent.limit_price or round(random.uniform(100.0, 220.0), 4)
-        if bridge_resp:
-            # Best-effort extraction from Freqtrade response.
-            fill_price = float(
-                bridge_resp.get('price')
-                or bridge_resp.get('open_rate')
-                or bridge_resp.get('rate')
-                or fill_price
-            )
 
         exe = create_execution(
             self.db,
