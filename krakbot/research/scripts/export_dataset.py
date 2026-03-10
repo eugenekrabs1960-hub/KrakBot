@@ -2,16 +2,25 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from pathlib import Path
 
-from src.dataset import ExportConfig, export_candles_with_optional_trades
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from src.data_quality import run_quality_checks, write_quality_report
+from src.ingestion import load_dataset_by_source
 from src.utils import ensure_parent, load_config, resolve_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/baseline.yaml")
-    parser.add_argument("--database-url", required=True, help="SQLAlchemy Postgres URL")
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="SQLAlchemy Postgres URL (required when dataset.source=local_db)",
+    )
     args = parser.parse_args()
 
     research_dir = Path(__file__).resolve().parents[1]
@@ -21,16 +30,12 @@ def main() -> None:
 
     out_path = resolve_path(research_dir, artifact_cfg["dataset_path"])
 
-    export_cfg = ExportConfig(
-        database_url=args.database_url,
-        market=dcfg.get("market", "SOL/USD"),
-        timeframe=dcfg.get("timeframe", "1m"),
-        start_ts=dcfg.get("start_ts"),
-        end_ts=dcfg.get("end_ts"),
-        use_market_trades=bool(dcfg.get("use_market_trades", True)),
-    )
+    db_url = args.database_url or os.getenv("DATABASE_URL") or os.getenv("KRAKBOT_DATABASE_URL")
 
-    df = export_candles_with_optional_trades(export_cfg)
+    df = load_dataset_by_source(research_dir, dcfg, database_url=db_url)
+    df, quality_report = run_quality_checks(df, timeframe=dcfg.get("timeframe", "1m"))
+    write_quality_report(research_dir, quality_report)
+
     if len(df) < int(dcfg.get("min_rows", 500)):
         raise RuntimeError(f"Not enough rows exported: {len(df)}")
 
@@ -41,6 +46,7 @@ def main() -> None:
         df.to_parquet(out_path, index=False)
 
     print(f"Exported {len(df)} rows to {out_path}")
+    print(f"Data quality report -> {research_dir / 'reports' / 'data_quality.json'}")
 
 
 if __name__ == "__main__":

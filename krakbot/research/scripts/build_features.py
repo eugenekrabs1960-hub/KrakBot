@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.features import build_features
 from src.utils import ensure_parent, load_config, resolve_path

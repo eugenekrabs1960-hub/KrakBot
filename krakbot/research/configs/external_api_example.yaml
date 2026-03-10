@@ -1,39 +1,15 @@
 dataset:
-  # source: local_db | external_csv | external_api
-  source: local_db
+  source: external_api
   market: SOL/USD
   timeframe: 1m
-  start_ts: null
-  end_ts: null
-  use_market_trades: true
   min_rows: 10
-
-  # Used when source=external_csv
-  external_csv:
-    path: data/raw/ohlcv.csv
-    timezone: UTC
-    column_mapping:
-      timestamp: timestamp
-      open: open
-      high: high
-      low: low
-      close: close
-      volume: volume
-
-  # Used when source=external_api
   external_api:
     provider: kraken
-    # pair defaults to market without slash, e.g. SOLUSD
     pair: SOLUSD
-    # Optional Kraken 'since' (unix seconds)
     since: null
-    # Kraken bounded pull (1..720)
     limit: 720
-
 features:
-  return_periods:
-  - 1
-  - 2
+  return_periods: [1, 2]
   volatility_window: 3
   momentum_window: 2
   rsi_window: 3

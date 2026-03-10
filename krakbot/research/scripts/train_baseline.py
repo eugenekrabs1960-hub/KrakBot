@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import joblib
 import pandas as pd
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.models import make_model
 from src.split import time_series_split
