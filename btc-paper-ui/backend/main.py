@@ -15,7 +15,7 @@ TRIGGER_UPPER = 69513.0
 TRIGGER_LOWER = 68698.6
 
 MODE_CONFIGS = {
-    "btc_15m_conservative": {"label": "BTC/USD 15m conservative", "interval": 15, "rr_min": 1.5, "aggressive": False},
+    "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_5m_aggressive": {"label": "BTC/USD 5m aggressive", "interval": 5, "rr_min": 1.25, "aggressive": True},
 }
 
@@ -95,16 +95,20 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
     last, prev = candles[-1], candles[-2]
     highs5 = [c["high"] for c in candles[-5:]]
     lows5 = [c["low"] for c in candles[-5:]]
+    highs6 = [c["high"] for c in candles[-6:]]
+    lows6 = [c["low"] for c in candles[-6:]]
     ranges = [c["high"] - c["low"] for c in candles[-8:]]
     avg_range = max(0.1, sum(ranges) / len(ranges))
+
+    # Frozen baseline behavior for 15m conservative (strict confirmation)
     conf = 1 if aggressive else 2
 
-    # Conservative/Shared templates
+    # 1) bearish breakdown continuation
     if last["close"] < TRIGGER_LOWER and (conf == 1 or prev["close"] < TRIGGER_LOWER):
         e = round(min(last["low"], prev["low"]) - 1, 1)
         st = round(max(highs5) + 1, 1)
         r = st - e
-        tp = round(e - 2 * r, 1)
+        tp = round(e - 2.0 * r, 1)
         rr = round((e - tp) / r, 2) if r > 0 else 0
         if rr >= rr_min:
             return normalize_decision({
@@ -113,12 +117,13 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
                 "regime_label": "bearish_breakdown_continuation", "reason": "Bounded template: breakdown continuation.",
             }, rr_min)
 
+    # 2) bullish reclaim recovery
     low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
     if low_below and last["close"] > TRIGGER_LOWER and (conf == 1 or prev["close"] > TRIGGER_LOWER):
         e = round(max(highs5) + 1, 1)
         st = round(min(lows5) - 1, 1)
         r = e - st
-        tp = round(e + 2 * r, 1)
+        tp = round(e + 2.0 * r, 1)
         rr = round((tp - e) / r, 2) if r > 0 else 0
         if rr >= rr_min:
             return normalize_decision({
@@ -127,7 +132,36 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
                 "regime_label": "bullish_reclaim_recovery", "reason": "Bounded template: reclaim recovery.",
             }, rr_min)
 
-    # Additional aggressive-only bounded templates (strong structure only)
+    # 3) rebound into resistance (strictly conservative unless aggressive)
+    if prev["high"] >= TRIGGER_UPPER * 0.997 and last["close"] < prev["close"]:
+        e = round(last["low"] - 1.0, 1)
+        st = round(max(highs5) + 1.0, 1)
+        r = st - e
+        tp = round(e - (1.8 * r), 1)
+        rr = round((e - tp) / r, 2) if r > 0 else 0
+        if rr >= rr_min:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {TRIGGER_UPPER}",
+                "regime_label": "rebound_into_resistance", "reason": "Bounded template: resistance rejection.",
+            }, rr_min)
+
+    # 4) consolidation breakout
+    rng = max(highs6) - min(lows6)
+    if last["close"] > max(highs6[:-1]) and rng / max(last["close"], 1) < 0.006:
+        e = round(max(highs6) + 1.0, 1)
+        st = round(min(lows6) - 1.0, 1)
+        r = e - st
+        tp = round(e + (1.8 * r), 1)
+        rr = round((tp - e) / r, 2) if r > 0 else 0
+        if rr >= rr_min:
+            return normalize_decision({
+                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {round(min(lows6),1)}",
+                "regime_label": "consolidation_breakout", "reason": "Bounded template: consolidation breakout.",
+            }, rr_min)
+
+    # Additional aggressive-only bounded templates (do NOT apply to frozen baseline)
     if aggressive:
         up_break = last["close"] > max(highs5[:-1]) and last["close"] > last["open"] and prev["close"] > prev["open"]
         dn_break = last["close"] < min(lows5[:-1]) and last["close"] < last["open"] and prev["close"] < prev["open"]
