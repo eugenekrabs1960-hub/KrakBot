@@ -26,11 +26,19 @@ store: dict[str, Any] = {
     "notify_user": None,
     "last_candle_time": None,
     "paper_execution_log": [],
+    "executed_signal_ids": set(),
+    "pending_orders": [],
+    "open_positions": [],
+    "closed_trades": [],
 }
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def round2(x: float) -> float:
+    return round(float(x), 2)
 
 
 async def fetch_market():
@@ -129,14 +137,16 @@ def normalize_decision(decision: dict[str, Any]) -> dict[str, Any]:
             isinstance(normalized["reason"], str) and normalized["reason"].strip() != "",
         ])
         if not required_ok:
-            normalized["status"] = "WAIT"
-            normalized["reason"] = "Clawbot did not provide full executable trade fields; keeping WAIT."
-            normalized["side"] = ""
-            normalized["entry_price"] = 0
-            normalized["stop_loss"] = 0
-            normalized["take_profit"] = 0
-            normalized["risk_reward_ratio"] = 0
-            normalized["invalidation"] = ""
+            normalized.update({
+                "status": "WAIT",
+                "reason": "Clawbot did not provide full executable trade fields; keeping WAIT.",
+                "side": "",
+                "entry_price": 0,
+                "stop_loss": 0,
+                "take_profit": 0,
+                "risk_reward_ratio": 0,
+                "invalidation": "",
+            })
 
     return normalized
 
@@ -152,7 +162,6 @@ def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, A
     highs6 = [c["high"] for c in candles[-6:]]
     lows6 = [c["low"] for c in candles[-6:]]
 
-    # 1) Bearish breakdown continuation
     if last["close"] < TRIGGER_LOWER and prev["close"] < TRIGGER_LOWER:
         entry = round(min(last["low"], prev["low"]) - 1.0, 1)
         stop = round(max(highs5) + 1.0, 1)
@@ -161,18 +170,13 @@ def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, A
         rr = round((entry - tp) / risk, 2) if risk > 0 else 0
         if risk > 0 and rr >= 1.5:
             return normalize_decision({
-                "status": "PROPOSE_TRADE",
-                "side": "SELL",
-                "entry_price": entry,
-                "stop_loss": stop,
-                "take_profit": tp,
-                "risk_reward_ratio": rr,
+                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": entry,
+                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
                 "invalidation": f"15m close above {TRIGGER_LOWER}",
                 "regime_label": "bearish_breakdown_continuation",
                 "reason": "Two consecutive closes below breakdown trigger with continuation structure.",
             })
 
-    # 2) Bullish reclaim recovery
     recent_low_below = any(c["low"] < TRIGGER_LOWER for c in candles[-8:])
     if recent_low_below and last["close"] > TRIGGER_LOWER and prev["close"] > TRIGGER_LOWER:
         entry = round(max(highs5) + 1.0, 1)
@@ -182,18 +186,13 @@ def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, A
         rr = round((tp - entry) / risk, 2) if risk > 0 else 0
         if risk > 0 and rr >= 1.5:
             return normalize_decision({
-                "status": "PROPOSE_TRADE",
-                "side": "BUY",
-                "entry_price": entry,
-                "stop_loss": stop,
-                "take_profit": tp,
-                "risk_reward_ratio": rr,
+                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": entry,
+                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
                 "invalidation": f"15m close back below {TRIGGER_LOWER}",
                 "regime_label": "bullish_reclaim_recovery",
                 "reason": "Reclaim above breakdown level with follow-through closes.",
             })
 
-    # 3) Rebound into resistance (short fade)
     if prev["high"] >= TRIGGER_UPPER * 0.997 and last["close"] < prev["close"]:
         entry = round(last["low"] - 1.0, 1)
         stop = round(max(highs5) + 1.0, 1)
@@ -202,18 +201,13 @@ def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, A
         rr = round((entry - tp) / risk, 2) if risk > 0 else 0
         if risk > 0 and rr >= 1.5:
             return normalize_decision({
-                "status": "PROPOSE_TRADE",
-                "side": "SELL",
-                "entry_price": entry,
-                "stop_loss": stop,
-                "take_profit": tp,
-                "risk_reward_ratio": rr,
+                "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": entry,
+                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
                 "invalidation": f"15m close above {TRIGGER_UPPER}",
                 "regime_label": "rebound_into_resistance",
                 "reason": "Rejection after rebound toward resistance zone.",
             })
 
-    # 4) Consolidation breakout
     rng = max(highs6) - min(lows6)
     if last["close"] > max(highs6[:-1]) and rng / max(last["close"], 1) < 0.006:
         entry = round(max(highs6) + 1.0, 1)
@@ -223,12 +217,8 @@ def construct_trade_from_structure(candles: list[dict[str, Any]]) -> dict[str, A
         rr = round((tp - entry) / risk, 2) if risk > 0 else 0
         if risk > 0 and rr >= 1.5:
             return normalize_decision({
-                "status": "PROPOSE_TRADE",
-                "side": "BUY",
-                "entry_price": entry,
-                "stop_loss": stop,
-                "take_profit": tp,
-                "risk_reward_ratio": rr,
+                "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": entry,
+                "stop_loss": stop, "take_profit": tp, "risk_reward_ratio": rr,
                 "invalidation": f"15m close below {round(min(lows6),1)}",
                 "regime_label": "consolidation_breakout",
                 "reason": "Compression followed by upside breakout trigger.",
@@ -247,8 +237,6 @@ async def call_clawbot(scan_payload: dict[str, Any]) -> dict[str, Any]:
         "{\"status\":\"PROPOSE_TRADE|WAIT|REJECT|INSUFFICIENT_DATA\",\"side\":\"BUY|SELL|\",\"entry_price\":0,\"stop_loss\":0,\"take_profit\":0,\"risk_reward_ratio\":0,\"invalidation\":\"\",\"regime_label\":\"\",\"reason\":\"\"}. "
         "PROPOSE_TRADE is allowed only when all executable fields are present and risk_reward_ratio >= 1.5. "
         "If structure exists but executable fields cannot be derived, return WAIT. "
-        "Use explicit BTC/USD 15m trade-construction rules: bearish breakdown continuation, bullish reclaim recovery, rebound into resistance, consolidation breakout. "
-        "For each setup, provide exact entry trigger, stop rule, take-profit rule, and invalidation rule. "
         "Paper mode only. No live trading. No execution. Do not invent missing values. Payload:\n"
         + json.dumps(scan_payload, separators=(",", ":"))
     )
@@ -260,24 +248,217 @@ async def call_clawbot(scan_payload: dict[str, Any]) -> dict[str, Any]:
     )
     out, _ = await proc.communicate()
     if proc.returncode != 0:
-        return normalize_decision({
-            "status": "INSUFFICIENT_DATA",
-            "regime_label": "scan_error",
-            "reason": "Failed to reach Clawbot scan path via Samy.",
-        })
+        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "scan_error", "reason": "Failed to reach Clawbot scan path via Samy."})
 
     try:
         wrapper = json.loads(out.decode("utf-8"))
         text = (wrapper.get("payloads") or [{}])[0].get("text", "{}")
         decision = json.loads(text)
     except Exception:
-        return normalize_decision({
-            "status": "INSUFFICIENT_DATA",
-            "regime_label": "parse_error",
-            "reason": "Clawbot response parse failed.",
-        })
+        return normalize_decision({"status": "INSUFFICIENT_DATA", "regime_label": "parse_error", "reason": "Clawbot response parse failed."})
 
     return normalize_decision(decision)
+
+
+def compute_unrealized(position: dict[str, Any], bid: float, ask: float) -> float:
+    qty = position["qty"]
+    entry = position["entry_fill_price"]
+    if position["side"] == "BUY":
+        return round2((bid - entry) * qty)
+    return round2((entry - ask) * qty)
+
+
+def maybe_close_position(position: dict[str, Any], candle: dict[str, Any], bid: float, ask: float, slip_pct: float):
+    side = position["side"]
+    hit = None
+    close_price = None
+
+    if side == "BUY":
+        if candle["low"] <= position["stop_loss"]:
+            hit = "STOP_LOSS"
+            close_price = position["stop_loss"] * (1 - slip_pct / 100)
+        elif candle["high"] >= position["take_profit"]:
+            hit = "TAKE_PROFIT"
+            close_price = position["take_profit"] * (1 - slip_pct / 100)
+    else:
+        if candle["high"] >= position["stop_loss"]:
+            hit = "STOP_LOSS"
+            close_price = position["stop_loss"] * (1 + slip_pct / 100)
+        elif candle["low"] <= position["take_profit"]:
+            hit = "TAKE_PROFIT"
+            close_price = position["take_profit"] * (1 + slip_pct / 100)
+
+    if not hit:
+        return None
+
+    close_fill = round2(close_price)
+    qty = position["qty"]
+    if side == "BUY":
+        realized = round2((close_fill - position["entry_fill_price"]) * qty)
+    else:
+        realized = round2((position["entry_fill_price"] - close_fill) * qty)
+
+    closed = {
+        **position,
+        "status": "PAPER_TRADE_CLOSED",
+        "close_reason": hit,
+        "close_fill_price": close_fill,
+        "realized_pnl": realized,
+        "close_time": now_iso(),
+        "unrealized_pnl": 0,
+    }
+    return closed
+
+
+def auto_execute_proposed_trade(latest: dict[str, Any]):
+    decision = latest.get("latest_decision", {})
+    if decision.get("status") != "PROPOSE_TRADE":
+        return latest
+
+    signal_id = decision.get("signal_id")
+    if not signal_id:
+        return latest
+    if signal_id in store["executed_signal_ids"]:
+        return latest
+
+    md = latest["market_data"][0]
+    bid, ask = md["bid"], md["ask"]
+    slip = md.get("slippage_assumption_pct", 0.01)
+
+    qty = 1.0
+    if decision["side"] == "BUY":
+        entry_fill = round2(ask * (1 + slip / 100))
+    else:
+        entry_fill = round2(bid * (1 - slip / 100))
+
+    position = {
+        "signal_id": signal_id,
+        "symbol": "BTC/USD",
+        "timeframe": "15m",
+        "side": decision["side"],
+        "qty": qty,
+        "entry_fill_price": entry_fill,
+        "stop_loss": decision["stop_loss"],
+        "take_profit": decision["take_profit"],
+        "invalidation": decision["invalidation"],
+        "regime_label": decision["regime_label"],
+        "reason": decision["reason"],
+        "risk_reward_ratio": decision["risk_reward_ratio"],
+        "open_time": now_iso(),
+        "close_time": None,
+        "status": "PAPER_TRADE_OPEN",
+        "unrealized_pnl": 0,
+        "realized_pnl": 0,
+    }
+
+    store["pending_orders"].append({
+        "timestamp": now_iso(),
+        "signal_id": signal_id,
+        "status": "QUEUED_TO_PAPER_EXECUTOR",
+        "decision": decision,
+    })
+    store["open_positions"].append(position)
+    store["executed_signal_ids"].add(signal_id)
+    store["paper_execution_log"].append({
+        "timestamp": now_iso(),
+        "action": "AUTO_EXECUTED_PAPER",
+        "executor": "samy_paper_executor",
+        "execution_status": "opened_paper_position",
+        "decision": decision,
+        "entry_fill_price": entry_fill,
+    })
+    store["history"].append({
+        "timestamp": now_iso(),
+        "decision_time": latest.get("latest_decision_time"),
+        "status": "PAPER_TRADE_OPEN",
+        "side": position["side"],
+        "entry_price": position["entry_fill_price"],
+        "stop_loss": position["stop_loss"],
+        "take_profit": position["take_profit"],
+        "regime_label": position["regime_label"],
+        "reason": "Auto-handled from PROPOSE_TRADE to paper executor open.",
+        "risk_reward_ratio": position["risk_reward_ratio"],
+        "invalidation": position["invalidation"],
+    })
+
+    latest["latest_decision"] = {
+        **decision,
+        "status": "PAPER_TRADE_OPEN",
+        "reason": "Auto-executed in paper mode via paper executor flow.",
+    }
+    latest["latest_decision_time"] = now_iso()
+    store["notify_user"] = {
+        "timestamp": now_iso(),
+        "message": "PAPER_TRADE_OPEN",
+        "decision": latest["latest_decision"],
+    }
+    latest["notify_user"] = store["notify_user"]
+    return latest
+
+
+def update_positions_with_latest_candle(latest: dict[str, Any]):
+    md = latest["market_data"][0]
+    candle = md["ohlcv"][-1]
+    bid, ask = md["bid"], md["ask"]
+    slip = md.get("slippage_assumption_pct", 0.01)
+
+    still_open = []
+    for pos in store["open_positions"]:
+        closed = maybe_close_position(pos, candle, bid, ask, slip)
+        if closed:
+            store["closed_trades"].append(closed)
+            store["paper_execution_log"].append({
+                "timestamp": now_iso(),
+                "action": "PAPER_TRADE_CLOSED",
+                "signal_id": pos["signal_id"],
+                "close_reason": closed["close_reason"],
+                "realized_pnl": closed["realized_pnl"],
+            })
+            store["history"].append({
+                "timestamp": now_iso(),
+                "decision_time": latest.get("latest_decision_time"),
+                "status": "PAPER_TRADE_CLOSED",
+                "side": closed["side"],
+                "entry_price": closed["entry_fill_price"],
+                "stop_loss": closed["stop_loss"],
+                "take_profit": closed["take_profit"],
+                "regime_label": closed["regime_label"],
+                "reason": f"Closed by {closed['close_reason']}",
+                "risk_reward_ratio": closed["risk_reward_ratio"],
+                "invalidation": closed["invalidation"],
+            })
+            latest["latest_decision"] = {
+                "status": "PAPER_TRADE_CLOSED",
+                "side": closed["side"],
+                "entry_price": closed["entry_fill_price"],
+                "stop_loss": closed["stop_loss"],
+                "take_profit": closed["take_profit"],
+                "risk_reward_ratio": closed["risk_reward_ratio"],
+                "invalidation": closed["invalidation"],
+                "regime_label": closed["regime_label"],
+                "reason": f"Closed by {closed['close_reason']} with realized PnL {closed['realized_pnl']}",
+                "signal_id": closed["signal_id"],
+            }
+            latest["latest_decision_time"] = now_iso()
+            store["notify_user"] = {
+                "timestamp": now_iso(),
+                "message": "PAPER_TRADE_CLOSED",
+                "decision": latest["latest_decision"],
+            }
+            latest["notify_user"] = store["notify_user"]
+        else:
+            pos["unrealized_pnl"] = compute_unrealized(pos, bid, ask)
+            still_open.append(pos)
+
+    store["open_positions"] = still_open
+    latest["open_positions"] = store["open_positions"]
+    latest["closed_trades"] = store["closed_trades"][-25:]
+    latest["pending_orders"] = store["pending_orders"][-25:]
+    latest["current_pnl"] = {
+        "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in store["open_positions"])),
+        "realized": round2(sum(t.get("realized_pnl", 0) for t in store["closed_trades"])),
+    }
+    return latest
 
 
 async def build_state():
@@ -295,7 +476,7 @@ async def build_state():
     if decision["status"] == "PROPOSE_TRADE":
         store["notify_user"] = {
             "timestamp": decision_time,
-            "message": "PROPOSE_TRADE returned. Notify user before any paper execution step.",
+            "message": "PROPOSE_TRADE returned. Auto paper-execution flow will process.",
             "decision": decision,
         }
 
@@ -309,7 +490,17 @@ async def build_state():
         "paper_mode": True,
         "notify_user": store.get("notify_user"),
         "paper_execution_log": store["paper_execution_log"][-10:],
+        "pending_orders": store["pending_orders"][-25:],
+        "open_positions": store["open_positions"],
+        "closed_trades": store["closed_trades"][-25:],
+        "current_pnl": {
+            "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in store["open_positions"])),
+            "realized": round2(sum(t.get("realized_pnl", 0) for t in store["closed_trades"])),
+        },
     }
+
+    payload = auto_execute_proposed_trade(payload)
+    payload = update_positions_with_latest_candle(payload)
     return payload
 
 
@@ -326,10 +517,11 @@ async def execute_scan_store():
             "entry_price": s["latest_decision"].get("entry_price", 0),
             "stop_loss": s["latest_decision"].get("stop_loss", 0),
             "take_profit": s["latest_decision"].get("take_profit", 0),
-            "regime_label": s["latest_decision"]["regime_label"],
-            "reason": s["latest_decision"]["reason"],
-            "risk_reward_ratio": s["latest_decision"]["risk_reward_ratio"],
+            "regime_label": s["latest_decision"].get("regime_label", ""),
+            "reason": s["latest_decision"].get("reason", ""),
+            "risk_reward_ratio": s["latest_decision"].get("risk_reward_ratio", 0),
             "invalidation": s["latest_decision"].get("invalidation", ""),
+            "signal_id": s["latest_decision"].get("signal_id", ""),
         }
     )
     return s
@@ -344,7 +536,7 @@ async def get_state():
 
 @app.get("/api/history")
 async def get_history():
-    return {"history": store["history"][-50:]}
+    return {"history": store["history"][-100:]}
 
 
 @app.post("/api/run-scan")
@@ -368,83 +560,12 @@ async def ack_notify():
 
 @app.post("/api/proposal/approve")
 async def approve_proposal():
-    latest = store.get("latest") or {}
-    decision = latest.get("latest_decision") or {}
-    if decision.get("status") != "PROPOSE_TRADE":
-        return {"ok": False, "message": "No active PROPOSE_TRADE to approve."}
-
-    signal_id = decision.get("signal_id", "")
-    already = any((r.get("decision", {}).get("signal_id") == signal_id) for r in store["paper_execution_log"])
-    if already:
-        return {"ok": True, "duplicate": True, "message": "Signal already approved.", "latest_decision": latest.get("latest_decision")}
-
-    execution_record = {
-        "timestamp": now_iso(),
-        "action": "APPROVED_FOR_PAPER_EXECUTOR",
-        "executor": "samy_paper_executor",
-        "execution_status": "submitted_to_executor_no_fill_confirmation",
-        "decision": decision,
-    }
-    store["paper_execution_log"].append(execution_record)
-    store["history"].append({
-        "timestamp": execution_record["timestamp"],
-        "decision_time": latest.get("latest_decision_time"),
-        "status": "APPROVED_PENDING_EXECUTOR",
-        "side": decision.get("side", ""),
-        "entry_price": decision.get("entry_price", 0),
-        "stop_loss": decision.get("stop_loss", 0),
-        "take_profit": decision.get("take_profit", 0),
-        "regime_label": decision.get("regime_label", ""),
-        "reason": "User approved signal for paper executor handoff; no auto-execution in UI/backend.",
-        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
-        "invalidation": decision.get("invalidation", ""),
-    })
-
-    # Clear actionable alert and switch latest decision state
-    latest["notify_user"] = None
-    store["notify_user"] = None
-    latest["latest_decision"] = {
-        **decision,
-        "status": "APPROVED_PENDING_EXECUTOR",
-        "reason": "Approved by user; pending paper executor. No auto-execution by UI/backend.",
-    }
-    latest["latest_decision_time"] = execution_record["timestamp"]
-    store["latest"] = latest
-
-    return {"ok": True, "execution_record": execution_record, "latest_decision": latest["latest_decision"]}
+    return {"ok": False, "message": "Manual approve disabled: auto paper execution flow is enabled."}
 
 
 @app.post("/api/proposal/reject")
 async def reject_proposal():
-    latest = store.get("latest") or {}
-    decision = latest.get("latest_decision") or {}
-    if decision.get("status") != "PROPOSE_TRADE":
-        return {"ok": False, "message": "No active PROPOSE_TRADE to reject."}
-
-    timestamp = now_iso()
-    store["history"].append({
-        "timestamp": timestamp,
-        "decision_time": latest.get("latest_decision_time"),
-        "status": "USER_REJECTED_SIGNAL",
-        "side": decision.get("side", ""),
-        "entry_price": decision.get("entry_price", 0),
-        "stop_loss": decision.get("stop_loss", 0),
-        "take_profit": decision.get("take_profit", 0),
-        "regime_label": decision.get("regime_label", ""),
-        "reason": "User rejected PROPOSE_TRADE signal.",
-        "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
-        "invalidation": decision.get("invalidation", ""),
-    })
-    store["notify_user"] = None
-    latest["notify_user"] = None
-    latest["latest_decision"] = {
-        **decision,
-        "status": "WAIT",
-        "reason": "Signal rejected by user.",
-    }
-    latest["latest_decision_time"] = timestamp
-    store["latest"] = latest
-    return {"ok": True, "status": "USER_REJECTED_SIGNAL", "timestamp": timestamp, "latest_decision": latest["latest_decision"]}
+    return {"ok": False, "message": "Manual reject disabled: auto paper execution flow is enabled."}
 
 
 @app.on_event("startup")
@@ -453,7 +574,7 @@ async def start_auto_scanner():
         while True:
             try:
                 if store["auto_scan"]:
-                    candles, bid, ask, spread, spread_pct = await fetch_market()
+                    candles, _, _, _, _ = await fetch_market()
                     latest_candle_time = candles[-1]["time"]
                     if store["last_candle_time"] != latest_candle_time:
                         await execute_scan_store()

@@ -47,16 +47,6 @@ export default function App() {
     await load()
   }
 
-  const approveProposal = async () => {
-    await fetch(`${API}/api/proposal/approve`, { method: 'POST' })
-    await load()
-  }
-
-  const rejectProposal = async () => {
-    await fetch(`${API}/api/proposal/reject`, { method: 'POST' })
-    await load()
-  }
-
   useEffect(() => {
     load()
     const t = setInterval(load, 15000)
@@ -65,18 +55,19 @@ export default function App() {
 
   const md = useMemo(() => state?.market_data?.[0] || null, [state])
   const d = state?.latest_decision || {}
-  const statusColor = d.status === 'WAIT' ? '#2ea043' : d.status === 'REJECT' ? '#d29922' : d.status === 'PROPOSE_TRADE' ? '#f85149' : '#8b949e'
+  const statusColor = d.status === 'WAIT' ? '#2ea043' : d.status === 'REJECT' ? '#d29922' : d.status === 'PROPOSE_TRADE' ? '#f85149' : d.status?.includes('OPEN') ? '#1f6feb' : '#8b949e'
 
   if (!state || !md) return <div className='wrap'>Loading...</div>
 
   return <div className='wrap'>
     {state.notify_user && (
       <div className='panel' style={{borderColor:'#f85149', marginBottom:12}}>
-        <strong style={{color:'#f85149'}}>PROPOSE_TRADE ALERT</strong>
-        <p style={{margin:'6px 0'}}>{state.notify_user.message}</p>
+        <strong style={{color:'#f85149'}}>{state.notify_user.message}</strong>
+        <p style={{margin:'6px 0',fontSize:12}}>{state.notify_user?.decision?.reason}</p>
         <button onClick={ackNotify}>Acknowledge</button>
       </div>
     )}
+
     <div className='top'>
       <div>
         <h2>BTC/USD 15m Paper Dashboard</h2>
@@ -103,36 +94,56 @@ export default function App() {
         <h3>Latest Decision</h3>
         <p>Status: <strong style={{color:d.status==='PROPOSE_TRADE'?'#f85149':'#e6edf3'}}>{d.status}</strong></p>
         <p>Regime: {d.regime_label}</p>
-        <p>Reason: <span style={{fontSize:12}}>{d.reason}</span></p>
+        <p>Side: {d.side || '-'}</p>
+        <p>Entry: {d.entry_price || 0}</p>
+        <p>Stop Loss: {d.stop_loss || 0}</p>
+        <p>Take Profit: {d.take_profit || 0}</p>
+        <p>Invalidation: {d.invalidation || '-'}</p>
         <p>R:R: {d.risk_reward_ratio}</p>
-
-        {d.status === 'PROPOSE_TRADE' && (
-          <div style={{marginTop:10,padding:10,border:'1px solid #30363d',borderRadius:8}}>
-            <h4 style={{marginTop:0}}>Proposed Trade Details</h4>
-            <p>Side: {d.side || '-'}</p>
-            <p>Entry: {d.entry_price || 0}</p>
-            <p>Stop Loss: {d.stop_loss || 0}</p>
-            <p>Take Profit: {d.take_profit || 0}</p>
-            <p>Invalidation: {d.invalidation || '-'}</p>
-            <div style={{display:'flex',gap:8,marginTop:8}}>
-              <button style={{background:'#2ea043',color:'#fff'}} onClick={approveProposal}>Approve Paper Trade</button>
-              <button style={{background:'#d29922',color:'#111'}} onClick={rejectProposal}>Reject Signal</button>
-            </div>
-          </div>
-        )}
-
+        <p style={{fontSize:12}}>Reason: {d.reason}</p>
         <hr />
         <h3>Account</h3>
         <p>Equity: {state.account_state.account_equity}</p>
         <p>Cash: {state.account_state.cash_available}</p>
-        <p>Open Positions: {state.account_state.open_positions.length}</p>
         <p>Bid/Ask: {md.bid} / {md.ask}</p>
         <p>Spread: {md.spread} ({md.spread_pct.toFixed(6)}%)</p>
+        <p>PnL Unrealized: {state.current_pnl?.unrealized ?? 0}</p>
+        <p>PnL Realized: {state.current_pnl?.realized ?? 0}</p>
       </div>
     </div>
 
     <div className='panel' style={{marginTop:12}}>
-      <h3>Recent Scan History</h3>
+      <h3>Pending Paper Orders</h3>
+      <table className='rows' style={{width:'100%'}}>
+        <thead><tr><th>Time</th><th>Signal</th><th>Status</th></tr></thead>
+        <tbody>
+          {(state.pending_orders || []).slice().reverse().map((o,i)=><tr key={i}><td>{o.timestamp}</td><td>{o.signal_id}</td><td>{o.status}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+
+    <div className='panel' style={{marginTop:12}}>
+      <h3>Open Paper Positions</h3>
+      <table className='rows' style={{width:'100%'}}>
+        <thead><tr><th>Open</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Unrealized PnL</th></tr></thead>
+        <tbody>
+          {(state.open_positions || []).map((p,i)=><tr key={i}><td>{p.open_time}</td><td>{p.side}</td><td>{p.entry_fill_price}</td><td>{p.stop_loss}</td><td>{p.take_profit}</td><td>{p.unrealized_pnl}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+
+    <div className='panel' style={{marginTop:12}}>
+      <h3>Closed Paper Trades</h3>
+      <table className='rows' style={{width:'100%'}}>
+        <thead><tr><th>Open</th><th>Close</th><th>Side</th><th>Entry</th><th>ClosePx</th><th>Realized PnL</th><th>Reason</th></tr></thead>
+        <tbody>
+          {(state.closed_trades || []).slice().reverse().map((t,i)=><tr key={i}><td>{t.open_time}</td><td>{t.close_time}</td><td>{t.side}</td><td>{t.entry_fill_price}</td><td>{t.close_fill_price}</td><td>{t.realized_pnl}</td><td>{t.close_reason}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+
+    <div className='panel' style={{marginTop:12}}>
+      <h3>Recent Scan / Decision History</h3>
       <table className='rows' style={{width:'100%'}}>
         <thead><tr><th>Scan Time</th><th>Decision Time</th><th>Status</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Regime</th><th>R:R</th></tr></thead>
         <tbody>
