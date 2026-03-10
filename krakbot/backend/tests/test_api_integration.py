@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 
 import pytest
@@ -66,7 +67,19 @@ def _paper_order(api_base: str, idem_key: str, payload: dict) -> dict:
     return resp.json()
 
 
+def _require_solusd_market_trade(api_base: str, attempts: int = 6, interval_sec: float = 0.5) -> None:
+    for _ in range(attempts):
+        resp = requests.get(f"{api_base}/market/trades?limit=1", timeout=TIMEOUT)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        if items and items[0].get("market") == "SOL/USD":
+            return
+        time.sleep(interval_sec)
+    pytest.skip("Skipping: no recent SOL/USD market trade in /api/market/trades?limit=1")
+
+
 def test_idempotent_paper_orders(api_base: str):
+    _require_solusd_market_trade(api_base)
     strategy_instance_id = _create_strategy_instance(api_base)
     payload = {
         "strategy_instance_id": strategy_instance_id,
@@ -122,7 +135,23 @@ def test_failure_when_no_trade_price_no_side_effects_and_replay_identical(api_ba
     assert after_count == before_count
 
 
+def test_unknown_market_rejected_with_no_market_trade_price(api_base: str):
+    strategy_instance_id = _create_strategy_instance(api_base)
+    payload = {
+        "strategy_instance_id": strategy_instance_id,
+        "market": "ABC/USD",
+        "side": "buy",
+        "qty": 0.1,
+        "order_type": "market",
+    }
+
+    result = _paper_order(api_base, f"itest-unknown-market-{uuid.uuid4().hex}", payload)
+    assert result["accepted"] is False
+    assert result["error_code"] == "no_market_trade_price"
+
+
 def test_strategy_list_detail_and_trade_history_consistency_after_fills(api_base: str):
+    _require_solusd_market_trade(api_base)
     strategy_instance_id = _create_strategy_instance(api_base)
 
     buy = _paper_order(
@@ -149,6 +178,9 @@ def test_strategy_list_detail_and_trade_history_consistency_after_fills(api_base
             "limit_price": 110.0,
         },
     )
+
+    assert buy["accepted"] is True
+    assert sell["accepted"] is True
 
     strategies = requests.get(f"{api_base}/strategies", timeout=TIMEOUT)
     strategies.raise_for_status()
