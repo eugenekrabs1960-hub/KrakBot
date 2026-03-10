@@ -36,8 +36,12 @@ def main() -> None:
     df, quality_report = run_quality_checks(df, timeframe=dcfg.get("timeframe", "1m"))
     write_quality_report(research_dir, quality_report)
 
-    if len(df) < int(dcfg.get("min_rows", 500)):
-        raise RuntimeError(f"Not enough rows exported: {len(df)}")
+    min_rows = int(dcfg.get("min_rows", 500))
+    if len(df) < min_rows:
+        raise RuntimeError(
+            f"Not enough rows exported: got {len(df)}, need at least {min_rows}. "
+            "Increase data window, lower dataset.min_rows, or switch to a higher-history source (local_db)."
+        )
 
     ensure_parent(out_path)
     if out_path.suffix == ".csv":

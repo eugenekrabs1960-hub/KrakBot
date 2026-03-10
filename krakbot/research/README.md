@@ -76,6 +76,28 @@ Notes:
 - Pull is bounded by `dataset.external_api.limit` (1..720).
 - Raw pull is saved under `data/raw/kraken_ohlc_*`.
 
+## Labeling behavior (Baseline v2)
+- `features.label_horizon` supports `1`, `3`, or `5` bars (configurable).
+- `future_return = close[t+h] / close[t] - 1`.
+- `features.label_neutral_band_bps` defines a no-trade band around zero return.
+  - Positive class (`target=1`): `future_return > +band`
+  - Negative class (`target=0`): `future_return < -band`
+  - Neutral (`target_raw=0`): `-band <= future_return <= +band`
+- `features.neutral_handling`:
+  - `drop` (default for v2): neutral rows are filtered before training/eval.
+  - `keep_as_negative`: neutral rows are retained and mapped to class `0`.
+
+This keeps the model path deterministic and binary while still allowing neutral-band filtering.
+
+## Baseline v2 run commands
+
+```bash
+cd krakbot/research
+export DATABASE_URL='postgresql+psycopg://krakbot:krakbot@localhost:5432/krakbot'
+./scripts/run_baseline.sh configs/baseline_v2_5k.yaml
+./scripts/run_baseline.sh configs/baseline_v2_20k.yaml
+```
+
 ## Outputs
 After success:
 - `reports/data_quality.json`

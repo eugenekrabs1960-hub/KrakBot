@@ -43,6 +43,13 @@ def main() -> None:
     X_val = split.val[feature_cols]
     y_val = split.val["target"]
 
+    class_counts = y_train.value_counts().to_dict()
+    if len(class_counts) < 2:
+        raise RuntimeError(
+            "Training split has only one class after labeling. "
+            "Try increasing dataset range, reducing label_neutral_band_bps, or using label_horizon=1."
+        )
+
     model = make_model(cfg["model"])
     model.fit(X_train, y_train)
 

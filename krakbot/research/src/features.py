@@ -29,9 +29,27 @@ def build_features(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     out["rsi_like"] = compute_rsi(out["close"], window=cfg["rsi_window"])
     out["volume_change"] = out["volume"].pct_change(cfg.get("volume_change_window", 1))
 
-    horizon = int(cfg["label_horizon"])
+    horizon = int(cfg.get("label_horizon", 1))
+    neutral_band_bps = float(cfg.get("label_neutral_band_bps", 0.0))
+    band = neutral_band_bps / 10000.0
+
     out["future_return"] = out["close"].shift(-horizon) / out["close"] - 1.0
-    out["target"] = (out["future_return"] > 0).astype(int)
+
+    out["target_raw"] = np.select(
+        [out["future_return"] > band, out["future_return"] < -band],
+        [1, -1],
+        default=0,
+    )
+
+    # Deterministic binary path for model training.
+    # - If band=0, equivalent to original target=(future_return > 0).
+    # - If band>0 and neutral_handling=drop, neutral rows are excluded.
+    # - If band>0 and neutral_handling=keep_as_negative, neutral labels map to class 0.
+    neutral_handling = cfg.get("neutral_handling", "drop")
+    if neutral_band_bps > 0 and neutral_handling == "drop":
+        out = out[out["target_raw"] != 0].copy()
+
+    out["target"] = (out["target_raw"] == 1).astype(int)
 
     if cfg.get("dropna", True):
         out = out.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
