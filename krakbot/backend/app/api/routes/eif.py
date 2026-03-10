@@ -51,7 +51,7 @@ def eif_regimes(
     market: str | None = None,
     strategy_instance_id: str | None = None,
     limit: int = Query(default=50),
-    offset: int = Query(default=0),
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
     guard = _guard_api_enabled()
@@ -83,7 +83,7 @@ def eif_filter_decisions(
     strategy_instance_id: str | None = None,
     reason_code: str | None = None,
     limit: int = Query(default=50),
-    offset: int = Query(default=0),
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
     guard = _guard_api_enabled()
@@ -144,7 +144,7 @@ def eif_scorecards(
     strategy_instance_id: str | None = None,
     market: str | None = None,
     limit: int = Query(default=50),
-    offset: int = Query(default=0),
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
     guard = _guard_api_enabled()
@@ -175,7 +175,7 @@ def eif_trade_trace(
     strategy_instance_id: str | None = None,
     market: str | None = None,
     limit: int = Query(default=50),
-    offset: int = Query(default=0),
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
     guard = _guard_api_enabled()
