@@ -24,6 +24,11 @@ function SharedChart({ state, theme }) {
     const isLight = theme === 'light'
     const danger = isLight ? '#b91c1c' : '#f85149'
     try {
+      const modeColors = {
+        btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
+        btc_5m_aggressive: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
+      }
+
       const chart = createChart(container, {
         width: container.clientWidth || 900,
         height: 320,
@@ -39,18 +44,20 @@ function SharedChart({ state, theme }) {
       const markers = []
       MODE_ORDER.forEach((mk) => {
         const m = state?.modes?.[mk]
+        const mc = modeColors[mk] || modeColors.btc_15m_conservative
         ;(m?.open_positions || []).forEach((p) => {
           const t = Math.floor(new Date(p.open_time).getTime() / 1000)
-          markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: '#1f6feb', shape: 'circle', text: `${mk}:OPEN` })
-          s.createPriceLine({ price: p.entry_fill_price, color: '#1f6feb', lineStyle: 2, lineWidth: 1, title: `${mk} entry` })
-          s.createPriceLine({ price: p.stop_loss, color: danger, lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
-          s.createPriceLine({ price: p.take_profit, color: '#2ea043', lineStyle: 2, lineWidth: 1, title: `${mk} TP` })
+          markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: mc.open, shape: 'arrowUp', text: `${mk}:OPEN` })
+          markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: mc.entry, shape: 'circle', text: `${mk}:ENTRY` })
+          s.createPriceLine({ price: p.entry_fill_price, color: mc.entry, lineStyle: 2, lineWidth: 2, title: `${mk} entry` })
+          s.createPriceLine({ price: p.stop_loss, color: mc.sl, lineStyle: 2, lineWidth: 2, title: `${mk} SL` })
+          s.createPriceLine({ price: p.take_profit, color: mc.tp, lineStyle: 2, lineWidth: 2, title: `${mk} TP` })
         })
         ;(m?.closed_trades || []).slice(-8).forEach((t) => {
           if (!t.close_time) return
           const tt = Math.floor(new Date(t.close_time).getTime() / 1000)
           if (!Number.isFinite(tt)) return
-          markers.push({ time: tt, position: t.side === 'BUY' ? 'aboveBar' : 'belowBar', color: '#d29922', shape: 'square', text: `${mk}:CLOSE` })
+          markers.push({ time: tt, position: t.side === 'BUY' ? 'aboveBar' : 'belowBar', color: mc.close, shape: 'square', text: `${mk}:CLOSE` })
         })
         const tr = m?.triggers
         if (tr) {
