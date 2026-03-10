@@ -37,6 +37,11 @@ export default function App() {
     await load()
   }
 
+  const setMode = async (mode) => {
+    await fetch(`${API}/api/mode/${mode}`, { method: 'POST' })
+    await load()
+  }
+
   const toggle = async () => {
     await fetch(`${API}/api/auto-scan`, { method: 'POST' })
     await load()
@@ -70,9 +75,9 @@ export default function App() {
 
     <div className='top'>
       <div>
-        <h2>BTC/USD 15m Paper Dashboard</h2>
+        <h2>BTC/USD Paper Dashboard</h2>
         <div style={{fontSize:12,opacity:.8}}>
-          Market update: {state.latest_market_data_time || '-'} | Scan: {state.latest_scan_time || '-'} | Decision: {state.latest_decision_time || '-'}
+          Mode: {state.mode_label || state.active_mode} | Market update: {state.latest_market_data_time || '-'} | Scan: {state.latest_scan_time || '-'} | Decision: {state.latest_decision_time || '-'}
         </div>
       </div>
       <div style={{display:'flex',gap:8,alignItems:'center'}}>
@@ -81,6 +86,8 @@ export default function App() {
           AUTO: {d.status || 'INSUFFICIENT_DATA'}
         </span>
         <span style={{fontSize:12,opacity:.85}}>at {state.latest_decision_time || '-'}</span>
+        <button onClick={() => setMode('btc_15m_conservative')}>BTC/USD 15m conservative</button>
+        <button onClick={() => setMode('btc_5m_aggressive')}>BTC/USD 5m aggressive</button>
         <button onClick={runScan}>Run Scan</button>
         <button onClick={toggle}>{state.auto_scan ? 'Pause Auto Scan' : 'Resume Auto Scan'}</button>
       </div>
@@ -140,6 +147,14 @@ export default function App() {
           {(state.closed_trades || []).slice().reverse().map((t,i)=><tr key={i}><td>{t.open_time}</td><td>{t.close_time}</td><td>{t.side}</td><td>{t.entry_fill_price}</td><td>{t.close_fill_price}</td><td>{t.realized_pnl}</td><td>{t.close_reason}</td></tr>)}
         </tbody>
       </table>
+    </div>
+
+    <div className='panel' style={{marginTop:12}}>
+      <h3>Mode Stats</h3>
+      <p>Total Opened: {state.mode_stats?.total_opened ?? 0} | Total Closed: {state.mode_stats?.total_closed ?? 0}</p>
+      <p>Win Rate: {state.mode_stats?.win_rate ?? 0}% | Avg Win: {state.mode_stats?.average_win ?? 0} | Avg Loss: {state.mode_stats?.average_loss ?? 0}</p>
+      <p>Realized: {state.mode_stats?.realized_pnl ?? 0} | Unrealized: {state.mode_stats?.unrealized_pnl ?? 0} | Max Drawdown: {state.mode_stats?.max_drawdown ?? 0}</p>
+      <pre style={{whiteSpace:'pre-wrap',fontSize:11}}>{JSON.stringify(state.mode_stats?.performance_by_regime || {}, null, 2)}</pre>
     </div>
 
     <div className='panel' style={{marginTop:12}}>
