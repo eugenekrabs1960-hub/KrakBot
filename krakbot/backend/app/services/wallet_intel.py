@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+
 
 CLASS_RULE_VERSION = "wclass-v1"
 INFERENCE_VERSION = "winfer-v1"
@@ -19,12 +21,11 @@ SIGNAL_VERSION = "wsignal-v1"
 
 @dataclass
 class EligibilityConfig:
-    # Scaffold defaults intentionally low for local pipeline bootstrapping.
-    min_t1_events_30d: int = 1
-    min_active_days_30d: int = 1
-    min_notional_30d: float = 50.0
-    min_sol_relevance: float = 0.8
-    recency_days: int = 5
+    min_t1_events_30d: int = settings.wallet_intel_min_t1_events_30d
+    min_active_days_30d: int = settings.wallet_intel_min_active_days_30d
+    min_notional_30d: float = settings.wallet_intel_min_notional_30d
+    min_sol_relevance: float = settings.wallet_intel_min_sol_relevance
+    recency_days: int = settings.wallet_intel_recency_days
 
 
 class WalletIntelService:
@@ -154,11 +155,13 @@ class WalletIntelService:
             text(
                 """
                 SELECT wm.id AS wallet_id,
+                       wm.manual_force_exclude AS manual_force_exclude,
+                       wm.manual_force_include AS manual_force_include,
                        COUNT(*) FILTER (WHERE wie.confidence_tier='T1') AS t1_count,
                        COALESCE(SUM(wie.notional_usd_est) FILTER (WHERE wie.confidence_tier='T1'),0) AS t1_notional
                 FROM wallet_master wm
                 LEFT JOIN wallet_inferred_event wie ON wie.wallet_id = wm.id
-                GROUP BY wm.id
+                GROUP BY wm.id, wm.manual_force_exclude, wm.manual_force_include
                 """
             )
         ).mappings().all()
@@ -171,7 +174,16 @@ class WalletIntelService:
             excluded = False
             conf = 0.5
             reasons = []
-            if t1 >= 20 and notion >= 25000:
+            if bool(r["manual_force_exclude"]):
+                label = "unknown"
+                excluded = True
+                conf = 1.0
+                reasons = ["manual_force_exclude"]
+            elif bool(r["manual_force_include"]):
+                label = "smart_money_candidate"
+                conf = 1.0
+                reasons = ["manual_force_include"]
+            elif t1 >= 20 and notion >= 25000:
                 label = "smart_money_candidate"
                 conf = 0.8
                 reasons = ["t1_count_high", "notional_high"]
@@ -217,6 +229,8 @@ class WalletIntelService:
                   ORDER BY wallet_id, effective_from DESC
                 )
                 SELECT wm.id AS wallet_id,
+                       wm.manual_force_include AS manual_force_include,
+                       wm.manual_force_exclude AS manual_force_exclude,
                        COUNT(*) FILTER (WHERE wie.confidence_tier='T1' AND wie.event_ts >= :since_30d) AS t1_count_30d,
                        COUNT(DISTINCT to_timestamp(wie.event_ts/1000)::date) FILTER (WHERE wie.confidence_tier='T1' AND wie.event_ts >= :since_30d) AS active_days_30d,
                        COALESCE(SUM(wie.notional_usd_est) FILTER (WHERE wie.confidence_tier='T1' AND wie.event_ts >= :since_30d),0) AS notional_30d,
@@ -227,7 +241,7 @@ class WalletIntelService:
                 FROM wallet_master wm
                 LEFT JOIN wallet_inferred_event wie ON wie.wallet_id = wm.id
                 LEFT JOIN latest_cls lc ON lc.wallet_id = wm.id
-                GROUP BY wm.id, lc.excluded
+                GROUP BY wm.id, wm.manual_force_include, wm.manual_force_exclude, lc.excluded
                 """
             ),
             {"since_30d": since_30d, "recency_since": recency_since},
@@ -241,23 +255,25 @@ class WalletIntelService:
             all_events = int(r["all_events_30d"] or 0)
             sol_events = int(r["sol_events_30d"] or 0)
             t1_recent = int(r["t1_recent"] or 0)
-            excluded = bool(r["excluded"])
+            excluded = bool(r["excluded"]) or bool(r["manual_force_exclude"])
+            force_include = bool(r["manual_force_include"])
             sol_rel = (sol_events / all_events) if all_events > 0 else 0.0
 
-            if t1 < cfg.min_t1_events_30d:
-                failed.append("min_t1_events")
-            if ad < cfg.min_active_days_30d:
-                failed.append("min_active_days")
-            if notion < cfg.min_notional_30d:
-                failed.append("min_notional")
-            if sol_rel < cfg.min_sol_relevance:
-                failed.append("min_sol_relevance")
-            if t1_recent < 1:
-                failed.append("recency")
+            if not force_include:
+                if t1 < cfg.min_t1_events_30d:
+                    failed.append("min_t1_events")
+                if ad < cfg.min_active_days_30d:
+                    failed.append("min_active_days")
+                if notion < cfg.min_notional_30d:
+                    failed.append("min_notional")
+                if sol_rel < cfg.min_sol_relevance:
+                    failed.append("min_sol_relevance")
+                if t1_recent < 1:
+                    failed.append("recency")
             if excluded:
                 failed.append("classification_excluded")
 
-            eligible = len(failed) == 0
+            eligible = (len(failed) == 0) or (force_include and not excluded)
             metrics = {
                 "t1_count_30d": t1,
                 "active_days_30d": ad,

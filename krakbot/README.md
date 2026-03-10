@@ -145,6 +145,19 @@ curl -s -X POST http://localhost:8010/api/wallet-intel/admin/run-pipeline \
 curl -s http://localhost:8010/api/wallet-intel/cohorts/top_sol_active_wallets/latest
 ```
 
+Phase-2 provider config (real Helius fetch, fallback to stub when unset):
+
+```bash
+WALLET_INTEL_HELIUS_API_KEY=your_key
+WALLET_INTEL_SOLANA_WATCHLIST=wallet1,wallet2,wallet3
+WALLET_INTEL_DEFAULT_PRICE_REF_USD=85
+WALLET_INTEL_MIN_T1_EVENTS_30D=20
+WALLET_INTEL_MIN_ACTIVE_DAYS_30D=10
+WALLET_INTEL_MIN_NOTIONAL_30D=25000
+WALLET_INTEL_MIN_SOL_RELEVANCE=0.8
+WALLET_INTEL_RECENCY_DAYS=5
+```
+
 ## Known Working Verification
 
 Start stack:

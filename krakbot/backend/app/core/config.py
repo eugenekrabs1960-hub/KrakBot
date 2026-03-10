@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     live_paper_test_min_seconds_between_orders: float = 5.0
     live_paper_test_force_paper_only: bool = True
 
+    # Wallet Intelligence Benchmark (WIB) phase-2 settings
+    wallet_intel_helius_api_key: str = ""
+    wallet_intel_helius_base_url: str = "https://api.helius.xyz"
+    wallet_intel_solana_watchlist: str = ""
+    wallet_intel_default_price_ref_usd: float = 85.0
+    wallet_intel_min_t1_events_30d: int = 20
+    wallet_intel_min_active_days_30d: int = 10
+    wallet_intel_min_notional_30d: float = 25000.0
+    wallet_intel_min_sol_relevance: float = 0.8
+    wallet_intel_recency_days: int = 5
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

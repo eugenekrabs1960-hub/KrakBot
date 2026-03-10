@@ -5,7 +5,7 @@ from sqlalchemy import text
 from app.db.session import get_db
 from app.schemas.wallet_intel import WalletPipelineRunRequest, WalletToggleExclusionRequest
 from app.services.wallet_intel import WalletIntelService
-from app.adapters.wallet_intel_providers import HeliusProviderStub
+from app.adapters.wallet_intel_providers import HeliusProvider, HeliusProviderStub
 
 router = APIRouter(prefix='/wallet-intel', tags=['wallet-intel'])
 
@@ -34,8 +34,12 @@ async def run_pipeline(payload: WalletPipelineRunRequest, db: Session = Depends(
 
     events = []
     if payload.provider == 'helius':
-        provider = HeliusProviderStub()
+        # Try real provider first, fallback to stub if not configured.
+        provider = HeliusProvider()
         fetched, _ = await provider.fetch_wallet_events(limit=100)
+        if not fetched:
+            provider = HeliusProviderStub()
+            fetched, _ = await provider.fetch_wallet_events(limit=100)
         events = [
             {
                 'provider': x.provider,
