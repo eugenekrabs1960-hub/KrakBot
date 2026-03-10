@@ -289,8 +289,28 @@ async def execute_mode_scan(mode: str):
         if fb["status"] == "PROPOSE_TRADE": d = fb
     d["signal_id"] = d.get("signal_id") or f"{mode}|{payload['timestamp']}|{candles[-1]['time']}"
 
+    history_events: list[dict[str, Any]] = []
+
+    def make_history_row(decision: dict[str, Any], *, ts: str | None = None, decision_time: str | None = None):
+        return {
+            "timestamp": ts or now_iso(),
+            "decision_time": decision_time or now_iso(),
+            "mode": mode,
+            "status": decision.get("status"),
+            "side": decision.get("side", ""),
+            "entry_price": decision.get("entry_price", 0),
+            "stop_loss": decision.get("stop_loss", 0),
+            "take_profit": decision.get("take_profit", 0),
+            "regime_label": decision.get("regime_label", ""),
+            "reason": decision.get("reason", ""),
+            "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
+            "invalidation": decision.get("invalidation", ""),
+            "signal_id": decision.get("signal_id", ""),
+        }
+
     # auto execution per-mode lock only
     if d["status"] == "PROPOSE_TRADE":
+        history_events.append(make_history_row(d, ts=payload["timestamp"]))
         bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PROPOSE_TRADE", "decision": d}
         if d["signal_id"] not in bucket["executed_signal_ids"] and len(bucket["open_positions"]) == 0:
             slip = payload["market_data"][0]["slippage_assumption_pct"]
@@ -305,7 +325,8 @@ async def execute_mode_scan(mode: str):
             bucket["open_positions"].append(pos)
             bucket["executed_signal_ids"].add(d["signal_id"])
             bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "AUTO_EXECUTED_PAPER", "execution_status": "opened_paper_position", "decision": d, "entry_fill_price": fill})
-            bucket["history"].append({"timestamp": now_iso(), "decision_time": now_iso(), "mode": mode, "status": "PAPER_TRADE_OPEN", "side": pos["side"], "entry_price": fill, "stop_loss": pos["stop_loss"], "take_profit": pos["take_profit"], "regime_label": pos["regime_label"], "reason": "Auto paper open", "risk_reward_ratio": pos["risk_reward_ratio"], "invalidation": pos["invalidation"], "signal_id": pos["signal_id"]})
+            bucket["pending_orders"] = [o for o in bucket["pending_orders"] if o.get("signal_id") != d["signal_id"]]
+            history_events.append(make_history_row({"status": "PAPER_TRADE_OPEN", "side": pos["side"], "entry_price": fill, "stop_loss": pos["stop_loss"], "take_profit": pos["take_profit"], "regime_label": pos["regime_label"], "reason": "Auto paper open", "risk_reward_ratio": pos["risk_reward_ratio"], "invalidation": pos["invalidation"], "signal_id": pos["signal_id"]}))
             d = {**d, "status": "PAPER_TRADE_OPEN", "reason": "Auto-executed in paper mode."}
             bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_OPEN", "decision": d}
 
@@ -317,7 +338,8 @@ async def execute_mode_scan(mode: str):
         if c:
             bucket["closed_trades"].append(c)
             bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "realized_pnl": c["realized_pnl"]})
-            bucket["history"].append({"timestamp": now_iso(), "decision_time": now_iso(), "mode": mode, "status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']}", "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "signal_id": c["signal_id"]})
+            bucket["pending_orders"] = [o for o in bucket["pending_orders"] if o.get("signal_id") != c["signal_id"]]
+            history_events.append(make_history_row({"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']}", "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "signal_id": c["signal_id"]}))
             d = {"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']} with realized PnL {c['realized_pnl']}", "signal_id": c["signal_id"]}
             bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_CLOSED", "decision": d}
         else:
@@ -346,7 +368,9 @@ async def execute_mode_scan(mode: str):
     }
     bucket["latest"] = latest
     bucket["last_candle_time"] = candles[-1]["time"]
-    bucket["history"].append({"timestamp": latest["latest_scan_time"], "decision_time": latest["latest_decision_time"], "mode": mode, "status": latest["latest_decision"].get("status"), "side": latest["latest_decision"].get("side", ""), "entry_price": latest["latest_decision"].get("entry_price", 0), "stop_loss": latest["latest_decision"].get("stop_loss", 0), "take_profit": latest["latest_decision"].get("take_profit", 0), "regime_label": latest["latest_decision"].get("regime_label", ""), "reason": latest["latest_decision"].get("reason", ""), "risk_reward_ratio": latest["latest_decision"].get("risk_reward_ratio", 0), "invalidation": latest["latest_decision"].get("invalidation", ""), "signal_id": latest["latest_decision"].get("signal_id", "")})
+    if not history_events:
+        history_events.append(make_history_row(latest["latest_decision"], ts=latest["latest_scan_time"], decision_time=latest["latest_decision_time"]))
+    bucket["history"].extend(history_events)
     return latest
 
 
