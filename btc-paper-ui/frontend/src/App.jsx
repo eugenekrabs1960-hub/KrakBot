@@ -4,7 +4,7 @@ import { createChart } from 'lightweight-charts'
 const API = 'http://127.0.0.1:8000'
 const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_aggressive']
 
-function SharedChart({ state }) {
+function SharedChart({ state, theme }) {
   const ref = useRef(null)
   const baseMode = state?.modes?.btc_5m_aggressive?.market_data?.[0]?.ohlcv?.length
     ? state?.modes?.btc_5m_aggressive
@@ -15,10 +15,11 @@ function SharedChart({ state }) {
     if (!ref.current || candles.length === 0) return
     ref.current.innerHTML = ''
 
+    const isLight = theme === 'light'
     const chart = createChart(ref.current, {
       height: 300,
-      layout: { background: { color: '#161b22' }, textColor: '#e6edf3' },
-      grid: { vertLines: { color: '#30363d' }, horzLines: { color: '#30363d' } }
+      layout: { background: { color: isLight ? '#ffffff' : '#161b22' }, textColor: isLight ? '#111827' : '#e6edf3' },
+      grid: { vertLines: { color: isLight ? '#e5e7eb' : '#30363d' }, horzLines: { color: isLight ? '#e5e7eb' : '#30363d' } }
     })
     const s = chart.addCandlestickSeries()
     s.setData(candles.map(c => ({
@@ -33,7 +34,7 @@ function SharedChart({ state }) {
         const t = Math.floor(new Date(p.open_time).getTime() / 1000)
         markers.push({ time: t, position: p.side === 'BUY' ? 'belowBar' : 'aboveBar', color: '#1f6feb', shape: 'circle', text: `${mk}:OPEN` })
         s.createPriceLine({ price: p.entry_fill_price, color: '#1f6feb', lineStyle: 2, lineWidth: 1, title: `${mk} entry` })
-        s.createPriceLine({ price: p.stop_loss, color: '#f85149', lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
+        s.createPriceLine({ price: p.stop_loss, color: 'var(--danger)', lineStyle: 2, lineWidth: 1, title: `${mk} SL` })
         s.createPriceLine({ price: p.take_profit, color: '#2ea043', lineStyle: 2, lineWidth: 1, title: `${mk} TP` })
       })
       ;(m?.closed_trades || []).slice(-8).forEach((t) => {
@@ -44,7 +45,7 @@ function SharedChart({ state }) {
       })
       const tr = m?.triggers
       if (tr) {
-        s.createPriceLine({ price: tr.upper, color: '#f85149', lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
+        s.createPriceLine({ price: tr.upper, color: 'var(--danger)', lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
         s.createPriceLine({ price: tr.lower, color: '#2ea043', lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
       }
     })
@@ -52,7 +53,7 @@ function SharedChart({ state }) {
     if (markers.length) s.setMarkers(markers)
     chart.timeScale().fitContent()
     return () => chart.remove()
-  }, [state, baseMode])
+  }, [state, baseMode, theme])
 
   const bid = baseMode?.market_data?.[0]?.bid
   const ask = baseMode?.market_data?.[0]?.ask
@@ -67,7 +68,7 @@ function SharedChart({ state }) {
   )
 }
 
-function ModePanel({ modeKey, m, onAck }) {
+function ModePanel({ modeKey, m, onAck, theme }) {
   const d = m?.latest_decision || {}
   const openPos = (m?.open_positions || [])[0]
   const latestClosed = (m?.closed_trades || []).slice(-1)[0]
@@ -88,8 +89,8 @@ function ModePanel({ modeKey, m, onAck }) {
       <h3>{m?.mode_label || modeKey}</h3>
       <div style={{ fontSize: 12, opacity: .85 }}>Timeframe: {m?.timeframe} | Last scan: {m?.latest_scan_time}</div>
       {m?.notify_user && (
-        <div style={{ marginTop: 8, border: '1px solid #f85149', padding: 8, borderRadius: 6 }}>
-          <strong style={{ color: '#f85149' }}>{m.notify_user.message}</strong>
+        <div style={{ marginTop: 8, border: '1px solid var(--danger)', padding: 8, borderRadius: 6 }}>
+          <strong style={{ color: 'var(--danger)' }}>{m.notify_user.message}</strong>
           <button style={{ marginLeft: 8 }} onClick={() => onAck(modeKey)}>Ack</button>
         </div>
       )}
@@ -98,19 +99,19 @@ function ModePanel({ modeKey, m, onAck }) {
       <p style={{ fontSize: 12 }}>Reason: {d.reason}</p>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,margin:'8px 0',fontSize:12}}>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Cash</strong><div>{cash.toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Equity</strong><div>{equity.toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Realized PnL</strong><div>{Number(realized).toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Unrealized PnL</strong><div>{Number(unrealized).toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Total PnL</strong><div>{Number(totalPnl).toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Max Drawdown</strong><div>{Number(m?.mode_stats?.max_drawdown ?? 0).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Cash</strong><div>{cash.toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Equity</strong><div>{equity.toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Realized PnL</strong><div>{Number(realized).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Unrealized PnL</strong><div>{Number(unrealized).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total PnL</strong><div>{Number(totalPnl).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Max Drawdown</strong><div>{Number(m?.mode_stats?.max_drawdown ?? 0).toFixed(2)}</div></div>
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8,fontSize:12}}>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Open Size / Notional</strong><div>{posQty} / {Number(notional).toFixed(2)}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Latest Fill</strong><div>{openPos?.entry_fill_price ?? '-'}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Bid / Ask</strong><div>{bid} / {ask}</div></div>
-        <div style={{background:'#0d1117',padding:8,borderRadius:6,border:'1px solid #30363d'}}><strong>Spread / %</strong><div>{Number(spread).toFixed(4)} / {Number(spreadPct).toFixed(6)}%</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Open Size / Notional</strong><div>{posQty} / {Number(notional).toFixed(2)}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Latest Fill</strong><div>{openPos?.entry_fill_price ?? '-'}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Bid / Ask</strong><div>{bid} / {ask}</div></div>
+        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Spread / %</strong><div>{Number(spread).toFixed(4)} / {Number(spreadPct).toFixed(6)}%</div></div>
       </div>
 
       <p>Open: {(m?.open_positions || []).length} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
@@ -172,6 +173,7 @@ function ModePanel({ modeKey, m, onAck }) {
 export default function App() {
   const [state, setState] = useState(null)
   const [err, setErr] = useState('')
+  const [theme, setTheme] = useState('dark')
 
   const load = async () => {
     try {
@@ -202,19 +204,20 @@ export default function App() {
   if (!state) return <div className='wrap'>Loading...</div>
 
   return (
-    <div className='wrap'>
+    <div className={`wrap theme-${theme}`}>
       <div className='top'>
         <h2>BTC Paper Dashboard (Parallel Modes)</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <span className='badge'>PAPER MODE</span>
+          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
           <button onClick={runScanBoth}>Run Both Scans</button>
           <button onClick={toggleAuto}>{state.auto_scan ? 'Pause Auto' : 'Resume Auto'}</button>
         </div>
       </div>
-      {err && <div className='panel' style={{ color: '#f85149', borderColor: '#f85149' }}>{err}</div>}
-      <SharedChart state={state} />
+      {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
+      <SharedChart state={state} theme={theme} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
-        {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
+        {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} theme={theme} />)}
       </div>
     </div>
   )
