@@ -367,6 +367,43 @@ def test_eif_filter_decisions_endpoint_bounded(monkeypatch):
     assert out['offset'] == 0
 
 
+def test_eif_trade_trace_normalizes_nullable_payloads(monkeypatch):
+    from app.api.routes.eif import eif_trade_trace
+
+    class _TraceDB(_FakeDB):
+        def execute(self, stmt, params=None):
+            sql = str(stmt)
+            self.calls.append((sql, params or {}))
+            if "FROM eif_trade_context_events" in sql:
+                return _FakeResult(row={"id": 1, "strategy_instance_id": "inst_1", "market": "SOL/USD", "event_type": "entry", "tags": None, "context": None, "ts": "2026-01-01T00:00:00Z"})
+            return _FakeResult()
+
+    fake_db = _TraceDB()
+    monkeypatch.setattr(settings, 'eif_analytics_api_enabled', True)
+    out = eif_trade_trace(limit=1, db=fake_db)
+    assert out['items'][0]['tags'] == []
+    assert out['items'][0]['context'] == {}
+
+
+def test_eif_filter_decisions_includes_regime_snapshot_field(monkeypatch):
+    from app.api.routes.eif import eif_filter_decisions
+
+    class _DecisionDB(_FakeDB):
+        def execute(self, stmt, params=None):
+            sql = str(stmt)
+            self.calls.append((sql, params or {}))
+            if "FROM eif_filter_decisions" in sql and "GROUP BY reason_code" not in sql:
+                return _FakeResult(row={"id": 9, "reason_code": "ok", "regime_snapshot_id": 42})
+            if "GROUP BY reason_code" in sql:
+                return _FakeResult(row={"reason_code": "ok", "count": 1})
+            return _FakeResult()
+
+    fake_db = _DecisionDB()
+    monkeypatch.setattr(settings, 'eif_analytics_api_enabled', True)
+    out = eif_filter_decisions(limit=1, db=fake_db)
+    assert out['items'][0]['regime_snapshot_id'] == 42
+
+
 def test_migration_0008_adds_regime_snapshot_fk_if_database_available():
     from app.db.session import engine
 

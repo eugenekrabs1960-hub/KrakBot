@@ -128,6 +128,7 @@ curl -s 'http://localhost:8010/api/eif/trade-trace?limit=20'
 ```
 
 See `docs/eif-phase1.md` and `docs/eif-phase2.md` for vocabularies, precedence policy, and filter trace schema.
+See `docs/eif-phase3.md` for operator UI workflows (why skipped? what changed?) and rollback/kill-switch runbook.
 
 ## Known Working Verification
 

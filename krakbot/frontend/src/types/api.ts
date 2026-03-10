@@ -20,3 +20,43 @@ export interface TradeRow {
   realized_pnl_usd?: number;
   ts: string;
 }
+
+export interface EifSummaryResponse {
+  analytics_api_enabled: boolean;
+  capture_enabled?: boolean;
+  shadow_mode?: boolean;
+  enforce_mode?: boolean;
+  summary: {
+    context_events?: number;
+    filter_decisions?: number;
+    allowed_decisions?: number;
+    blocked_decisions?: number;
+    regime_snapshots?: number;
+    scorecard_snapshots?: number;
+  };
+}
+
+export interface EifRegimeRow {
+  id: number;
+  strategy_instance_id: string;
+  market: string;
+  trend: string;
+  volatility: string;
+  liquidity: string;
+  session_structure: string;
+  sample_size: number;
+  captured_ts: string;
+}
+
+export interface EifFilterDecisionRow {
+  id: number;
+  strategy_instance_id: string;
+  market: string;
+  decision: string;
+  reason_code: string;
+  allowed: boolean;
+  precedence_stage?: string;
+  regime_snapshot_id?: number;
+  trace?: unknown;
+  ts: string;
+}

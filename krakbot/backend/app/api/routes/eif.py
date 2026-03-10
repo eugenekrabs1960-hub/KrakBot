@@ -96,7 +96,7 @@ def eif_filter_decisions(
         text(
             """
             SELECT id, strategy_instance_id, market, decision, reason_code, allowed,
-                   precedence_stage, shadow_mode, enforce_mode, filter_engine_version,
+                   regime_snapshot_id, precedence_stage, shadow_mode, enforce_mode, filter_engine_version,
                    trace, details, ts
             FROM eif_filter_decisions
             WHERE (:market IS NULL OR market = :market)
@@ -197,7 +197,15 @@ def eif_trade_trace(
         ),
         {"sid": strategy_instance_id, "market": market, "limit": limit, "offset": offset},
     ).mappings().all()
-    return {"analytics_api_enabled": True, "items": [dict(r) for r in rows], "limit": limit, "offset": offset}
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        if item.get('tags') is None:
+            item['tags'] = []
+        if item.get('context') is None:
+            item['context'] = {}
+        normalized.append(item)
+    return {"analytics_api_enabled": True, "items": normalized, "limit": limit, "offset": offset}
 
 
 @router.get('/events/recent')
