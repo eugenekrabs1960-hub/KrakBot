@@ -188,7 +188,7 @@ class KrakenMarketIngestor:
         payload = event["payload"]
         price = float(payload.get("price", 0))
         qty = float(payload.get("qty", 0))
-        ts_ms = int(payload.get("timestamp", event["ts"]))
+        ts_ms = self._parse_event_ts_ms(payload, event["ts"])
         open_ts = (ts_ms // 60000) * 60000
         key = (event["market"], open_ts)
 
