@@ -31,7 +31,7 @@ def check_or_store(
         text(
             """
             INSERT INTO idempotency_keys(key, scope, request_hash, response)
-            VALUES (:key, :scope, :request_hash, :response::jsonb)
+            VALUES (:key, :scope, :request_hash, CAST(:response AS jsonb))
             """
         ),
         {
@@ -47,7 +47,7 @@ def check_or_store(
 
 def update_response(db: Session, key: str, response: dict):
     db.execute(
-        text("UPDATE idempotency_keys SET response=:r::jsonb WHERE key=:k"),
+        text("UPDATE idempotency_keys SET response=CAST(:r AS jsonb) WHERE key=:k"),
         {'k': key, 'r': json.dumps(response)},
     )
     db.commit()

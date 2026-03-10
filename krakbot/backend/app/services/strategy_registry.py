@@ -19,7 +19,7 @@ def create_instance(db: Session, strategy_name: str, market: str, instrument_typ
         text(
             """
             INSERT INTO strategy_instances(id, strategy_id, market, instrument_type, enabled, status, params)
-            VALUES (:id, :strategy_id, :market, :instrument_type, true, 'idle', :params::jsonb)
+            VALUES (:id, :strategy_id, :market, :instrument_type, true, 'idle', CAST(:params AS jsonb))
             """
         ),
         {
