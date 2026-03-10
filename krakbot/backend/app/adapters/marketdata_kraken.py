@@ -1,7 +1,9 @@
 import asyncio
 import json
+import logging
 import time
 from contextlib import suppress
+from datetime import datetime, timezone
 
 import websockets
 from sqlalchemy import text
@@ -14,6 +16,7 @@ from app.services.market_registry import list_markets
 from app.services.ws_hub import ws_hub
 
 KRAKEN_WS_URL = "wss://ws.kraken.com/v2"
+logger = logging.getLogger(__name__)
 
 
 class KrakenMarketIngestor:
@@ -105,6 +108,26 @@ class KrakenMarketIngestor:
             self._save_checkpoint(event.get('ts'))
             await ws_hub.broadcast(event)
 
+    def _parse_event_ts_ms(self, payload: dict, fallback_ms: int) -> int:
+        raw_ts = payload.get("timestamp")
+        if raw_ts is None:
+            return fallback_ms
+
+        if isinstance(raw_ts, (int, float)):
+            return int(raw_ts)
+
+        if isinstance(raw_ts, str):
+            try:
+                # Kraken v2 typically uses RFC3339 like "2026-03-10T03:43:12.123456Z"
+                dt = datetime.fromisoformat(raw_ts.replace('Z', '+00:00'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return int(dt.timestamp() * 1000)
+            except Exception:
+                logger.warning("Failed to parse Kraken trade timestamp: %s", raw_ts)
+
+        return fallback_ms
+
     def _persist_trade(self, event: dict):
         db: Session = SessionLocal()
         try:
@@ -123,13 +146,14 @@ class KrakenMarketIngestor:
                     "side": payload.get("side", "unknown"),
                     "price": float(payload.get("price", 0)),
                     "qty": float(payload.get("qty", 0)),
-                    "event_ts": int(payload.get("timestamp", event["ts"])),
+                    "event_ts": self._parse_event_ts_ms(payload, event["ts"]),
                     "raw": json.dumps(payload),
                 },
             )
             db.commit()
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            logger.exception("Failed persisting Kraken trade payload: %s", exc)
         finally:
             db.close()
 
