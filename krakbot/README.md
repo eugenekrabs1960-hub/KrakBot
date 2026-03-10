@@ -103,6 +103,27 @@ UI panels to watch (`http://localhost:5173`):
 - Rate guards: max orders/minute + min seconds between orders.
 - Decision/order attempt events are logged as `paper_test.decision` and `paper_test.order_attempt`.
 
+## EIF Phase 1 (Shadow Data Capture)
+
+Phase 1 adds EIF capture vocabulary + storage in shadow mode (no filter enforcement changes).
+
+Enable explicitly (default is off):
+
+```bash
+EIF_CAPTURE_ENABLED=true
+EIF_SCORECARD_COMPUTE_ENABLED=true
+```
+
+Operator endpoints:
+
+```bash
+curl -s http://localhost:8010/api/control/eif-flags
+curl -s http://localhost:8010/api/eif/summary
+curl -s 'http://localhost:8010/api/eif/events/recent?limit=20'
+```
+
+See `docs/eif-phase1.md` for locked vocabularies/taxonomies and table details.
+
 ## Known Working Verification
 
 Start stack:

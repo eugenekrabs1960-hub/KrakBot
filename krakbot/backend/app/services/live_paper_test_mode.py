@@ -10,6 +10,8 @@ from app.adapters.execution.base import OrderIntent
 from app.adapters.execution.freqtrade_adapter import FreqtradeExecutionAdapter
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.services.eif_capture import eif_capture
+from app.services.eif_scorecard import eif_scorecard
 from app.services.orchestrator import OrchestratorService
 from app.services.ws_hub import ws_hub
 
@@ -79,8 +81,41 @@ class LivePaperTestModeService:
                 logger.info('paper_test decision strategy=%s state=%s decision=%s allowed=%s reason=%s',
                             strategy_id, bot_state, decision, can_attempt, reason)
                 await ws_hub.broadcast(decision_event)
+                allowed_to_trade = bool(can_attempt and bot_state == 'running' and decision != 'hold')
+                if allowed_to_trade:
+                    reason_code = 'ok'
+                elif bot_state != 'running':
+                    reason_code = 'bot_not_running'
+                elif decision == 'hold':
+                    reason_code = 'hold_decision'
+                else:
+                    reason_code = reason
+
+                eif_capture.capture_filter_decision(
+                    db,
+                    strategy_instance_id=strategy_id,
+                    market=c['market'],
+                    event_type='decision',
+                    decision=decision,
+                    reason_code=reason_code,
+                    allowed=allowed_to_trade,
+                    tags=['mode:paper', 'event:decision', 'source:live_paper_test_mode'],
+                    details={'bot_state': bot_state, 'raw_reason': reason},
+                )
 
                 if bot_state != 'running' or decision == 'hold' or not can_attempt:
+                    eif_capture.capture_trade_context_event(
+                        db,
+                        strategy_instance_id=strategy_id,
+                        market=c['market'],
+                        event_type='skip',
+                        side='buy' if decision == 'enter' else ('sell' if decision == 'exit' else None),
+                        qty=0.0,
+                        price=None,
+                        pnl_usd=None,
+                        tags=['mode:paper', 'event:skip', 'source:live_paper_test_mode'],
+                        context={'bot_state': bot_state, 'reason': reason, 'decision': decision},
+                    )
                     continue
 
                 side = 'buy' if decision == 'enter' else 'sell'
@@ -117,6 +152,20 @@ class LivePaperTestModeService:
                 logger.info('paper_test order_attempt strategy=%s side=%s qty=%.6f accepted=%s error=%s',
                             strategy_id, side, qty, result.get('accepted'), result.get('error_code'))
                 await ws_hub.broadcast(order_event)
+                eif_capture.capture_trade_context_event(
+                    db,
+                    strategy_instance_id=strategy_id,
+                    market=c['market'],
+                    event_type='entry' if decision == 'enter' else 'exit',
+                    side=side,
+                    qty=qty,
+                    price=float(result.get('fill_price')) if result.get('fill_price') is not None else None,
+                    pnl_usd=None,
+                    tags=['mode:paper', f'event:{"entry" if decision == "enter" else "exit"}', 'source:live_paper_test_mode'],
+                    context={'result': result},
+                )
+                if result.get('accepted'):
+                    eif_scorecard.compute_snapshot(db, strategy_id, c['market'])
         finally:
             db.close()
 

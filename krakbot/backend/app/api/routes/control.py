@@ -43,3 +43,13 @@ def live_paper_test_mode_config():
         'min_seconds_between_orders': settings.live_paper_test_min_seconds_between_orders,
         'force_paper_only': settings.live_paper_test_force_paper_only,
     }
+
+
+@router.get('/eif-flags')
+def eif_flags():
+    return {
+        'eif': {
+            'capture': {'enabled': settings.eif_capture_enabled},
+            'scorecard': {'compute': {'enabled': settings.eif_scorecard_compute_enabled}},
+        }
+    }
