@@ -147,6 +147,7 @@ curl -s http://localhost:8010/api/wallet-intel/wallets/w_solana_wallet_demo_1/ex
 curl -s -X POST http://localhost:8010/api/wallet-intel/alignment/tag \
   -H 'content-type: application/json' \
   -d '{"strategy_instance_id":"inst_demo","strategy_side":"buy","scope":"trade"}'
+curl -s http://localhost:8010/api/wallet-intel/alignment/summary?lookback_days=7
 ```
 
 Phase-2 provider config (real Helius fetch, fallback to stub when unset):

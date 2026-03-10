@@ -187,11 +187,22 @@ def eif_trade_trace(
     rows = db.execute(
         text(
             """
-            SELECT id, strategy_instance_id, market, event_type, side, qty, price, pnl_usd, tags, context, ts
-            FROM eif_trade_context_events
-            WHERE (:sid IS NULL OR strategy_instance_id = :sid)
-              AND (:market IS NULL OR market = :market)
-            ORDER BY ts DESC, id DESC
+            SELECT e.id, e.strategy_instance_id, e.market, e.event_type, e.side, e.qty, e.price, e.pnl_usd, e.tags, e.context, e.ts,
+                   a.alignment_state AS benchmark_alignment_state,
+                   a.details_json AS benchmark_alignment_details,
+                   a.ts AS benchmark_alignment_ts
+            FROM eif_trade_context_events e
+            LEFT JOIN LATERAL (
+                SELECT sba.alignment_state, sba.details_json, sba.ts
+                FROM strategy_benchmark_alignment sba
+                WHERE sba.strategy_instance_id = e.strategy_instance_id
+                  AND sba.ts <= e.ts
+                ORDER BY sba.ts DESC
+                LIMIT 1
+            ) a ON TRUE
+            WHERE (:sid IS NULL OR e.strategy_instance_id = :sid)
+              AND (:market IS NULL OR e.market = :market)
+            ORDER BY e.ts DESC, e.id DESC
             LIMIT :limit OFFSET :offset
             """
         ),

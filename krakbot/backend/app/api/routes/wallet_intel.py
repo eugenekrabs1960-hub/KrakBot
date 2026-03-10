@@ -140,3 +140,10 @@ def tag_alignment(payload: WalletAlignmentRequest, db: Session = Depends(get_db)
         trade_ref=payload.trade_ref,
     )
     return {'ok': True, **out}
+
+
+@router.get('/alignment/summary')
+def alignment_summary(lookback_days: int = 7, db: Session = Depends(get_db)):
+    svc = WalletIntelService()
+    out = svc.get_alignment_summary(db, lookback_days=max(1, min(90, int(lookback_days))))
+    return {'ok': True, **out}

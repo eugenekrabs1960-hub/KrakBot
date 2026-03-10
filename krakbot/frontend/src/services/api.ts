@@ -53,6 +53,17 @@ export async function getEifSummary() {
   return parseJsonOrThrow(res);
 }
 
+export async function getWalletIntelHealth() {
+  const res = await fetch(`${API_BASE}/wallet-intel/health`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getWalletIntelAlignmentSummary(lookbackDays = 7) {
+  const d = Math.max(1, Math.min(90, lookbackDays));
+  const res = await fetch(`${API_BASE}/wallet-intel/alignment/summary?lookback_days=${d}`);
+  return parseJsonOrThrow(res);
+}
+
 export async function getEifRegimes(params: { market?: string; strategy_instance_id?: string; limit?: number; offset?: number } = {}) {
   const search = new URLSearchParams();
   if (params.market) search.set('market', params.market);

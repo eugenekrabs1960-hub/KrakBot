@@ -688,6 +688,27 @@ class WalletIntelService:
         db.commit()
         return {"alignment_state": state, "benchmark_signal_id": signal_id, "details": details}
 
+    def get_alignment_summary(self, db: Session, *, lookback_days: int = 7):
+        since_ms = int(time.time() * 1000) - lookback_days * 24 * 60 * 60 * 1000
+        rows = db.execute(
+            text(
+                """
+                SELECT alignment_state, COUNT(*)::int AS count
+                FROM strategy_benchmark_alignment
+                WHERE ts >= :since_ms
+                GROUP BY alignment_state
+                ORDER BY count DESC, alignment_state ASC
+                """
+            ),
+            {"since_ms": since_ms},
+        ).mappings().all()
+        total = sum(int(r["count"]) for r in rows)
+        return {
+            "lookback_days": lookback_days,
+            "total": total,
+            "breakdown": [dict(r) for r in rows],
+        }
+
     def run_pipeline(self, db: Session, *, provider_events: list[dict] | None = None):
         run_id = f"wrun_{uuid.uuid4().hex[:10]}"
         now_ms = int(time.time() * 1000)

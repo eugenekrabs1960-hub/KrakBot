@@ -69,3 +69,9 @@ def test_wallet_explainability_and_alignment_tag(api_base: str):
     align_body = align.json()
     assert align_body["ok"] is True
     assert "alignment_state" in align_body
+
+    summary = requests.get(f"{api_base}/wallet-intel/alignment/summary?lookback_days=7", timeout=TIMEOUT)
+    summary.raise_for_status()
+    summary_body = summary.json()
+    assert summary_body["ok"] is True
+    assert "breakdown" in summary_body
