@@ -382,8 +382,11 @@ class WalletIntelService:
                 )
         db.commit()
 
-    def build_cohort_and_signal(self, db: Session, *, run_id: str, now_ms: int, cohort_id: str = "top_sol_active_wallets", target_size: int = 50):
-        scores = db.execute(
+    def build_cohort_and_signal(self, db: Session, *, run_id: str, now_ms: int, cohort_id: str = "top_sol_active_wallets", target_size: int | None = None):
+        target_size = target_size or settings.wallet_intel_cohort_target_size
+        buffer = settings.wallet_intel_cohort_hysteresis_buffer
+
+        ranked = db.execute(
             text(
                 """
                 WITH latest_score AS (
@@ -395,17 +398,57 @@ class WalletIntelService:
                 SELECT wallet_id, score_total
                 FROM latest_score
                 ORDER BY score_total DESC, wallet_id
-                LIMIT :target_size
+                LIMIT :rank_limit
                 """
             ),
-            {"target_size": target_size},
+            {"rank_limit": target_size + buffer},
         ).mappings().all()
 
-        if not scores:
+        if not ranked:
             return {"cohort_id": cohort_id, "members": 0, "signal": "neutral", "confidence": 0.0}
+
+        prev_members = db.execute(
+            text(
+                """
+                SELECT wallet_id
+                FROM wallet_cohort_membership
+                WHERE cohort_id=:cohort_id
+                  AND cohort_version = (
+                    SELECT cohort_version FROM wallet_cohort_snapshot
+                    WHERE cohort_id=:cohort_id
+                    ORDER BY as_of_ts DESC
+                    LIMIT 1
+                  )
+                """
+            ),
+            {"cohort_id": cohort_id},
+        ).mappings().all()
+        prev_set = {r["wallet_id"] for r in prev_members}
+
+        primary = ranked[:target_size]
+        reserve = ranked[target_size:target_size + buffer]
+        selected = {r["wallet_id"]: float(r["score_total"]) for r in primary}
+
+        for r in reserve:
+            wid = r["wallet_id"]
+            if wid in prev_set and wid not in selected and len(selected) < target_size:
+                selected[wid] = float(r["score_total"])
+
+        # If hysteresis retention did not trigger enough, fill by strict rank.
+        if len(selected) < target_size:
+            for r in ranked:
+                wid = r["wallet_id"]
+                if wid not in selected:
+                    selected[wid] = float(r["score_total"])
+                if len(selected) >= target_size:
+                    break
+
+        scores = [{"wallet_id": k, "score_total": v} for k, v in selected.items()]
+        scores.sort(key=lambda x: (-x["score_total"], x["wallet_id"]))
 
         cohort_version = f"{COHORT_VERSION}-{now_ms}"
         for idx, r in enumerate(scores, start=1):
+            reason = "retained_hysteresis" if (r["wallet_id"] in prev_set and idx > target_size - buffer) else "selected_ranked"
             db.execute(
                 text(
                     """
@@ -420,7 +463,7 @@ class WalletIntelService:
                     "rank": idx,
                     "score_total": float(r["score_total"]),
                     "as_of_ts": now_ms,
-                    "reason_json": json.dumps({"selected_from": "window30_latest"}),
+                    "reason_json": json.dumps({"selected_from": reason}),
                 },
             )
 
@@ -511,6 +554,139 @@ class WalletIntelService:
             "signal": bias_state,
             "confidence": confidence,
         }
+
+    def get_wallet_explainability(self, db: Session, wallet_id: str, *, event_limit: int = 25):
+        wallet = db.execute(
+            text("SELECT id, chain, address, manual_force_include, manual_force_exclude FROM wallet_master WHERE id=:wallet_id"),
+            {"wallet_id": wallet_id},
+        ).mappings().first()
+        if not wallet:
+            return None
+
+        classification = db.execute(
+            text(
+                """
+                SELECT class_label, confidence_score, excluded, reason_codes, rule_version, effective_from
+                FROM wallet_classification
+                WHERE wallet_id=:wallet_id
+                ORDER BY effective_from DESC
+                LIMIT 1
+                """
+            ),
+            {"wallet_id": wallet_id},
+        ).mappings().first()
+
+        eligibility = db.execute(
+            text(
+                """
+                SELECT lookback_days, eligible, failed_rules, metrics_json, threshold_version, generated_at
+                FROM wallet_eligibility_snapshot
+                WHERE wallet_id=:wallet_id
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """
+            ),
+            {"wallet_id": wallet_id},
+        ).mappings().first()
+
+        scores = db.execute(
+            text(
+                """
+                SELECT window_days, score_total, component_scores, penalties_json, score_version, generated_at
+                FROM wallet_score_snapshot
+                WHERE wallet_id=:wallet_id
+                ORDER BY generated_at DESC
+                LIMIT 10
+                """
+            ),
+            {"wallet_id": wallet_id},
+        ).mappings().all()
+
+        inferred = db.execute(
+            text(
+                """
+                SELECT id, side, confidence_tier, confidence_score, notional_usd_est, event_ts, inference_version, reason_codes
+                FROM wallet_inferred_event
+                WHERE wallet_id=:wallet_id
+                ORDER BY event_ts DESC
+                LIMIT :event_limit
+                """
+            ),
+            {"wallet_id": wallet_id, "event_limit": event_limit},
+        ).mappings().all()
+
+        return {
+            "wallet": dict(wallet),
+            "classification": dict(classification) if classification else None,
+            "eligibility": dict(eligibility) if eligibility else None,
+            "scores": [dict(x) for x in scores],
+            "recent_inferred_events": [dict(x) for x in inferred],
+        }
+
+    def tag_alignment(self, db: Session, *, strategy_side: str, scope: str, strategy_instance_id: str | None = None, trade_ref: str | None = None):
+        row = db.execute(
+            text(
+                """
+                SELECT id, bias_state, bias_strength, benchmark_confidence, degraded_state, signal_ts
+                FROM wallet_benchmark_signal
+                ORDER BY signal_ts DESC
+                LIMIT 1
+                """
+            )
+        ).mappings().first()
+
+        if not row:
+            state = "insufficient_benchmark_confidence"
+            signal_id = None
+            details = {"reason": "no_signal"}
+        else:
+            signal_id = row["id"]
+            conf = float(row["benchmark_confidence"] or 0.0)
+            degraded = row["degraded_state"]
+            bias = row["bias_state"]
+            s = (strategy_side or "").lower()
+            is_buy = s in {"buy", "long", "bullish"}
+            is_sell = s in {"sell", "short", "bearish"}
+
+            if conf < settings.wallet_intel_alignment_min_confidence or degraded == "LOW_CONFIDENCE":
+                state = "insufficient_benchmark_confidence"
+            elif bias == "neutral" or (not is_buy and not is_sell):
+                state = "neutral"
+            elif bias == "bullish":
+                state = "aligned_bullish" if is_buy else "opposed_bullish"
+            elif bias == "bearish":
+                state = "aligned_bearish" if is_sell else "opposed_bearish"
+            else:
+                state = "neutral"
+
+            details = {
+                "signal_ts": row["signal_ts"],
+                "bias_state": bias,
+                "bias_strength": row["bias_strength"],
+                "benchmark_confidence": conf,
+                "degraded_state": degraded,
+                "min_confidence_required": settings.wallet_intel_alignment_min_confidence,
+            }
+
+        db.execute(
+            text(
+                """
+                INSERT INTO strategy_benchmark_alignment(strategy_instance_id, trade_ref, scope, alignment_state, benchmark_signal_id, details_json, ts)
+                VALUES (:strategy_instance_id, :trade_ref, :scope, :alignment_state, :benchmark_signal_id, CAST(:details_json AS jsonb), :ts)
+                """
+            ),
+            {
+                "strategy_instance_id": strategy_instance_id,
+                "trade_ref": trade_ref,
+                "scope": scope,
+                "alignment_state": state,
+                "benchmark_signal_id": signal_id,
+                "details_json": json.dumps(details),
+                "ts": int(time.time() * 1000),
+            },
+        )
+        db.commit()
+        return {"alignment_state": state, "benchmark_signal_id": signal_id, "details": details}
 
     def run_pipeline(self, db: Session, *, provider_events: list[dict] | None = None):
         run_id = f"wrun_{uuid.uuid4().hex[:10]}"

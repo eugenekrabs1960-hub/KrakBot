@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.db.session import get_db
-from app.schemas.wallet_intel import WalletPipelineRunRequest, WalletToggleExclusionRequest
+from app.schemas.wallet_intel import (
+    WalletPipelineRunRequest,
+    WalletToggleExclusionRequest,
+    WalletToggleInclusionRequest,
+    WalletAlignmentRequest,
+)
 from app.services.wallet_intel import WalletIntelService
 from app.adapters.wallet_intel_providers import HeliusProvider, HeliusProviderStub
 
@@ -103,3 +108,35 @@ def toggle_exclusion(payload: WalletToggleExclusionRequest, db: Session = Depend
     )
     db.commit()
     return {'ok': True, 'wallet_id': payload.wallet_id, 'force_exclude': payload.force_exclude}
+
+
+@router.post('/admin/toggle-inclusion')
+def toggle_inclusion(payload: WalletToggleInclusionRequest, db: Session = Depends(get_db)):
+    db.execute(
+        text('UPDATE wallet_master SET manual_force_include=:force_include, updated_at=NOW() WHERE id=:wallet_id'),
+        {'wallet_id': payload.wallet_id, 'force_include': payload.force_include},
+    )
+    db.commit()
+    return {'ok': True, 'wallet_id': payload.wallet_id, 'force_include': payload.force_include}
+
+
+@router.get('/wallets/{wallet_id}/explainability')
+def wallet_explainability(wallet_id: str, event_limit: int = 25, db: Session = Depends(get_db)):
+    svc = WalletIntelService()
+    out = svc.get_wallet_explainability(db, wallet_id=wallet_id, event_limit=event_limit)
+    if out is None:
+        return {'ok': False, 'error': 'wallet_not_found', 'wallet_id': wallet_id}
+    return {'ok': True, 'data': out}
+
+
+@router.post('/alignment/tag')
+def tag_alignment(payload: WalletAlignmentRequest, db: Session = Depends(get_db)):
+    svc = WalletIntelService()
+    out = svc.tag_alignment(
+        db,
+        strategy_side=payload.strategy_side,
+        scope=payload.scope,
+        strategy_instance_id=payload.strategy_instance_id,
+        trade_ref=payload.trade_ref,
+    )
+    return {'ok': True, **out}

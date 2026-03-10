@@ -143,6 +143,10 @@ curl -s -X POST http://localhost:8010/api/wallet-intel/admin/run-pipeline \
   -H 'content-type: application/json' \
   -d '{"provider":"helius"}'
 curl -s http://localhost:8010/api/wallet-intel/cohorts/top_sol_active_wallets/latest
+curl -s http://localhost:8010/api/wallet-intel/wallets/w_solana_wallet_demo_1/explainability
+curl -s -X POST http://localhost:8010/api/wallet-intel/alignment/tag \
+  -H 'content-type: application/json' \
+  -d '{"strategy_instance_id":"inst_demo","strategy_side":"buy","scope":"trade"}'
 ```
 
 Phase-2 provider config (real Helius fetch, fallback to stub when unset):
@@ -156,6 +160,9 @@ WALLET_INTEL_MIN_ACTIVE_DAYS_30D=10
 WALLET_INTEL_MIN_NOTIONAL_30D=25000
 WALLET_INTEL_MIN_SOL_RELEVANCE=0.8
 WALLET_INTEL_RECENCY_DAYS=5
+WALLET_INTEL_COHORT_TARGET_SIZE=50
+WALLET_INTEL_COHORT_HYSTERESIS_BUFFER=15
+WALLET_INTEL_ALIGNMENT_MIN_CONFIDENCE=35
 ```
 
 ## Known Working Verification
