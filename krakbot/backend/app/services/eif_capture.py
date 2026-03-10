@@ -99,6 +99,11 @@ class EIFCaptureService:
         allowed: bool,
         tags: list[str] | None = None,
         details: dict | None = None,
+        trace: list[dict] | None = None,
+        precedence_stage: str | None = None,
+        shadow_mode: bool | None = None,
+        enforce_mode: bool | None = None,
+        engine_version: str | None = None,
         ts_ms: int | None = None,
     ):
         if not self.enabled:
@@ -140,10 +145,14 @@ class EIFCaptureService:
                 """
                 INSERT INTO eif_filter_decisions(
                     strategy_instance_id, market, event_type, decision, reason_code, allowed,
-                    reason_code_version, tags, details, regime_version, regime_snapshot_id, regime_snapshot_ts, ts
+                    reason_code_version, tags, details, trace, precedence_stage,
+                    shadow_mode, enforce_mode, filter_engine_version,
+                    regime_version, regime_snapshot_id, regime_snapshot_ts, ts
                 ) VALUES (
                     :sid, :market, :event_type, :decision, :reason_code, :allowed,
-                    :reason_code_version, CAST(:tags AS jsonb), CAST(:details AS jsonb), :regime_version, :regime_snapshot_id, :regime_snapshot_ts, :ts
+                    :reason_code_version, CAST(:tags AS jsonb), CAST(:details AS jsonb), CAST(:trace AS jsonb), :precedence_stage,
+                    :shadow_mode, :enforce_mode, :filter_engine_version,
+                    :regime_version, :regime_snapshot_id, :regime_snapshot_ts, :ts
                 )
                 """
             ),
@@ -157,6 +166,11 @@ class EIFCaptureService:
                 "reason_code_version": REASON_CODE_VERSION,
                 "tags": json.dumps(tags or []),
                 "details": json.dumps(details or {}),
+                "trace": json.dumps(trace or []),
+                "precedence_stage": precedence_stage,
+                "shadow_mode": bool(shadow_mode) if shadow_mode is not None else False,
+                "enforce_mode": bool(enforce_mode) if enforce_mode is not None else False,
+                "filter_engine_version": engine_version or "v1",
                 "regime_version": regime["regime_version"],
                 "regime_snapshot_id": regime_snapshot_id,
                 "regime_snapshot_ts": regime["captured_ts"],

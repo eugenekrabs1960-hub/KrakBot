@@ -234,6 +234,98 @@ def test_live_paper_flow_unchanged_when_eif_disabled(monkeypatch):
     assert calls['submit'] == 1
 
 
+def test_live_paper_shadow_mode_does_not_block(monkeypatch):
+    svc = LivePaperTestModeService()
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.SessionLocal', lambda: _FakeDB())
+    monkeypatch.setattr('app.services.live_paper_test_mode.OrchestratorService.get_state', lambda *_a, **_k: 'running')
+    monkeypatch.setattr(
+        svc,
+        '_load_candidates',
+        lambda _db: [{'strategy_instance_id': 'inst_1', 'market': 'SOL/USD', 'strategy_name': 'trend_following', 'current_position_qty': 0}],
+    )
+    monkeypatch.setattr(settings, 'live_paper_test_min_seconds_between_orders', 0.0)
+    monkeypatch.setattr(settings, 'live_paper_test_max_orders_per_minute', 99)
+    monkeypatch.setattr(settings, 'live_paper_test_order_qty', 0.1)
+
+    class _Eval:
+        allowed = True
+        reason_code = 'shadow_data_stale'
+        traces = []
+        blocked_stage = 'data_integrity'
+        shadow_mode = True
+        enforce_mode = False
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.eif_filter_engine.evaluate', lambda *_a, **_k: _Eval())
+
+    calls = {'submit': 0}
+
+    class _FakeAdapter:
+        def __init__(self, _db):
+            self.bridge = type('Bridge', (), {'enabled': True, 'base_url': 'http://x'})()
+
+        def submit_order(self, _intent):
+            calls['submit'] += 1
+            return {'accepted': True, 'order_id': 'ord_1'}
+
+    async def _broadcast(_evt):
+        return None
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.FreqtradeExecutionAdapter', _FakeAdapter)
+    monkeypatch.setattr('app.services.live_paper_test_mode.ws_hub.broadcast', _broadcast)
+
+    import asyncio
+
+    asyncio.run(svc.run_once())
+    assert calls['submit'] == 1
+
+
+def test_live_paper_enforce_mode_blocks(monkeypatch):
+    svc = LivePaperTestModeService()
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.SessionLocal', lambda: _FakeDB())
+    monkeypatch.setattr('app.services.live_paper_test_mode.OrchestratorService.get_state', lambda *_a, **_k: 'running')
+    monkeypatch.setattr(
+        svc,
+        '_load_candidates',
+        lambda _db: [{'strategy_instance_id': 'inst_1', 'market': 'SOL/USD', 'strategy_name': 'trend_following', 'current_position_qty': 0}],
+    )
+    monkeypatch.setattr(settings, 'live_paper_test_min_seconds_between_orders', 0.0)
+    monkeypatch.setattr(settings, 'live_paper_test_max_orders_per_minute', 99)
+    monkeypatch.setattr(settings, 'live_paper_test_order_qty', 0.1)
+
+    class _Eval:
+        allowed = False
+        reason_code = 'spread_too_wide'
+        traces = []
+        blocked_stage = 'hard_risk'
+        shadow_mode = False
+        enforce_mode = True
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.eif_filter_engine.evaluate', lambda *_a, **_k: _Eval())
+
+    calls = {'submit': 0}
+
+    class _FakeAdapter:
+        def __init__(self, _db):
+            self.bridge = type('Bridge', (), {'enabled': True, 'base_url': 'http://x'})()
+
+        def submit_order(self, _intent):
+            calls['submit'] += 1
+            return {'accepted': True, 'order_id': 'ord_1'}
+
+    async def _broadcast(_evt):
+        return None
+
+    monkeypatch.setattr('app.services.live_paper_test_mode.FreqtradeExecutionAdapter', _FakeAdapter)
+    monkeypatch.setattr('app.services.live_paper_test_mode.ws_hub.broadcast', _broadcast)
+
+    import asyncio
+
+    asyncio.run(svc.run_once())
+    assert calls['submit'] == 0
+
+
 def test_migration_0007_applies_if_database_available():
     from app.db.session import engine
 
@@ -254,6 +346,25 @@ def test_migration_0007_applies_if_database_available():
     assert ctx == 'eif_trade_context_events'
     assert dec == 'eif_filter_decisions'
     assert sc == 'eif_scorecard_snapshots'
+
+
+def test_eif_analytics_api_guard(monkeypatch):
+    from app.api.routes.eif import eif_summary
+
+    fake_db = _FakeDB()
+    monkeypatch.setattr(settings, 'eif_analytics_api_enabled', False)
+    out = eif_summary(db=fake_db)
+    assert out['analytics_api_enabled'] is False
+
+
+def test_eif_filter_decisions_endpoint_bounded(monkeypatch):
+    from app.api.routes.eif import eif_filter_decisions
+
+    fake_db = _FakeDB()
+    monkeypatch.setattr(settings, 'eif_analytics_api_enabled', True)
+    out = eif_filter_decisions(limit=999, offset=-5, db=fake_db)
+    assert out['limit'] == 200
+    assert out['offset'] == 0
 
 
 def test_migration_0008_adds_regime_snapshot_fk_if_database_available():
@@ -280,3 +391,29 @@ def test_migration_0008_adds_regime_snapshot_fk_if_database_available():
         pytest.skip(f"DB not available for migration apply test: {exc}")
 
     assert col == 'regime_snapshot_id'
+
+
+def test_migration_0009_adds_filter_trace_columns_if_database_available():
+    from app.db.session import engine
+
+    migration_path = Path(__file__).resolve().parents[1] / "app" / "db" / "migrations" / "0009_eif_phase2_filter_engine.sql"
+    sql = migration_path.read_text()
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+            col = conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'eif_filter_decisions'
+                      AND column_name IN ('trace', 'precedence_stage', 'shadow_mode', 'enforce_mode', 'filter_engine_version')
+                    """
+                )
+            ).fetchall()
+    except Exception as exc:  # pragma: no cover - environment guard
+        pytest.skip(f"DB not available for migration apply test: {exc}")
+
+    assert len(col) == 5

@@ -51,5 +51,11 @@ def eif_flags():
         'eif': {
             'capture': {'enabled': settings.eif_capture_enabled},
             'scorecard': {'compute': {'enabled': settings.eif_scorecard_compute_enabled}},
+            'filter': {
+                'shadow_mode': settings.eif_filter_shadow_mode,
+                'enforce_mode': settings.eif_filter_enforce_mode,
+                'fail_closed': settings.eif_filter_fail_closed,
+            },
+            'analytics': {'api': {'enabled': settings.eif_analytics_api_enabled}},
         }
     }

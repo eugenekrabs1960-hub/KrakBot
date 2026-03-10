@@ -11,6 +11,7 @@ from app.adapters.execution.freqtrade_adapter import FreqtradeExecutionAdapter
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.eif_capture import eif_capture
+from app.services.eif_filter_engine import eif_filter_engine
 from app.services.eif_scorecard import eif_scorecard
 from app.services.orchestrator import OrchestratorService
 from app.services.ws_hub import ws_hub
@@ -67,6 +68,7 @@ class LivePaperTestModeService:
 
                 decision = self._decide(c)
                 can_attempt, reason = self._allow_attempt(strategy_id, now)
+                filter_eval = eif_filter_engine.evaluate(db, c, decision)
 
                 decision_event = {
                     'type': 'paper_test.decision',
@@ -77,17 +79,23 @@ class LivePaperTestModeService:
                     'decision': decision,
                     'allowed': can_attempt,
                     'reason': reason,
+                    'filter_allowed': filter_eval.allowed,
+                    'filter_reason_code': filter_eval.reason_code,
+                    'filter_enforce_mode': filter_eval.enforce_mode,
+                    'filter_shadow_mode': filter_eval.shadow_mode,
                 }
                 logger.info('paper_test decision strategy=%s state=%s decision=%s allowed=%s reason=%s',
                             strategy_id, bot_state, decision, can_attempt, reason)
                 await ws_hub.broadcast(decision_event)
-                allowed_to_trade = bool(can_attempt and bot_state == 'running' and decision != 'hold')
+                allowed_to_trade = bool(can_attempt and bot_state == 'running' and decision != 'hold' and filter_eval.allowed)
                 if allowed_to_trade:
                     reason_code = 'ok'
                 elif bot_state != 'running':
                     reason_code = 'bot_not_running'
                 elif decision == 'hold':
                     reason_code = 'hold_decision'
+                elif not filter_eval.allowed:
+                    reason_code = filter_eval.reason_code
                 else:
                     reason_code = reason
 
@@ -101,9 +109,14 @@ class LivePaperTestModeService:
                     allowed=allowed_to_trade,
                     tags=['mode:paper', 'event:decision', 'source:live_paper_test_mode'],
                     details={'bot_state': bot_state, 'raw_reason': reason},
+                    trace=filter_eval.traces,
+                    precedence_stage=filter_eval.blocked_stage,
+                    shadow_mode=filter_eval.shadow_mode,
+                    enforce_mode=filter_eval.enforce_mode,
+                    engine_version=eif_filter_engine.version,
                 )
 
-                if bot_state != 'running' or decision == 'hold' or not can_attempt:
+                if bot_state != 'running' or decision == 'hold' or not can_attempt or not filter_eval.allowed:
                     eif_capture.capture_trade_context_event(
                         db,
                         strategy_instance_id=strategy_id,
@@ -175,8 +188,10 @@ class LivePaperTestModeService:
                 """
                 SELECT si.id AS strategy_instance_id,
                        si.market,
+                       s.name AS strategy_name,
                        COALESCE(pos.qty, 0) AS current_position_qty
                 FROM strategy_instances si
+                JOIN strategies s ON s.id = si.strategy_id
                 LEFT JOIN positions pos ON pos.strategy_instance_id = si.id AND pos.market = si.market
                 WHERE si.enabled = TRUE
                   AND si.market = :market

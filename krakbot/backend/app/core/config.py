@@ -15,9 +15,26 @@ class Settings(BaseSettings):
     # Live paper test mode (safe defaults: off)
     live_paper_test_mode_enabled: bool = False
 
-    # EIF Phase 1 feature flags (safe defaults: off)
+    # EIF feature flags (safe defaults: off)
     eif_capture_enabled: bool = False
     eif_scorecard_compute_enabled: bool = False
+    eif_filter_shadow_mode: bool = False
+    eif_filter_enforce_mode: bool = False
+    eif_filter_fail_closed: bool = False
+    eif_analytics_api_enabled: bool = False
+
+    # EIF filter thresholds (MVP defaults)
+    eif_filter_max_data_age_ms: int = 120000
+    eif_filter_min_qty_5m: float = 15.0
+    eif_filter_min_trade_count_window: int = 10
+    eif_filter_max_spread_pct: float = 0.01
+    eif_filter_min_volatility_pct: float = 0.001
+    eif_filter_max_volatility_pct: float = 0.05
+    eif_filter_min_depth_qty: float = 3.0
+    eif_filter_depth_levels: int = 5
+    eif_filter_min_imbalance_abs: float = 0.25
+    eif_filter_cooldown_consecutive_losses: int = 3
+    eif_filter_drawdown_shock_pct: float = 12.0
     live_paper_test_market: str = "SOL/USD"
     live_paper_test_loop_interval_sec: float = 5.0
     live_paper_test_order_qty: float = 0.05

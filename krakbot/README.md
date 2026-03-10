@@ -103,15 +103,17 @@ UI panels to watch (`http://localhost:5173`):
 - Rate guards: max orders/minute + min seconds between orders.
 - Decision/order attempt events are logged as `paper_test.decision` and `paper_test.order_attempt`.
 
-## EIF Phase 1 (Shadow Data Capture)
+## EIF Phases 1-2 (Capture + Optional Filter Enforcement + Analytics)
 
-Phase 1 adds EIF capture vocabulary + storage in shadow mode (no filter enforcement changes).
-
-Enable explicitly (default is off):
+Enable explicitly (defaults are safe/off):
 
 ```bash
 EIF_CAPTURE_ENABLED=true
 EIF_SCORECARD_COMPUTE_ENABLED=true
+EIF_FILTER_SHADOW_MODE=true        # evaluate + trace only
+EIF_FILTER_ENFORCE_MODE=false      # keep false unless you want blocking
+EIF_FILTER_FAIL_CLOSED=false       # fail-open default
+EIF_ANALYTICS_API_ENABLED=true
 ```
 
 Operator endpoints:
@@ -119,10 +121,13 @@ Operator endpoints:
 ```bash
 curl -s http://localhost:8010/api/control/eif-flags
 curl -s http://localhost:8010/api/eif/summary
-curl -s 'http://localhost:8010/api/eif/events/recent?limit=20'
+curl -s 'http://localhost:8010/api/eif/filter-decisions?limit=20'
+curl -s 'http://localhost:8010/api/eif/regimes?limit=20'
+curl -s 'http://localhost:8010/api/eif/scorecards?limit=20'
+curl -s 'http://localhost:8010/api/eif/trade-trace?limit=20'
 ```
 
-See `docs/eif-phase1.md` for locked vocabularies/taxonomies and table details.
+See `docs/eif-phase1.md` and `docs/eif-phase2.md` for vocabularies, precedence policy, and filter trace schema.
 
 ## Known Working Verification
 
