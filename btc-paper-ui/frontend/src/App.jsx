@@ -5,6 +5,9 @@ const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_aggressive']
 
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
+  const openPos = (m?.open_positions || [])[0]
+  const latestClosed = (m?.closed_trades || []).slice(-1)[0]
+  const tradeAge = openPos?.open_time ? Math.max(0, Math.floor((Date.now() - new Date(openPos.open_time).getTime()) / 60000)) : null
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
@@ -23,6 +26,43 @@ function ModePanel({ modeKey, m, onAck }) {
       <div style={{ fontSize: 12 }}>
         WinRate: {m?.mode_stats?.win_rate ?? 0}% | AvgWin: {m?.mode_stats?.average_win ?? 0} | AvgLoss: {m?.mode_stats?.average_loss ?? 0} | MaxDD: {m?.mode_stats?.max_drawdown ?? 0}
       </div>
+
+      <details style={{ marginTop: 8 }}>
+        <summary>Mode details</summary>
+        <div style={{ fontSize: 12, marginTop: 8 }}>
+          <strong>Latest executable decision</strong>
+          <div>Side: {d.side || '-'}</div>
+          <div>Entry: {d.entry_price || 0}</div>
+          <div>Stop Loss: {d.stop_loss || 0}</div>
+          <div>Take Profit: {d.take_profit || 0}</div>
+          <div>Invalidation: {d.invalidation || '-'}</div>
+          <div>Risk/Reward: {d.risk_reward_ratio || 0}</div>
+          <div>Reason: {d.reason || '-'}</div>
+          <div>Latest scan time: {m?.latest_scan_time || '-'}</div>
+          <div>Latest decision time: {m?.latest_decision_time || '-'}</div>
+
+          <div style={{ marginTop: 8 }}><strong>Open trade</strong></div>
+          {openPos ? (
+            <>
+              <div>Fill price: {openPos.entry_fill_price}</div>
+              <div>Unrealized PnL: {openPos.unrealized_pnl}</div>
+              <div>Open time: {openPos.open_time}</div>
+              <div>Age: {tradeAge} min</div>
+            </>
+          ) : <div>None</div>}
+
+          <div style={{ marginTop: 8 }}><strong>Latest closed trade</strong></div>
+          {latestClosed ? (
+            <>
+              <div>Entry: {latestClosed.entry_fill_price}</div>
+              <div>Exit: {latestClosed.close_fill_price}</div>
+              <div>Realized PnL: {latestClosed.realized_pnl}</div>
+              <div>Close reason: {latestClosed.close_reason}</div>
+            </>
+          ) : <div>None</div>}
+        </div>
+      </details>
+
       <details style={{ marginTop: 6 }}>
         <summary>Recent history ({(m?.history || []).length})</summary>
         <table className='rows' style={{ width: '100%' }}>
