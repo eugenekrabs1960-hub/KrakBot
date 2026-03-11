@@ -102,6 +102,10 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   gap: 12px;
 }
 .arena-card { display: grid; gap: 10px; }
+.arena-active-banner {
+  border-color: #5d3eb9;
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.35);
+}
 .arena-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(139,92,246,0.45); }
 .arena-card h3 { margin: 4px 0 0 0; }
 .arena-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }

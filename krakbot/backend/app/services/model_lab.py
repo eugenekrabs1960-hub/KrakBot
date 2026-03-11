@@ -116,6 +116,56 @@ def get_active_model_for_paper(db: Session):
     return {'ok': True, 'item': value}
 
 
+def set_active_execution_model(db: Session, *, agent_id: str, confirm_phrase: str):
+    if confirm_phrase != 'SWITCH':
+        return {'ok': False, 'error': 'confirmation_required', 'required': 'SWITCH'}
+
+    payload_obj = {'agent_id': agent_id, 'selected_at_ms': int(time.time() * 1000)}
+    payload = json.dumps(payload_obj)
+
+    dialect = getattr(getattr(db, 'bind', None), 'dialect', None)
+    dialect_name = getattr(dialect, 'name', '')
+    if dialect_name == 'postgresql':
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_arena_active_execution', CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    else:
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_arena_active_execution', :payload, CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    db.commit()
+    return {'ok': True, 'item': payload_obj}
+
+
+def get_active_execution_model(db: Session):
+    row = db.execute(text("SELECT value FROM system_state WHERE key='model_arena_active_execution' LIMIT 1")).mappings().first()
+    if not row:
+        return {'ok': True, 'item': None}
+    value = row.get('value')
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            value = None
+    return {'ok': True, 'item': value}
+
+
 def train_baseline(db: Session, symbol: str = 'BTC', limit: int = 50000):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     started_at = int(time.time() * 1000)

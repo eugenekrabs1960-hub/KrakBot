@@ -4,8 +4,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.services.model_lab import (
+    get_active_execution_model,
     get_active_model_for_paper,
     list_job_history,
+    set_active_execution_model,
     set_active_model_for_paper,
     strategy_benchmarks,
     train_baseline,
@@ -63,3 +65,19 @@ def test_promote_toggle_requires_confirmation(tmp_path, monkeypatch):
         active = get_active_model_for_paper(db)
         assert active['ok'] is True
         assert active['item']['model_path'] == '/tmp/model.json'
+
+
+def test_execution_model_switch_requires_confirmation(tmp_path):
+    eng = _prep_db(tmp_path / 'ml3.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = set_active_execution_model(db, agent_id='agent_alpha', confirm_phrase='NOPE')
+        assert out['ok'] is False
+
+        ok = set_active_execution_model(db, agent_id='agent_alpha', confirm_phrase='SWITCH')
+        assert ok['ok'] is True
+
+        active = get_active_execution_model(db)
+        assert active['ok'] is True
+        assert active['item']['agent_id'] == 'agent_alpha'

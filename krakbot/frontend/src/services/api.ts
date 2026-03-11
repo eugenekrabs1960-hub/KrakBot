@@ -128,6 +128,17 @@ export async function getActivePaperModel() {
   return parseJsonOrThrow(res);
 }
 
+export async function getActiveExecutionModel() {
+  const res = await fetch(`${API_BASE}/model-lab/active-execution-model`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setActiveExecutionModel(agentId: string, confirmPhrase = 'SWITCH') {
+  const q = new URLSearchParams({ agent_id: agentId, confirm_phrase: confirmPhrase });
+  const res = await fetch(`${API_BASE}/model-lab/set-active-execution-model?${q.toString()}`, { method: 'POST' });
+  return parseJsonOrThrow(res);
+}
+
 export async function promoteModelToPaper(symbol: string, modelPath: string, confirmPhrase = 'PROMOTE') {
   const q = new URLSearchParams({ symbol, model_path: modelPath, confirm_phrase: confirmPhrase });
   const res = await fetch(`${API_BASE}/model-lab/promote-to-paper?${q.toString()}`, { method: 'POST' });

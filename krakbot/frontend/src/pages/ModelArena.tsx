@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
-import { getActivePaperModel, getAgentDecisionPackets } from '../services/api';
+import { getActiveExecutionModel, getActivePaperModel, getAgentDecisionPackets, setActiveExecutionModel } from '../services/api';
 
 type ArenaModel = {
   id: string;
@@ -35,7 +35,12 @@ function prettyJson(value: unknown) {
 export default function ModelArena() {
   const [packets, setPackets] = useState<any[]>([]);
   const [activePaper, setActivePaper] = useState<any>(null);
+  const [activeExecution, setActiveExecution] = useState<any>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
+  const [switchConfirm, setSwitchConfirm] = useState('');
+  const [switchMsg, setSwitchMsg] = useState('');
+  const [switchBusy, setSwitchBusy] = useState(false);
 
   const [symbolFilter, setSymbolFilter] = useState('all');
   const [agentFilter, setAgentFilter] = useState('all');
@@ -44,12 +49,14 @@ export default function ModelArena() {
 
   useEffect(() => {
     const load = async () => {
-      const [packetRes, activeRes] = await Promise.all([
+      const [packetRes, activeRes, execRes] = await Promise.all([
         getAgentDecisionPackets(500).catch(() => ({ items: [] })),
         getActivePaperModel().catch(() => ({ item: null })),
+        getActiveExecutionModel().catch(() => ({ item: null })),
       ]);
       setPackets(packetRes?.items || []);
       setActivePaper(activeRes?.item || null);
+      setActiveExecution(execRes?.item || null);
     };
     load();
   }, []);
@@ -183,6 +190,27 @@ export default function ModelArena() {
     });
   };
 
+  const switchExecutionModel = async () => {
+    if (!switchCandidate) return;
+    setSwitchBusy(true);
+    setSwitchMsg('');
+    try {
+      const out = await setActiveExecutionModel(switchCandidate, switchConfirm || '');
+      if (out?.ok) {
+        setActiveExecution(out.item || null);
+        setSwitchMsg(`Active execution model switched to ${switchCandidate}.`);
+        setSwitchCandidate(null);
+        setSwitchConfirm('');
+      } else {
+        setSwitchMsg(out?.error || 'Switch failed');
+      }
+    } catch (err: any) {
+      setSwitchMsg(err?.message || 'Switch failed');
+    } finally {
+      setSwitchBusy(false);
+    }
+  };
+
   return (
     <section>
       <PageHeader
@@ -190,9 +218,18 @@ export default function ModelArena() {
         subtitle="Ranked model cards, side-by-side comparison, and decision timeline with reason/risk/execution drill-down."
       />
 
-      <div className="card glass-card compact" style={{ marginBottom: 12 }}>
-        <strong>Active Paper Model:</strong>{' '}
-        <span className="muted">{activePaper?.model_path || 'none selected'}</span>
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+        <div className="card glass-card compact arena-active-banner">
+          <strong>Active Execution Model:</strong>{' '}
+          <span>{activeExecution?.agent_id || 'none selected'}</span>
+          {activeExecution?.selected_at_ms ? (
+            <div className="muted">Switched: {new Date(Number(activeExecution.selected_at_ms)).toLocaleString()}</div>
+          ) : null}
+        </div>
+        <div className="card glass-card compact">
+          <strong>Active Paper Model:</strong>{' '}
+          <span className="muted">{activePaper?.model_path || 'none selected'}</span>
+        </div>
       </div>
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
@@ -241,13 +278,35 @@ export default function ModelArena() {
                 <div><span className="muted">Avg confidence</span><strong>{pct(model.avgConfidence * 100)}</strong></div>
               </div>
               <div className="muted">Symbols: {model.symbols.length > 0 ? model.symbols.join(', ') : 'n/a'}</div>
-              <button className={`btn ${selected.includes(model.id) ? 'active' : ''}`} onClick={() => toggleSelection(model.id)}>
-                {selected.includes(model.id) ? 'Selected for Compare' : 'Compare'}
-              </button>
+              <div className="toolbar">
+                <button className={`btn ${selected.includes(model.id) ? 'active' : ''}`} onClick={() => toggleSelection(model.id)}>
+                  {selected.includes(model.id) ? 'Selected for Compare' : 'Compare'}
+                </button>
+                <button className={`btn ${activeExecution?.agent_id === model.id ? 'active' : ''}`} onClick={() => setSwitchCandidate(model.id)}>
+                  {activeExecution?.agent_id === model.id ? 'Active for Execution' : 'Set Active Execution'}
+                </button>
+              </div>
             </article>
           ))
         )}
       </div>
+
+      {switchCandidate ? (
+        <div className="card glass-card" style={{ marginTop: 12 }}>
+          <h3 style={{ marginTop: 0 }}>Confirm Execution Model Switch</h3>
+          <div className="muted">You are switching active execution to <strong>{switchCandidate}</strong>. Type <strong>SWITCH</strong> to confirm.</div>
+          <div className="toolbar" style={{ marginTop: 8 }}>
+            <input value={switchConfirm} onChange={(e) => setSwitchConfirm(e.target.value)} placeholder="Type SWITCH" />
+            <button className="btn" onClick={switchExecutionModel} disabled={switchBusy}>{switchBusy ? 'Switching…' : 'Confirm Switch'}</button>
+            <button className="btn" onClick={() => { setSwitchCandidate(null); setSwitchConfirm(''); }}>Cancel</button>
+          </div>
+          {switchMsg ? <div className="muted" style={{ marginTop: 8 }}>{switchMsg}</div> : null}
+        </div>
+      ) : switchMsg ? (
+        <div className="card glass-card compact" style={{ marginTop: 12 }}>
+          <div className="muted">{switchMsg}</div>
+        </div>
+      ) : null}
 
       <div className="card glass-card" style={{ marginTop: 12 }}>
         <h3 style={{ marginTop: 0 }}>Side-by-side Compare</h3>

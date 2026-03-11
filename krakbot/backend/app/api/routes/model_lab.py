@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.model_lab import (
+    get_active_execution_model,
     get_active_model_for_paper,
     latest_model,
     list_job_history,
+    set_active_execution_model,
     set_active_model_for_paper,
     strategy_benchmarks,
     train_baseline,
@@ -42,3 +44,13 @@ def active_paper_model(db: Session = Depends(get_db)):
 @router.post('/promote-to-paper')
 def promote_to_paper(symbol: str, model_path: str, confirm_phrase: str, db: Session = Depends(get_db)):
     return set_active_model_for_paper(db, symbol=symbol, model_path=model_path, confirm_phrase=confirm_phrase)
+
+
+@router.get('/active-execution-model')
+def active_execution_model(db: Session = Depends(get_db)):
+    return get_active_execution_model(db)
+
+
+@router.post('/set-active-execution-model')
+def switch_active_execution_model(agent_id: str, confirm_phrase: str, db: Session = Depends(get_db)):
+    return set_active_execution_model(db, agent_id=agent_id, confirm_phrase=confirm_phrase)
