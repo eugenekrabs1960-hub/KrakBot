@@ -45,13 +45,26 @@ class WalletIntelService:
         return wallet_id
 
     def ingest_raw_event(self, db: Session, *, wallet_id: str, provider: str, provider_event_id: str, chain: str, event_ts: int, payload: dict):
+        existing = db.execute(
+            text(
+                """
+                SELECT id
+                FROM wallet_raw_event
+                WHERE provider=:provider AND provider_event_id=:provider_event_id
+                LIMIT 1
+                """
+            ),
+            {"provider": provider, "provider_event_id": provider_event_id},
+        ).mappings().first()
+        if existing:
+            return None
+
         raw_id = f"raw_{uuid.uuid4().hex[:12]}"
-        result = db.execute(
+        db.execute(
             text(
                 """
                 INSERT INTO wallet_raw_event(id, wallet_id, provider, provider_event_id, chain, event_ts, ingest_ts, payload_json, schema_version)
                 VALUES (:id, :wallet_id, :provider, :provider_event_id, :chain, :event_ts, :ingest_ts, CAST(:payload AS jsonb), :schema_version)
-                ON CONFLICT (provider, provider_event_id) DO NOTHING
                 """
             ),
             {
@@ -67,8 +80,6 @@ class WalletIntelService:
             },
         )
         db.commit()
-        if result.rowcount == 0:
-            return None
         return raw_id
 
     def normalize_event(self, db: Session, *, wallet_id: str, raw_id: str, event_ts: int, payload: dict):

@@ -16,41 +16,46 @@ from app.services.wallet_intel_scheduler import wallet_intel_scheduler
 router = APIRouter(prefix='/wallet-intel', tags=['wallet-intel'])
 
 
+def _safe_query_first(db: Session, sql: str, params: dict | None = None):
+    try:
+        return db.execute(text(sql), params or {}).mappings().first()
+    except Exception:
+        return None
+
+
 @router.get('/health')
 def wallet_intel_health(db: Session = Depends(get_db)):
-    row = db.execute(
-        text(
-            """
-            SELECT cohort_id, signal_ts, bias_state, benchmark_confidence, degraded_state
-            FROM wallet_benchmark_signal
-            ORDER BY signal_ts DESC
-            LIMIT 1
-            """
-        )
-    ).mappings().first()
-    latest_run = db.execute(
-        text(
-            """
-            SELECT run_id, source, status, started_at_ms, heartbeat_at_ms, finished_at_ms, duration_ms, error_text
-            FROM wallet_pipeline_run_ledger
-            ORDER BY started_at_ms DESC
-            LIMIT 1
-            """
-        )
-    ).mappings().first()
-    lock = db.execute(
-        text(
-            """
-            SELECT lock_name, owner_run_id, acquired_at_ms, heartbeat_at_ms
-            FROM wallet_pipeline_lock
-            WHERE lock_name='wallet_pipeline'
-            LIMIT 1
-            """
-        )
-    ).mappings().first()
-    cursor_state = db.execute(
-        text("SELECT checkpoint FROM worker_checkpoints WHERE worker_name='wallet_intel_helius_cursor' LIMIT 1")
-    ).mappings().first()
+    row = _safe_query_first(
+        db,
+        """
+        SELECT cohort_id, signal_ts, bias_state, benchmark_confidence, degraded_state
+        FROM wallet_benchmark_signal
+        ORDER BY signal_ts DESC
+        LIMIT 1
+        """,
+    )
+    latest_run = _safe_query_first(
+        db,
+        """
+        SELECT run_id, source, status, started_at_ms, heartbeat_at_ms, finished_at_ms, duration_ms, error_text
+        FROM wallet_pipeline_run_ledger
+        ORDER BY started_at_ms DESC
+        LIMIT 1
+        """,
+    )
+    lock = _safe_query_first(
+        db,
+        """
+        SELECT lock_name, owner_run_id, acquired_at_ms, heartbeat_at_ms
+        FROM wallet_pipeline_lock
+        WHERE lock_name='wallet_pipeline'
+        LIMIT 1
+        """,
+    )
+    cursor_state = _safe_query_first(
+        db,
+        "SELECT checkpoint FROM worker_checkpoints WHERE worker_name='wallet_intel_helius_cursor' LIMIT 1",
+    )
     return {
         'ok': True,
         'latest_signal': dict(row) if row else None,
