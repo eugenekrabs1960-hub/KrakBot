@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     wallet_intel_scheduler_interval_sec: int = 900
     wallet_intel_scheduler_lock_ttl_sec: int = 1200
 
+    # Hyperliquid execution settings
+    hyperliquid_enabled: bool = False
+    hyperliquid_base_url: str = "https://api.hyperliquid.xyz"
+    hyperliquid_environment: str = "testnet"
+    hyperliquid_account_address: str = ""
+    hyperliquid_api_wallet: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

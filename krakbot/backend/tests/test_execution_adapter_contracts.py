@@ -28,4 +28,4 @@ def test_hyperliquid_adapter_phase_a_contract_shape():
         )
     )
     assert out.accepted is False
-    assert out.error_code == 'not_implemented'
+    assert out.error_code in {'venue_disabled', 'auth_not_configured'}
