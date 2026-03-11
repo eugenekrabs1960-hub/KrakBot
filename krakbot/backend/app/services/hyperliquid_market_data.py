@@ -130,6 +130,7 @@ class HyperliquidMarketDataService:
         data = self._info(req)
         candles = data if isinstance(data, list) else []
 
+        parsed: list[tuple[int, float]] = []
         mids_written = 0
         for c in candles:
             ts = int(c.get('t') or c.get('time') or c.get('T') or 0)
@@ -140,6 +141,7 @@ class HyperliquidMarketDataService:
                 mid_price = float(close)
             except Exception:
                 continue
+            parsed.append((ts, mid_price))
             db.execute(
                 text(
                     """
@@ -152,7 +154,47 @@ class HyperliquidMarketDataService:
             mids_written += 1
         db.commit()
 
-        features_written = self._compute_feature_rows(db, ts=None, symbols=[symbol], source='hyperliquid_backfill_v1')
+        # Generate feature rows for each backfilled timestamp, leakage-safe by using only prior points.
+        parsed.sort(key=lambda x: x[0])
+        features_written = 0
+        n = len(parsed)
+        for i in range(n):
+            ts, curr = parsed[i]
+
+            def ret_at(k: int):
+                j = i - k
+                if j < 0:
+                    return None
+                prev = parsed[j][1]
+                if prev == 0:
+                    return None
+                return (curr - prev) / prev
+
+            db.execute(
+                text(
+                    """
+                    INSERT INTO hyperliquid_training_features(
+                      ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
+                    )
+                    VALUES (
+                      :ts, :environment, :symbol, :mid_price, :ret_1, :ret_5, :ret_15, :source
+                    )
+                    """
+                ),
+                {
+                    'ts': ts,
+                    'environment': self.environment,
+                    'symbol': symbol,
+                    'mid_price': curr,
+                    'ret_1': ret_at(1),
+                    'ret_5': ret_at(5),
+                    'ret_15': ret_at(15),
+                    'source': 'hyperliquid_backfill_v1',
+                },
+            )
+            features_written += 1
+        db.commit()
+
         return BackfillResult(
             ok=True,
             symbol=symbol,
