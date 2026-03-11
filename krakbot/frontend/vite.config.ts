@@ -4,6 +4,8 @@ const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:80
 
 export default defineConfig({
   server: {
+    host: true,
+    allowedHosts: true,
     port: 5173,
     proxy: {
       '/api': {
