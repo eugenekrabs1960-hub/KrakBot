@@ -42,9 +42,12 @@ export default function TradeHistory() {
   return (
     <section>
       <PageHeader title="Trades & Decision Trace" subtitle="See what happened, why it happened, and the latest filter context by strategy." />
+      <div className="card glass-card compact" style={{ marginBottom: 12 }}>
+        <span className="muted">Comparison-first trace: trades are paired with most recent filter decision and trace events for fast post-trade review.</span>
+      </div>
       <div className="grid" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
         <div className="card table-wrap glass-card">
-          <h3>What happened (Recent Trades)</h3>
+          <h3 style={{ marginTop: 0 }}>What happened (Recent Trades)</h3>
           <table className="responsive-table"><thead><tr><th>Time</th><th>Strategy</th><th>Action</th><th>Qty</th><th>Entry</th><th>PnL</th><th>Why now</th></tr></thead><tbody>
             {trades.map((t, i) => {
               const latestDecision = latestDecisionByStrategy[t.strategy_instance_id];
@@ -64,7 +67,7 @@ export default function TradeHistory() {
         </div>
 
         <div className="card glass-card">
-          <h3>Why (Decision Inspector)</h3>
+          <h3 style={{ marginTop: 0 }}>Why (Decision Inspector)</h3>
           {decisions.slice(0, 8).map((d) => (
             <div key={d.id} className="decision-item">
               <Badge tone={d.allowed ? 'good' : 'bad'}>{d.allowed ? 'ALLOW' : 'SKIP'}</Badge> {d.reason_code}

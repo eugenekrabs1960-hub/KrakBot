@@ -43,6 +43,10 @@ export default function Dashboard() {
   return (
     <section>
       <PageHeader title="Benchmark, Wallet Intel & Hyperliquid" subtitle="Cohort quality plus Hyperliquid-native execution/account observability." />
+      <div className="card glass-card compact" style={{ marginBottom: 12 }}>
+        <span className="muted">Arena parity view: wallet intelligence, execution health, and position risk are grouped for side-by-side operator comparison.</span>
+      </div>
+
       <div className="grid kpi">
         <StatCard label="Pipeline Status" value={health?.status || 'unknown'} />
         <StatCard label="Provider" value={health?.provider || 'n/a'} />

@@ -24,22 +24,36 @@ export default function StrategyDetail() {
   return (
     <section>
       <PageHeader title="Strategy Detail" subtitle="Deep dive into a single strategy instance." />
-      <div className="toolbar">
-        <select value={selected} onChange={(e) => setSelected(e.target.value)}>
-          {strategies.map((s) => <option key={s.strategy_instance_id} value={s.strategy_instance_id}>{s.name} ({s.strategy_instance_id})</option>)}
-        </select>
+      <div className="card glass-card compact">
+        <div className="toolbar">
+          <label>Strategy</label>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+            {strategies.map((s) => <option key={s.strategy_instance_id} value={s.strategy_instance_id}>{s.name} ({s.strategy_instance_id})</option>)}
+          </select>
+        </div>
       </div>
-      <div className="card" style={{ marginTop: 12 }}>
-        {!detail ? <p className="muted">No strategy detail loaded.</p> : (
-          <>
-            <p><strong>ID:</strong> {detail.strategy_instance_id}</p>
-            <p><strong>Status:</strong> <Badge tone={detail.enabled ? 'good' : 'warn'}>{detail.status || 'unknown'}</Badge></p>
-            <p><strong>Market:</strong> {detail.market}</p>
-            <p><strong>Position:</strong> {Number(detail.current_position_qty || 0).toFixed(4)}</p>
-            <p><strong>Avg Entry:</strong> {Number(detail.avg_entry_price || 0).toFixed(4)}</p>
-            <p><strong>Realized PnL:</strong> {Number(detail.realized_pnl_usd || 0).toFixed(2)}</p>
-          </>
-        )}
+
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 12 }}>
+        <div className="card glass-card">
+          {!detail ? <p className="muted">No strategy detail loaded.</p> : (
+            <>
+              <h3 style={{ marginTop: 0 }}>Strategy Identity</h3>
+              <p><strong>ID:</strong> {detail.strategy_instance_id}</p>
+              <p><strong>Status:</strong> <Badge tone={detail.enabled ? 'good' : 'warn'}>{detail.status || 'unknown'}</Badge></p>
+              <p><strong>Market:</strong> {detail.market}</p>
+            </>
+          )}
+        </div>
+        <div className="card glass-card">
+          {!detail ? <p className="muted">Awaiting strategy payload.</p> : (
+            <>
+              <h3 style={{ marginTop: 0 }}>Position & PnL</h3>
+              <p><strong>Position:</strong> {Number(detail.current_position_qty || 0).toFixed(4)}</p>
+              <p><strong>Avg Entry:</strong> {Number(detail.avg_entry_price || 0).toFixed(4)}</p>
+              <p><strong>Realized PnL:</strong> {Number(detail.realized_pnl_usd || 0).toFixed(2)}</p>
+            </>
+          )}
+        </div>
       </div>
     </section>
   );

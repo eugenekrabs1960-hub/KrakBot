@@ -46,8 +46,12 @@ export default function Controls() {
   return (
     <section>
       <PageHeader title="Controls & Safety" subtitle="Consistent, safer operator actions with explicit stop protection and command feedback." />
+      <div className="card glass-card compact arena-active-banner" style={{ marginBottom: 12 }}>
+        <strong>Runtime State:</strong> <Badge tone={state === 'running' ? 'good' : state === 'paused' ? 'warn' : 'info'}>{state}</Badge>
+      </div>
+
       <div className="card glass-card">
-        <p>Runtime State: <Badge tone={state === 'running' ? 'good' : state === 'paused' ? 'warn' : 'info'}>{state}</Badge></p>
+        <h3 style={{ marginTop: 0 }}>Command Console</h3>
         <div className="toolbar quick-controls-row">
           {commands.map((c) => {
             const dangerous = c === 'stop';
