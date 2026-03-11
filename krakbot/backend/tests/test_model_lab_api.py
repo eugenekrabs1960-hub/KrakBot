@@ -58,3 +58,13 @@ def test_model_lab_endpoints_shape(api_base: str):
     ex_ok = requests.post(f"{api_base}/model-lab/set-active-execution-model?agent_id=agent_a&confirm_phrase=SWITCH", timeout=TIMEOUT)
     ex_ok.raise_for_status()
     assert ex_ok.json()['ok'] is True
+
+    ex_dup = requests.post(f"{api_base}/model-lab/set-active-execution-model?agent_id=agent_a&confirm_phrase=SWITCH", timeout=TIMEOUT)
+    ex_dup.raise_for_status()
+    assert ex_dup.json()['ok'] is True
+    assert ex_dup.json().get('unchanged') is True
+
+    ex_empty = requests.post(f"{api_base}/model-lab/set-active-execution-model?agent_id=%20%20%20&confirm_phrase=SWITCH", timeout=TIMEOUT)
+    ex_empty.raise_for_status()
+    assert ex_empty.json()['ok'] is False
+    assert ex_empty.json().get('error') == 'invalid_agent_id'

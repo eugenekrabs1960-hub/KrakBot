@@ -81,3 +81,22 @@ def test_execution_model_switch_requires_confirmation(tmp_path):
         active = get_active_execution_model(db)
         assert active['ok'] is True
         assert active['item']['agent_id'] == 'agent_alpha'
+
+
+def test_execution_model_switch_rejects_empty_and_handles_duplicate(tmp_path):
+    eng = _prep_db(tmp_path / 'ml4.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        bad = set_active_execution_model(db, agent_id='   ', confirm_phrase='SWITCH')
+        assert bad['ok'] is False
+        assert bad['error'] == 'invalid_agent_id'
+
+        first = set_active_execution_model(db, agent_id='agent_beta', confirm_phrase='SWITCH')
+        assert first['ok'] is True
+        assert first.get('unchanged') is not True
+
+        second = set_active_execution_model(db, agent_id='agent_beta', confirm_phrase='SWITCH')
+        assert second['ok'] is True
+        assert second.get('unchanged') is True
+        assert second['item']['agent_id'] == 'agent_beta'

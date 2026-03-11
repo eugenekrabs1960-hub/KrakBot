@@ -120,7 +120,15 @@ def set_active_execution_model(db: Session, *, agent_id: str, confirm_phrase: st
     if confirm_phrase != 'SWITCH':
         return {'ok': False, 'error': 'confirmation_required', 'required': 'SWITCH'}
 
-    payload_obj = {'agent_id': agent_id, 'selected_at_ms': int(time.time() * 1000)}
+    normalized_agent = str(agent_id or '').strip()
+    if not normalized_agent:
+        return {'ok': False, 'error': 'invalid_agent_id'}
+
+    current = get_active_execution_model(db).get('item') or {}
+    if str(current.get('agent_id') or '') == normalized_agent:
+        return {'ok': True, 'item': current, 'unchanged': True}
+
+    payload_obj = {'agent_id': normalized_agent, 'selected_at_ms': int(time.time() * 1000)}
     payload = json.dumps(payload_obj)
 
     dialect = getattr(getattr(db, 'bind', None), 'dialect', None)
