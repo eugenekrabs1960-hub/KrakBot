@@ -6,6 +6,7 @@ from app.adapters.execution.hyperliquid_adapter import HyperliquidExecutionAdapt
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.hyperliquid_reconciliation import HyperliquidReconciliationService
+from app.services.hyperliquid_market_data import HyperliquidMarketDataService, list_latest_training_features
 from app.services.hyperliquid_state_store import (
     compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
@@ -73,3 +74,15 @@ def hyperliquid_position_snapshots(limit: int = 50, db: Session = Depends(get_db
 @router.get('/hyperliquid/risk-snapshot')
 def hyperliquid_risk_snapshot(db: Session = Depends(get_db)):
     return compute_latest_hyperliquid_risk_snapshot(db)
+
+
+@router.post('/hyperliquid/collect-market-data')
+def hyperliquid_collect_market_data(symbols_limit: int = 120, db: Session = Depends(get_db)):
+    svc = HyperliquidMarketDataService(environment=settings.hyperliquid_environment)
+    out = svc.collect_once(db, symbols_limit=symbols_limit)
+    return out.__dict__
+
+
+@router.get('/hyperliquid/training-features')
+def hyperliquid_training_features(limit: int = 200, symbol: str | None = None, db: Session = Depends(get_db)):
+    return {'ok': True, 'items': list_latest_training_features(db, limit=limit, symbol=symbol)}
