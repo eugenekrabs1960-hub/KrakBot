@@ -3,6 +3,12 @@ import PageHeader from '../components/PageHeader';
 import Badge from '../components/Badge';
 import { getEifFilterDecisions, getEifTradeTrace, listTrades } from '../services/api';
 
+function fmtTs(ts: any) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return 'n/a';
+  return new Date(n).toLocaleString();
+}
+
 export default function TradeHistory() {
   const [trades, setTrades] = useState<any[]>([]);
   const [decisions, setDecisions] = useState<any[]>([]);
@@ -39,11 +45,12 @@ export default function TradeHistory() {
       <div className="grid" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
         <div className="card table-wrap glass-card">
           <h3>What happened (Recent Trades)</h3>
-          <table className="responsive-table"><thead><tr><th>Strategy</th><th>Action</th><th>Qty</th><th>Entry</th><th>PnL</th><th>Why now</th></tr></thead><tbody>
+          <table className="responsive-table"><thead><tr><th>Time</th><th>Strategy</th><th>Action</th><th>Qty</th><th>Entry</th><th>PnL</th><th>Why now</th></tr></thead><tbody>
             {trades.map((t, i) => {
               const latestDecision = latestDecisionByStrategy[t.strategy_instance_id];
               return (
                 <tr key={`${t.ts}-${i}`}>
+                  <td data-label="Time">{fmtTs(t.ts)}</td>
                   <td data-label="Strategy">{t.strategy_instance_id}</td>
                   <td data-label="Action">{t.side}</td>
                   <td data-label="Qty">{t.qty}</td>

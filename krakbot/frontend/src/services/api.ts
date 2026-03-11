@@ -98,6 +98,26 @@ export async function getWalletIntelAlignmentSummary(lookbackDays = 7) {
   return parseJsonOrThrow(res);
 }
 
+export async function getWalletCohortLatest(cohortId = 'top_sol_active_wallets') {
+  const res = await fetch(`${API_BASE}/wallet-intel/cohorts/${cohortId}/latest`);
+  return parseJsonOrThrow(res);
+}
+
+export async function trainBaselineModel(symbol = 'BTC', limit = 50000) {
+  const res = await fetch(`${API_BASE}/model-lab/train-baseline?symbol=${encodeURIComponent(symbol)}&limit=${limit}`, { method: 'POST' });
+  return parseJsonOrThrow(res);
+}
+
+export async function getLatestModel(symbol = 'BTC') {
+  const res = await fetch(`${API_BASE}/model-lab/latest-model?symbol=${encodeURIComponent(symbol)}`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getStrategyBenchmarks(symbol = 'BTC', limit = 50000) {
+  const res = await fetch(`${API_BASE}/model-lab/strategy-benchmarks?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+  return parseJsonOrThrow(res);
+}
+
 export async function getHyperliquidExecutionHealth() {
   const res = await fetch(`${API_BASE}/execution/hyperliquid/health`);
   return parseJsonOrThrow(res);

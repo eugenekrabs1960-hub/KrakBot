@@ -29,3 +29,6 @@ research/reports/plots/*
 
 # TypeScript build cache
 frontend/*.tsbuildinfo
+
+# Generated model/dataset artifacts
+backend/data/*
