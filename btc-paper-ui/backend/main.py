@@ -21,8 +21,8 @@ PAPER_FEE_PCT = 0.40
 # 5m experiment controls (change one variable at a time)
 AGGR_MAX_SPREAD_PCT = 0.05
 AGGR_CHOP_ENTRY_BAND_FRAC = 0.45
-AGGR_MIN_RISK_PCT = 0.15
-AGGR_MAX_RISK_PCT = 0.90
+AGGR_MIN_RISK_PCT = 0.12
+AGGR_MAX_RISK_PCT = 1.00
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
