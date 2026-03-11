@@ -27,17 +27,56 @@ def _version_from_filename(filename: str) -> int:
 
 
 def _ensure_ledger(conn) -> None:
-    conn.exec_driver_sql(
-        f"""
-        CREATE TABLE IF NOT EXISTS {LEDGER_TABLE} (
-            id INTEGER PRIMARY KEY,
-            version INTEGER NOT NULL UNIQUE,
-            filename VARCHAR(255) NOT NULL UNIQUE,
-            checksum CHAR(64) NOT NULL,
-            applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    dialect = conn.engine.dialect.name
+    if dialect == 'postgresql':
+        conn.exec_driver_sql(
+            f"""
+            CREATE TABLE IF NOT EXISTS {LEDGER_TABLE} (
+                id BIGSERIAL PRIMARY KEY,
+                version INTEGER NOT NULL UNIQUE,
+                filename VARCHAR(255) NOT NULL UNIQUE,
+                checksum CHAR(64) NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
+        # Repair legacy table shape where id had no sequence/default.
+        conn.exec_driver_sql(
+            f"""
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind = 'S' AND c.relname = '{LEDGER_TABLE}_id_seq'
+              ) THEN
+                CREATE SEQUENCE {LEDGER_TABLE}_id_seq;
+              END IF;
+
+              ALTER TABLE {LEDGER_TABLE}
+                ALTER COLUMN id SET DEFAULT nextval('{LEDGER_TABLE}_id_seq');
+
+              PERFORM setval(
+                '{LEDGER_TABLE}_id_seq',
+                GREATEST(COALESCE((SELECT MAX(id) FROM {LEDGER_TABLE}), 0), 1),
+                true
+              );
+            END $$;
+            """
+        )
+    else:
+        conn.exec_driver_sql(
+            f"""
+            CREATE TABLE IF NOT EXISTS {LEDGER_TABLE} (
+                id INTEGER PRIMARY KEY,
+                version INTEGER NOT NULL UNIQUE,
+                filename VARCHAR(255) NOT NULL UNIQUE,
+                checksum CHAR(64) NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
 
 def run_migrations(
