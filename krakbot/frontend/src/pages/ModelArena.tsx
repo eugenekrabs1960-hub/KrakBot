@@ -326,6 +326,7 @@ export default function ModelArena() {
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>Leaderboard</h3>
+        <div className="muted" style={{ marginBottom: 10 }}>Top cards are ranked by blended score (PnL, win-rate, confidence, activity).</div>
         <div className="arena-grid">
           {rankedModels.length === 0 ? (
             <div className="card glass-card">No decision packets in this filter scope.</div>
