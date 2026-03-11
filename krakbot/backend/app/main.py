@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.adapters.marketdata_kraken import ingestor
-from app.api.routes import health, control, strategies, market, trades, ws, reliability, market_registry, eif, wallet_intel
+from app.api.routes import health, control, strategies, market, trades, ws, reliability, market_registry, eif, wallet_intel, execution
 from app.core.config import settings
 from app.services.live_paper_test_mode import live_paper_test_mode
 from app.services.wallet_intel_scheduler import wallet_intel_scheduler
@@ -34,6 +34,7 @@ app.include_router(reliability.router, prefix="/api")
 app.include_router(market_registry.router, prefix="/api")
 app.include_router(eif.router, prefix="/api")
 app.include_router(wallet_intel.router, prefix="/api")
+app.include_router(execution.router, prefix="/api")
 
 
 @app.get("/")
