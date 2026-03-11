@@ -16,6 +16,7 @@ type ArenaModel = {
   pnl: number;
   winRate: number;
   trades: number;
+  decisions: number;
   avgConfidence: number;
   longBias: number;
   shortBias: number;
@@ -125,6 +126,7 @@ export default function ModelArena() {
         const action = String(row.action || '').toLowerCase();
         if (action === 'buy' || action === 'long') longCount += 1;
         if (action === 'sell' || action === 'short') shortCount += 1;
+        if (action === 'close' || action === 'exit') shortCount += 0;
 
         if (row.symbol) symbols.add(String(row.symbol));
 
@@ -146,7 +148,11 @@ export default function ModelArena() {
         }
       }
 
-      const trades = rows.length;
+      const decisions = rows.length;
+      const trades = rows.filter((r) => {
+        const a = String(r.action || '').toLowerCase();
+        return ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(a);
+      }).length;
       const decided = Math.max(1, wins + losses);
       const avgConfidence = confidenceCount > 0 ? confidenceTotal / confidenceCount : 0;
       const latest = rows[0] || {};
@@ -154,9 +160,10 @@ export default function ModelArena() {
       return {
         id: agentId,
         label: agentId,
-        status: trades > 0 ? 'online' : 'idle',
+        status: decisions > 0 ? 'online' : 'idle',
         pnl,
         trades,
+        decisions,
         winRate: (wins / decided) * 100,
         avgConfidence,
         longBias: trades > 0 ? (longCount / trades) * 100 : 0,
@@ -272,15 +279,19 @@ export default function ModelArena() {
         <div className="card glass-card">
           <h3 style={{ marginTop: 0 }}>What just happened</h3>
           <div className="trace-list">
-            {timelinePackets.slice(0, 10).map((p) => (
-              <div key={`digest-${p.id}`} className="arena-event-row">
-                <div>
-                  <strong>{String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')}
-                  <div className="muted">{p.rationale || 'No rationale provided.'}</div>
+            {timelinePackets.slice(0, 10).map((p) => {
+              const action = String(p.action || '').toLowerCase();
+              const isTrade = ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(action);
+              return (
+                <div key={`digest-${p.id}`} className="arena-event-row">
+                  <div>
+                    <strong>{String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')} {!isTrade ? <span className="muted">(decision only)</span> : null}
+                    <div className="muted">{p.rationale || 'No rationale provided.'}</div>
+                  </div>
+                  <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
                 </div>
-                <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -345,6 +356,7 @@ export default function ModelArena() {
                 <div><span className="muted">PnL</span><strong>{model.pnl.toFixed(2)} USD</strong></div>
                 <div><span className="muted">Win rate</span><strong>{pct(model.winRate)}</strong></div>
                 <div><span className="muted">Trades</span><strong>{model.trades}</strong></div>
+                <div><span className="muted">Decisions</span><strong>{model.decisions}</strong></div>
                 <div><span className="muted">Confidence</span><strong>{pct(model.avgConfidence * 100)}</strong></div>
               </div>
               <div className="muted">Symbols: {model.symbols.length > 0 ? model.symbols.join(', ') : 'n/a'}</div>
@@ -398,7 +410,7 @@ export default function ModelArena() {
                 <h4>{model.label}</h4>
                 <div className="muted">Win rate: {pct(model.winRate)}</div>
                 <div className="muted">PnL: {model.pnl.toFixed(2)} USD</div>
-                <div className="muted">Trades: {model.trades}</div>
+                <div className="muted">Trades: {model.trades} (Decisions: {model.decisions})</div>
                 <div className="muted">Long/Short bias: {pct(model.longBias)} / {pct(model.shortBias)}</div>
                 <div className="muted">Avg confidence: {pct(model.avgConfidence * 100)}</div>
                 <div style={{ marginTop: 8 }}>
