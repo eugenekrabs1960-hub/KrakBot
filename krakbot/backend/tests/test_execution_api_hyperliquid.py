@@ -75,3 +75,8 @@ def test_hyperliquid_collector_and_export_endpoints(api_base: str):
     export = requests.get(f"{api_base}/execution/hyperliquid/training-features/export?limit=10", timeout=TIMEOUT)
     export.raise_for_status()
     assert 'id,ts,environment,symbol,mid_price,ret_1,ret_5,ret_15,source' in export.text.splitlines()[0]
+
+    job = requests.post(f"{api_base}/execution/hyperliquid/training-features/export-job?limit=20", timeout=TIMEOUT)
+    job.raise_for_status()
+    jb = job.json()
+    assert 'ok' in jb

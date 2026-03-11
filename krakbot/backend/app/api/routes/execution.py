@@ -13,6 +13,7 @@ from app.services.hyperliquid_reconciliation import HyperliquidReconciliationSer
 from app.services.checkpoints import load_checkpoint
 from app.services.hyperliquid_market_data import HyperliquidMarketDataService, list_latest_training_features
 from app.services.hyperliquid_market_scheduler import hyperliquid_market_scheduler
+from app.services.hyperliquid_dataset_jobs import export_training_dataset_csv
 from app.services.hyperliquid_state_store import (
     compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
@@ -114,3 +115,17 @@ def hyperliquid_training_features_export(limit: int = 1000, symbol: str | None =
     for r in rows:
         writer.writerow({k: r.get(k) for k in writer.fieldnames})
     return PlainTextResponse(output.getvalue(), media_type='text/csv')
+
+
+@router.post('/hyperliquid/training-features/export-job')
+def hyperliquid_training_features_export_job(
+    symbol: str | None = None,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    limit: int = 20000,
+    db: Session = Depends(get_db),
+):
+    try:
+        return export_training_dataset_csv(db, symbol=symbol, from_ts=from_ts, to_ts=to_ts, limit=limit)
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)[:300]}
