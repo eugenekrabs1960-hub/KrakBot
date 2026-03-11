@@ -29,6 +29,8 @@ def list_strategies(db: Session = Depends(get_db)):
             """
             SELECT si.id as strategy_instance_id,
                    s.name,
+                   COALESCE(si.params->>'display_name', initcap(replace(s.name, '_', ' '))) AS display_name,
+                   COALESCE(si.params->>'description', 'No description yet.') AS description,
                    si.enabled,
                    si.status,
                    si.market,
@@ -83,6 +85,8 @@ def strategy_detail(strategy_instance_id: str, db: Session = Depends(get_db)):
             """
             SELECT si.id as strategy_instance_id,
                    s.name,
+                   COALESCE(si.params->>'display_name', initcap(replace(s.name, '_', ' '))) AS display_name,
+                   COALESCE(si.params->>'description', 'No description yet.') AS description,
                    si.enabled,
                    si.status,
                    si.market,

@@ -47,6 +47,21 @@ export async function getStrategySummary() {
   return parseJsonOrThrow(res);
 }
 
+export async function createStrategyInstance(payload: {
+  strategy_name: 'trend_following' | 'mean_reversion' | 'breakout';
+  market: string;
+  instrument_type?: string;
+  starting_equity_usd?: number;
+  params?: Record<string, any>;
+}) {
+  const res = await fetch(`${API_BASE}/strategies/instances`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function listTrades(limit = 100) {
   const bounded = Math.max(1, Math.min(limit, 200));
   const res = await fetch(`${API_BASE}/trades?limit=${bounded}`);

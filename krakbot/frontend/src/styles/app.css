@@ -3,7 +3,7 @@ body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--b
 a { color: var(--accent); }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; }
-.sidebar { background: #0d1729; border-right: 1px solid var(--border); padding: var(--space-4); position: sticky; top: 0; height: 100vh; }
+.sidebar { background: #0b0b12; border-right: 1px solid var(--border); padding: var(--space-4); position: sticky; top: 0; height: 100vh; }
 .brand { font-size: 1.1rem; font-weight: 700; margin-bottom: var(--space-4); }
 .nav-btn { width: 100%; text-align: left; margin-bottom: var(--space-2); border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer; }
 .nav-btn.active { background: var(--accent); border-color: var(--accent); color: #061224; font-weight: 700; }
@@ -28,7 +28,17 @@ th, td { border-bottom: 1px solid var(--border); padding: 10px; text-align: left
 .btn:hover { border-color: var(--accent); }
 .btn.danger { border-color: var(--bad); color: var(--bad); }
 .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
-input, select { background: #0f1c32; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+input, select { background: #10101b; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.04);
+}
+.status-dot.good { background: var(--good); }
+.status-dot.warn { background: var(--warn); }
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
