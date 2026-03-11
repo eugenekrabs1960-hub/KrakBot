@@ -24,14 +24,19 @@ Local-only paper-trading dashboard.
 - `POST /api/auto-scan` (for Pause/Resume)
 
 ## Run
-### Backend
+### Backend (recommended for long unattended runs)
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-### Frontend
+Notes:
+- Avoid `--reload` for long unattended runs.
+- The backend auto-scanner runs independently of the browser.
+- State/history now persist to `backend/data/paper_state.json`, so the bot can recover after backend restarts.
+
+### Frontend dev mode
 ```bash
 cd frontend
 npm install
@@ -39,3 +44,20 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173
+
+### Frontend production-style build (lighter for long monitoring)
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Then open the dashboard from the backend server at:
+```bash
+http://127.0.0.1:8000/
+```
+
+This serves the built frontend from FastAPI, so you can:
+- run only the backend continuously
+- open/close the browser whenever you want
+- avoid leaving the Vite dev server and Brave tab open for long sessions

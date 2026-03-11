@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createChart } from 'lightweight-charts'
 
-const API = 'http://127.0.0.1:8000'
+const API = window.location.origin.includes('5173') ? 'http://127.0.0.1:8000' : window.location.origin
 const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_breakout_retest']
+const POLL_MS = 30000
 
 function SharedChart({ state, theme }) {
   const ref = useRef(null)
@@ -246,9 +247,22 @@ export default function App() {
   const ack = async (mode) => { await fetch(`${API}/api/ack-notify/${mode}`, { method: 'POST' }); await load() }
 
   useEffect(() => {
+    let t
+    const schedule = () => {
+      clearInterval(t)
+      if (!document.hidden) t = setInterval(load, POLL_MS)
+    }
     load()
-    const t = setInterval(load, 15000)
-    return () => clearInterval(t)
+    schedule()
+    const onVis = () => {
+      if (!document.hidden) load()
+      schedule()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [])
 
   if (!state) return <div className='wrap'>Loading...</div>

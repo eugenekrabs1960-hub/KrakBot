@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 import json
 import asyncio
@@ -6,6 +7,8 @@ import asyncio
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="BTC Paper Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -28,6 +31,12 @@ MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_15m_breakout_retest": {"label": "BTC/USD 15m breakout-retest experiment", "interval": 15, "rr_min": 1.35, "aggressive": True},
 }
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+STATE_DIR = BASE_DIR / "data"
+STATE_FILE = STATE_DIR / "paper_state.json"
+FRONTEND_DIST_DIR = PROJECT_DIR / "frontend" / "dist"
 
 
 def now_iso() -> str:
@@ -56,6 +65,61 @@ store: dict[str, Any] = {
     "auto_scan": True,
     "modes": {k: mode_bucket() for k in MODE_CONFIGS.keys()},
 }
+
+
+def _json_safe_store_snapshot() -> dict[str, Any]:
+    modes: dict[str, Any] = {}
+    for mode, bucket in store["modes"].items():
+        modes[mode] = {
+            "latest": bucket.get("latest"),
+            "last_candle_time": bucket.get("last_candle_time"),
+            "notify_user": bucket.get("notify_user"),
+            "history": bucket.get("history", [])[-1000:],
+            "pending_orders": bucket.get("pending_orders", []),
+            "open_positions": bucket.get("open_positions", []),
+            "closed_trades": bucket.get("closed_trades", [])[-500:],
+            "paper_execution_log": bucket.get("paper_execution_log", [])[-500:],
+            "executed_signal_ids": sorted(bucket.get("executed_signal_ids", set())),
+        }
+    return {"auto_scan": store.get("auto_scan", True), "modes": modes}
+
+
+def persist_store() -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_json_safe_store_snapshot(), separators=(",", ":")), encoding="utf-8")
+    tmp.replace(STATE_FILE)
+
+
+def load_store() -> None:
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    store["auto_scan"] = bool(data.get("auto_scan", True))
+    saved_modes = data.get("modes", {})
+    for mode in MODE_CONFIGS.keys():
+        bucket = mode_bucket()
+        saved = saved_modes.get(mode, {}) if isinstance(saved_modes, dict) else {}
+        bucket["latest"] = saved.get("latest")
+        bucket["last_candle_time"] = saved.get("last_candle_time")
+        bucket["notify_user"] = saved.get("notify_user")
+        bucket["history"] = saved.get("history", [])[-1000:]
+        bucket["pending_orders"] = saved.get("pending_orders", [])
+        bucket["open_positions"] = saved.get("open_positions", [])
+        bucket["closed_trades"] = saved.get("closed_trades", [])[-500:]
+        bucket["paper_execution_log"] = saved.get("paper_execution_log", [])[-500:]
+        bucket["executed_signal_ids"] = set(saved.get("executed_signal_ids", []))
+        if bucket["latest"]:
+            bucket["latest"]["notify_user"] = bucket["notify_user"]
+            bucket["latest"]["pending_orders"] = bucket["pending_orders"][-25:]
+            bucket["latest"]["open_positions"] = bucket["open_positions"]
+            bucket["latest"]["closed_trades"] = bucket["closed_trades"][-25:]
+            bucket["latest"]["paper_execution_log"] = bucket["paper_execution_log"][-10:]
+            bucket["latest"]["mode_stats"] = mode_stats(bucket)
+        store["modes"][mode] = bucket
 
 
 async def fetch_market(interval: int):
@@ -545,6 +609,7 @@ async def execute_mode_scan(mode: str):
     if not history_events:
         history_events.append(make_history_row(latest["latest_decision"], ts=latest["latest_scan_time"], decision_time=latest["latest_decision_time"]))
     bucket["history"].extend(history_events)
+    persist_store()
     return latest
 
 
@@ -573,6 +638,7 @@ async def run_scan(mode: str | None = None):
 @app.post("/api/auto-scan")
 async def toggle_auto_scan():
     store["auto_scan"] = not store["auto_scan"]
+    persist_store()
     return {"auto_scan": store["auto_scan"]}
 
 
@@ -582,11 +648,26 @@ async def ack_notify(mode: str):
         store["modes"][mode]["notify_user"] = None
         if store["modes"][mode]["latest"]:
             store["modes"][mode]["latest"]["notify_user"] = None
+        persist_store()
     return {"ok": True}
+
+
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend-assets")
+
+
+@app.get("/")
+async def frontend_index():
+    index = FRONTEND_DIST_DIR / "index.html"
+    if index.exists():
+        return FileResponse(index)
+    return {"ok": True, "message": "Frontend production build not found. Run `npm run build` in btc-paper-ui/frontend or use the dev server."}
 
 
 @app.on_event("startup")
 async def start_auto_scanner():
+    load_store()
+
     async def loop():
         while True:
             try:
@@ -597,6 +678,6 @@ async def start_auto_scanner():
                         if store["modes"][m]["last_candle_time"] != ct:
                             await execute_mode_scan(m)
             except Exception:
-                pass
+                persist_store()
             await asyncio.sleep(20)
     asyncio.create_task(loop())
