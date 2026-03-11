@@ -18,3 +18,4 @@ class PaperOrderRequest(BaseModel):
     qty: float
     order_type: str = 'market'
     limit_price: float | None = None
+    venue: str = 'paper'

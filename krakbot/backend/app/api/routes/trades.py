@@ -60,6 +60,7 @@ def paper_order(
         qty=payload.qty,
         order_type=payload.order_type,
         limit_price=payload.limit_price,
+        venue=payload.venue,
     )
 
     event_type = 'entry' if side == 'buy' else 'exit'
