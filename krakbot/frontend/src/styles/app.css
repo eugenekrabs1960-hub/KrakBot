@@ -101,7 +101,7 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
 }
-.arena-digest-grid { grid-template-columns: repeat(4, minmax(180px, 1fr)); }
+.arena-digest-grid { grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; }
 .arena-event-row {
   display: flex;
   justify-content: space-between;
@@ -110,6 +110,7 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   padding-bottom: 8px;
   margin-bottom: 8px;
 }
+.arena-event-row strong { color: #e3d9ff; }
 .arena-card {
   display: grid;
   gap: 10px;
@@ -123,7 +124,7 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   background: linear-gradient(180deg, rgba(48,34,89,0.9), rgba(22,16,40,0.9));
 }
 .arena-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(139,92,246,0.45); }
-.arena-card h3 { margin: 4px 0 0 0; }
+.arena-card h3 { margin: 4px 0 0 0; font-size: 1.05rem; letter-spacing: 0.01em; }
 .arena-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .arena-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .arena-stats div {

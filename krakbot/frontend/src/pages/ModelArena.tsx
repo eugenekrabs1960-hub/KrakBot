@@ -54,7 +54,7 @@ export default function ModelArena() {
 
   const [symbolFilter, setSymbolFilter] = useState('all');
   const [agentFilter, setAgentFilter] = useState('all');
-  const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('24h');
+  const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('6h');
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
   const [showInspector, setShowInspector] = useState(false);
 
@@ -302,6 +302,7 @@ export default function ModelArena() {
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <div className="toolbar">
           <button className="btn" onClick={load}>Refresh Arena Data</button>
+          <button className="btn" onClick={() => { setSymbolFilter('all'); setAgentFilter('all'); setTimeFilter('6h'); }}>Reset View</button>
           <label>Symbol</label>
           <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
             <option value="all">All</option>
