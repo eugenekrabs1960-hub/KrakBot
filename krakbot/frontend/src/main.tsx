@@ -11,6 +11,7 @@ import MarketData from './pages/MarketData';
 import Controls from './pages/Controls';
 import MarketRegistry from './pages/MarketRegistry';
 import ModelLab from './pages/ModelLab';
+import ModelArena from './pages/ModelArena';
 import './styles/tokens.css';
 import './styles/app.css';
 
@@ -25,6 +26,7 @@ function App() {
       { id: 'registry', label: 'Market Registry' },
       { id: 'wallet', label: 'Benchmark & Wallet Intel' },
       { id: 'model-lab', label: 'Model Lab' },
+      { id: 'model-arena', label: 'Model Arena' },
       { id: 'controls', label: 'Controls & Safety' },
     ],
     [],
@@ -41,6 +43,7 @@ function App() {
       {active === 'registry' && <MarketRegistry />}
       {active === 'wallet' && <Dashboard />}
       {active === 'model-lab' && <ModelLab />}
+      {active === 'model-arena' && <ModelArena />}
       {active === 'controls' && <Controls />}
     </AppShell>
   );
