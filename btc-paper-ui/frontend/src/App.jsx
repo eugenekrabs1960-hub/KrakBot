@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createChart } from 'lightweight-charts'
 
 const API = 'http://127.0.0.1:8000'
-const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_aggressive']
+const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_breakout_retest']
 
 function SharedChart({ state, theme }) {
   const ref = useRef(null)
   const [chartError, setChartError] = useState('')
-  const baseMode = state?.modes?.btc_5m_aggressive?.market_data?.[0]?.ohlcv?.length
-    ? state?.modes?.btc_5m_aggressive
+  const baseMode = state?.modes?.btc_5m_breakout_retest?.market_data?.[0]?.ohlcv?.length
+    ? state?.modes?.btc_5m_breakout_retest
     : state?.modes?.btc_15m_conservative
 
   useEffect(() => {
@@ -26,7 +26,7 @@ function SharedChart({ state, theme }) {
     try {
       const modeColors = {
         btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
-        btc_5m_aggressive: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
+        btc_5m_breakout_retest: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
       }
 
       const chart = createChart(container, {

@@ -20,13 +20,13 @@ PAPER_FEE_PCT = 0.40
 
 # 5m experiment controls (change one variable at a time)
 AGGR_MAX_SPREAD_PCT = 0.05
-AGGR_CHOP_ENTRY_BAND_FRAC = 0.45
 AGGR_MIN_RISK_PCT = 0.12
 AGGR_MAX_RISK_PCT = 1.00
+BRK_RETEST_LOOKBACK = 8
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
-    "btc_5m_aggressive": {"label": "BTC/USD 5m aggressive", "interval": 5, "rr_min": 1.25, "aggressive": True},
+    "btc_5m_breakout_retest": {"label": "BTC/USD 5m breakout-retest experiment", "interval": 5, "rr_min": 1.25, "aggressive": True},
 }
 
 
@@ -102,7 +102,7 @@ def normalize_decision(d: dict[str, Any], rr_min: float):
 
 
 def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
-    """Extra safety/quality gates for 5m aggressive mode only."""
+    """Extra safety/quality gates for 5m breakout-retest mode only."""
     if d.get("status") != "PROPOSE_TRADE":
         return d
 
@@ -111,31 +111,31 @@ def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
     stop = float(d.get("stop_loss") or 0)
     rr = float(d.get("risk_reward_ratio") or 0)
     if side not in {"BUY", "SELL"} or entry <= 0 or stop <= 0:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_invalid_fields", "reason": "Aggressive gate blocked: invalid trade fields."}, 1.25)
+        return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_invalid_fields", "reason": "Breakout-retest gate blocked: invalid trade fields."}, 1.25)
 
     # 1) tighter regime / execution quality filter
     if spread_pct > AGGR_MAX_SPREAD_PCT:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_spread", "reason": f"Aggressive gate blocked: spread too wide for 5m execution quality (>{AGGR_MAX_SPREAD_PCT}%)."}, 1.25)
+        return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_spread", "reason": f"Breakout-retest gate blocked: spread too wide for 5m execution quality (>{AGGR_MAX_SPREAD_PCT}%)."}, 1.25)
 
     # 2) tighter trade construction: bounded stop distance + stronger R:R floor
     risk_pct = abs(entry - stop) / max(entry, 1) * 100
     if risk_pct < AGGR_MIN_RISK_PCT or risk_pct > AGGR_MAX_RISK_PCT:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_risk_band", "reason": f"Aggressive gate blocked: stop distance outside {AGGR_MIN_RISK_PCT:.2f}%-{AGGR_MAX_RISK_PCT:.2f}% risk band."}, 1.25)
+        return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_risk_band", "reason": f"Breakout-retest gate blocked: stop distance outside {AGGR_MIN_RISK_PCT:.2f}%-{AGGR_MAX_RISK_PCT:.2f}% risk band."}, 1.25)
     if rr < 1.40:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_rr", "reason": "Aggressive gate blocked: risk/reward below tightened 5m threshold (1.40)."}, 1.25)
+        return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_rr", "reason": "Breakout-retest gate blocked: risk/reward below tightened 5m threshold (1.40)."}, 1.25)
 
     # 3) better entry confirmation: momentum + avoid chasing too far from planned entry
     last, prev = candles[-1], candles[-2]
     if side == "BUY":
         if not (last["close"] >= prev["close"]):
-            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_confirmation", "reason": "Aggressive gate blocked: missing bullish 2-candle confirmation."}, 1.25)
+            return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_confirmation", "reason": "Breakout-retest gate blocked: missing bullish 2-candle confirmation."}, 1.25)
         if ask > entry * 1.0015:
-            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_entry_chase", "reason": "Aggressive gate blocked: buy fill would chase too far above planned entry."}, 1.25)
+            return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_entry_chase", "reason": "Breakout-retest gate blocked: buy fill would chase too far above planned entry."}, 1.25)
     else:
         if not (last["close"] <= prev["close"]):
-            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_confirmation", "reason": "Aggressive gate blocked: missing bearish 2-candle confirmation."}, 1.25)
+            return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_confirmation", "reason": "Breakout-retest gate blocked: missing bearish 2-candle confirmation."}, 1.25)
         if bid < entry * 0.9985:
-            return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_entry_chase", "reason": "Aggressive gate blocked: sell fill would chase too far below planned entry."}, 1.25)
+            return normalize_decision({"status": "WAIT", "regime_label": "brk5_filter_entry_chase", "reason": "Breakout-retest gate blocked: sell fill would chase too far below planned entry."}, 1.25)
 
     return d
 
@@ -149,54 +149,52 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
     ranges = [c["high"] - c["low"] for c in candles[-8:]]
     avg_range = max(0.1, sum(ranges) / len(ranges))
 
-    # 5m aggressive is intentionally a different strategy family: mean-reversion in chop only.
+    # 5m experiment uses a different family: breakout-retest continuation.
     if aggressive:
-        highs10 = [c["high"] for c in candles[-10:]]
-        lows10 = [c["low"] for c in candles[-10:]]
-        closes10 = [c["close"] for c in candles[-10:]]
-        hi10, lo10 = max(highs10), min(lows10)
-        width = max(0.1, hi10 - lo10)
-        width_pct = (width / max(last["close"], 1)) * 100
-        drift_pct = abs(closes10[-1] - closes10[0]) / max(closes10[0], 1) * 100
+        highsN = [c["high"] for c in candles[-BRK_RETEST_LOOKBACK:]]
+        lowsN = [c["low"] for c in candles[-BRK_RETEST_LOOKBACK:]]
+        breakout_high = max(highsN[:-1])
+        breakout_low = min(lowsN[:-1])
+        rangeN = max(0.1, max(highsN) - min(lowsN))
 
-        # chop-only regime: tight range, low net drift
-        if width_pct <= 0.70 and drift_pct <= 0.35:
-            lower_band = lo10 + AGGR_CHOP_ENTRY_BAND_FRAC * width
-            upper_band = hi10 - AGGR_CHOP_ENTRY_BAND_FRAC * width
+        broke_up = last["close"] > breakout_high and prev["close"] <= breakout_high
+        retest_up = last["low"] <= breakout_high * 1.0006
+        confirm_up = last["close"] >= last["open"] and last["close"] >= breakout_high
 
-            # long reversion from lower band with bullish confirmation
-            if last["close"] <= lower_band and last["close"] >= last["open"] and prev["close"] <= prev["open"]:
-                e = round(last["high"] + 0.5, 1)
-                st = round(min(lows5) - 0.5, 1)
-                r = e - st
-                tp = round(lo10 + 0.65 * width, 1)
-                rr = round((tp - e) / r, 2) if r > 0 else 0
-                if rr >= rr_min:
-                    return normalize_decision({
-                        "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
-                        "risk_reward_ratio": rr, "invalidation": f"{timeframe} close below {round(lo10,1)}",
-                        "regime_label": "aggr_chop_mean_reversion_long",
-                        "reason": "5m family: mean reversion long inside confirmed chop regime.",
-                    }, rr_min)
+        if broke_up and retest_up and confirm_up:
+            e = round(last["high"] + 0.5, 1)
+            st = round(min(lows5) - 0.5, 1)
+            r = e - st
+            tp = round(e + 1.6 * r, 1)
+            rr = round((tp - e) / r, 2) if r > 0 else 0
+            if rr >= rr_min:
+                return normalize_decision({
+                    "status": "PROPOSE_TRADE", "side": "BUY", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                    "risk_reward_ratio": rr, "invalidation": f"{timeframe} close back below {round(breakout_high,1)}",
+                    "regime_label": "brk5_breakout_retest_long",
+                    "reason": "5m family: bullish breakout-retest continuation.",
+                }, rr_min)
 
-            # short reversion from upper band with bearish confirmation
-            if last["close"] >= upper_band and last["close"] <= last["open"] and prev["close"] >= prev["open"]:
-                e = round(last["low"] - 0.5, 1)
-                st = round(max(highs5) + 0.5, 1)
-                r = st - e
-                tp = round(hi10 - 0.65 * width, 1)
-                rr = round((e - tp) / r, 2) if r > 0 else 0
-                if rr >= rr_min:
-                    return normalize_decision({
-                        "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
-                        "risk_reward_ratio": rr, "invalidation": f"{timeframe} close above {round(hi10,1)}",
-                        "regime_label": "aggr_chop_mean_reversion_short",
-                        "reason": "5m family: mean reversion short inside confirmed chop regime.",
-                    }, rr_min)
+        broke_down = last["close"] < breakout_low and prev["close"] >= breakout_low
+        retest_dn = last["high"] >= breakout_low * 0.9994
+        confirm_dn = last["close"] <= last["open"] and last["close"] <= breakout_low
 
-            return normalize_decision({"status": "WAIT", "regime_label": "aggr_chop_no_edge", "reason": "Chop regime detected but no qualified mean-reversion entry."}, rr_min)
+        if broke_down and retest_dn and confirm_dn:
+            e = round(last["low"] - 0.5, 1)
+            st = round(max(highs5) + 0.5, 1)
+            r = st - e
+            tp = round(e - 1.6 * r, 1)
+            rr = round((e - tp) / r, 2) if r > 0 else 0
+            if rr >= rr_min:
+                return normalize_decision({
+                    "status": "PROPOSE_TRADE", "side": "SELL", "entry_price": e, "stop_loss": st, "take_profit": tp,
+                    "risk_reward_ratio": rr, "invalidation": f"{timeframe} close back above {round(breakout_low,1)}",
+                    "regime_label": "brk5_breakout_retest_short",
+                    "reason": "5m family: bearish breakout-retest continuation.",
+                }, rr_min)
 
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_not_chop", "reason": "5m strategy family blocks non-chop regime."}, rr_min)
+        # no valid breakout-retest edge yet
+        return normalize_decision({"status": "WAIT", "regime_label": "brk5_no_edge", "reason": "5m breakout-retest family found no qualified setup."}, rr_min)
 
     # Frozen baseline behavior for 15m conservative (strict confirmation)
     conf = 2
@@ -437,17 +435,17 @@ async def execute_mode_scan(mode: str):
     d = await call_clawbot(payload, timeframe, cfg["rr_min"])
 
     # 5m experiment must remain a different family from 15m baseline.
-    if mode == "btc_5m_aggressive" and d.get("status") == "PROPOSE_TRADE":
-        if not str(d.get("regime_label", "")).startswith("aggr_"):
-            d = normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_family_mismatch", "reason": "5m family gate blocked non-aggressive regime proposal."}, cfg["rr_min"])
+    if mode == "btc_5m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
+        if not str(d.get("regime_label", "")).startswith("brk5_"):
+            d = normalize_decision({"status": "WAIT", "regime_label": "brk5_family_mismatch", "reason": "5m family gate blocked non-breakout-retest proposal."}, cfg["rr_min"])
 
     if d["status"] == "WAIT":
         fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
-        if fb["status"] == "PROPOSE_TRADE" or mode == "btc_5m_aggressive":
+        if fb["status"] == "PROPOSE_TRADE" or mode == "btc_5m_breakout_retest":
             d = fb
 
-    # Tightening applies ONLY to 5m aggressive mode; 15m baseline remains frozen.
-    if mode == "btc_5m_aggressive" and d.get("status") == "PROPOSE_TRADE":
+    # Tightening applies ONLY to 5m experiment mode; 15m baseline remains frozen.
+    if mode == "btc_5m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
         d = aggressive_quality_gate(candles, d, bid, ask, spread_pct)
 
     d["signal_id"] = d.get("signal_id") or f"{mode}|{payload['timestamp']}|{candles[-1]['time']}"
