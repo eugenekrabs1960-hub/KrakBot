@@ -20,6 +20,7 @@ PAPER_FEE_PCT = 0.40
 
 # 5m experiment controls (change one variable at a time)
 AGGR_MAX_SPREAD_PCT = 0.05
+AGGR_CHOP_ENTRY_BAND_FRAC = 0.35
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
@@ -158,8 +159,8 @@ def fallback_construct(candles, rr_min, aggressive, timeframe):
 
         # chop-only regime: tight range, low net drift
         if width_pct <= 0.70 and drift_pct <= 0.35:
-            lower_band = lo10 + 0.25 * width
-            upper_band = hi10 - 0.25 * width
+            lower_band = lo10 + AGGR_CHOP_ENTRY_BAND_FRAC * width
+            upper_band = hi10 - AGGR_CHOP_ENTRY_BAND_FRAC * width
 
             # long reversion from lower band with bullish confirmation
             if last["close"] <= lower_band and last["close"] >= last["open"] and prev["close"] <= prev["open"]:
