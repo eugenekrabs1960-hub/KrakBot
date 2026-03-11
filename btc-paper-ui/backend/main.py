@@ -20,7 +20,7 @@ PAPER_FEE_PCT = 0.40
 
 # 5m experiment controls (change one variable at a time)
 AGGR_MAX_SPREAD_PCT = 0.05
-AGGR_CHOP_ENTRY_BAND_FRAC = 0.35
+AGGR_CHOP_ENTRY_BAND_FRAC = 0.45
 AGGR_MIN_RISK_PCT = 0.15
 AGGR_MAX_RISK_PCT = 0.90
 
