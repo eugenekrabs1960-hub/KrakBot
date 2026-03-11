@@ -101,6 +101,15 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
 }
+.arena-digest-grid { grid-template-columns: repeat(4, minmax(180px, 1fr)); }
+.arena-event-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px dashed rgba(255,255,255,0.08);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
 .arena-card { display: grid; gap: 10px; }
 .arena-active-banner {
   border-color: #5d3eb9;
@@ -173,6 +182,7 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   .leader-roi { text-align: left; }
   .arena-compare-grid { grid-template-columns: 1fr; }
   .arena-timeline-wrap { grid-template-columns: 1fr; }
+  .arena-digest-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 700px) {

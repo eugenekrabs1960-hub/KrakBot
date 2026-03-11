@@ -153,6 +153,17 @@ export async function getAgentDecisionPackets(limit = 100, agentId?: string, sym
   return parseJsonOrThrow(res);
 }
 
+export async function getJasonState() {
+  const res = await fetch(`${API_BASE}/agents/jason/state`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getJasonTrades(limit = 30) {
+  const bounded = Math.max(1, Math.min(limit, 200));
+  const res = await fetch(`${API_BASE}/agents/jason/trades?limit=${bounded}`);
+  return parseJsonOrThrow(res);
+}
+
 export async function getHyperliquidExecutionHealth() {
   const res = await fetch(`${API_BASE}/execution/hyperliquid/health`);
   return parseJsonOrThrow(res);

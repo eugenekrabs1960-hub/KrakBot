@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
-import { getActiveExecutionModel, getActivePaperModel, getAgentDecisionPackets, setActiveExecutionModel } from '../services/api';
+import {
+  getActiveExecutionModel,
+  getActivePaperModel,
+  getAgentDecisionPackets,
+  getJasonState,
+  getJasonTrades,
+  setActiveExecutionModel,
+} from '../services/api';
 
 type ArenaModel = {
   id: string;
@@ -36,6 +43,9 @@ export default function ModelArena() {
   const [packets, setPackets] = useState<any[]>([]);
   const [activePaper, setActivePaper] = useState<any>(null);
   const [activeExecution, setActiveExecution] = useState<any>(null);
+  const [jasonState, setJasonState] = useState<any>(null);
+  const [jasonTrades, setJasonTrades] = useState<any[]>([]);
+
   const [selected, setSelected] = useState<string[]>([]);
   const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
   const [switchConfirm, setSwitchConfirm] = useState('');
@@ -48,14 +58,18 @@ export default function ModelArena() {
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
 
   const load = async () => {
-    const [packetRes, activeRes, execRes] = await Promise.all([
+    const [packetRes, activeRes, execRes, jsState, jsTrades] = await Promise.all([
       getAgentDecisionPackets(500).catch(() => ({ items: [] })),
       getActivePaperModel().catch(() => ({ item: null })),
       getActiveExecutionModel().catch(() => ({ item: null })),
+      getJasonState().catch(() => ({ state: null, open_trade: null })),
+      getJasonTrades(30).catch(() => ({ items: [] })),
     ]);
     setPackets(packetRes?.items || []);
     setActivePaper(activeRes?.item || null);
     setActiveExecution(execRes?.item || null);
+    setJasonState(jsState || null);
+    setJasonTrades(jsTrades?.items || []);
   };
 
   useEffect(() => {
@@ -168,7 +182,6 @@ export default function ModelArena() {
   }, [rankedModels]);
 
   const selectedModels = rankedModels.filter((m) => selected.includes(m.id)).slice(0, 2);
-
   const comparisonAgentSet = useMemo(() => new Set(selectedModels.map((m) => m.id)), [selectedModels]);
 
   const timelinePackets = useMemo(() => {
@@ -182,6 +195,22 @@ export default function ModelArena() {
     if (focusedPacketId == null) return timelinePackets[0] || null;
     return timelinePackets.find((p) => Number(p.id) === focusedPacketId) || timelinePackets[0] || null;
   }, [timelinePackets, focusedPacketId]);
+
+  const digest = useMemo(() => {
+    const totalAgents = rankedModels.length;
+    const totalPackets = filteredPackets.length;
+    const leader = rankedModels[0] || null;
+    const jState = jasonState?.state || {};
+    const jOpen = jasonState?.open_trade || null;
+    return {
+      totalAgents,
+      totalPackets,
+      leader,
+      jBalance: Number(jState.balance_usd || 0),
+      jActive: Boolean(jState.active),
+      jOpen,
+    };
+  }, [rankedModels, filteredPackets, jasonState]);
 
   const toggleSelection = (id: string) => {
     setSelected((prev) => {
@@ -216,20 +245,56 @@ export default function ModelArena() {
     <section>
       <PageHeader
         title="Model Arena"
-        subtitle="Ranked model cards, side-by-side comparison, and decision timeline with reason/risk/execution drill-down."
+        subtitle="Clean operator view: who is active, what changed recently, and why each trade happened."
       />
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+      <div className="grid arena-digest-grid" style={{ marginBottom: 12 }}>
         <div className="card glass-card compact arena-active-banner">
-          <strong>Active Execution Model:</strong>{' '}
-          <span>{activeExecution?.agent_id || 'none selected'}</span>
-          {activeExecution?.selected_at_ms ? (
-            <div className="muted">Switched: {new Date(Number(activeExecution.selected_at_ms)).toLocaleString()}</div>
-          ) : null}
+          <div className="muted">Active Execution</div>
+          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{activeExecution?.agent_id || 'none selected'}</div>
         </div>
         <div className="card glass-card compact">
-          <strong>Active Paper Model:</strong>{' '}
-          <span className="muted">{activePaper?.model_path || 'none selected'}</span>
+          <div className="muted">Agents in view</div>
+          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.totalAgents}</div>
+        </div>
+        <div className="card glass-card compact">
+          <div className="muted">Decision packets</div>
+          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.totalPackets}</div>
+        </div>
+        <div className="card glass-card compact">
+          <div className="muted">Leader now</div>
+          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.leader?.label || 'n/a'}</div>
+        </div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', marginBottom: 12 }}>
+        <div className="card glass-card">
+          <h3 style={{ marginTop: 0 }}>What just happened</h3>
+          <div className="trace-list">
+            {timelinePackets.slice(0, 10).map((p) => (
+              <div key={`digest-${p.id}`} className="arena-event-row">
+                <div>
+                  <strong>{String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')}
+                  <div className="muted">{p.rationale || 'No rationale provided.'}</div>
+                </div>
+                <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card glass-card">
+          <h3 style={{ marginTop: 0 }}>Jason Snapshot</h3>
+          <div className="muted">Running: {digest.jActive ? 'yes' : 'no'}</div>
+          <div className="muted">Balance: {digest.jBalance.toFixed(2)} USD</div>
+          {digest.jOpen ? (
+            <>
+              <div className="muted">Open: {digest.jOpen.side?.toUpperCase()} {digest.jOpen.symbol}</div>
+              <div className="muted">Leverage: {Number(digest.jOpen.leverage || 0).toFixed(2)}x</div>
+              <div className="muted">Entry: {Number(digest.jOpen.entry_price || 0).toFixed(2)}</div>
+            </>
+          ) : <div className="muted">Open: none</div>}
+          <button className="btn" style={{ marginTop: 8 }} onClick={load}>Refresh</button>
         </div>
       </div>
 
@@ -255,8 +320,6 @@ export default function ModelArena() {
             <option value="24h">Last 24h</option>
             <option value="all">All</option>
           </select>
-
-          <span className="muted">Packets in view: {filteredPackets.length}</span>
         </div>
       </div>
 
@@ -277,12 +340,12 @@ export default function ModelArena() {
                 <div><span className="muted">PnL</span><strong>{model.pnl.toFixed(2)} USD</strong></div>
                 <div><span className="muted">Win rate</span><strong>{pct(model.winRate)}</strong></div>
                 <div><span className="muted">Trades</span><strong>{model.trades}</strong></div>
-                <div><span className="muted">Avg confidence</span><strong>{pct(model.avgConfidence * 100)}</strong></div>
+                <div><span className="muted">Confidence</span><strong>{pct(model.avgConfidence * 100)}</strong></div>
               </div>
               <div className="muted">Symbols: {model.symbols.length > 0 ? model.symbols.join(', ') : 'n/a'}</div>
               <div className="toolbar">
                 <button className={`btn ${selected.includes(model.id) ? 'active' : ''}`} onClick={() => toggleSelection(model.id)}>
-                  {selected.includes(model.id) ? 'Selected for Compare' : 'Compare'}
+                  {selected.includes(model.id) ? 'Selected' : 'Compare'}
                 </button>
                 <button
                   className={`btn ${activeExecution?.agent_id === model.id ? 'active' : ''}`}
@@ -293,7 +356,7 @@ export default function ModelArena() {
                   }}
                   disabled={activeExecution?.agent_id === model.id}
                 >
-                  {activeExecution?.agent_id === model.id ? 'Active for Execution' : 'Set Active Execution'}
+                  {activeExecution?.agent_id === model.id ? 'Active' : 'Set Active'}
                 </button>
               </div>
             </article>
@@ -304,10 +367,10 @@ export default function ModelArena() {
       {switchCandidate ? (
         <div className="card glass-card" style={{ marginTop: 12 }}>
           <h3 style={{ marginTop: 0 }}>Confirm Execution Model Switch</h3>
-          <div className="muted">You are switching active execution to <strong>{switchCandidate}</strong>. Type <strong>SWITCH</strong> to confirm.</div>
+          <div className="muted">Switch active execution to <strong>{switchCandidate}</strong>. Type <strong>SWITCH</strong> to confirm.</div>
           <div className="toolbar" style={{ marginTop: 8 }}>
             <input value={switchConfirm} onChange={(e) => setSwitchConfirm(e.target.value)} placeholder="Type SWITCH" />
-            <button className="btn" onClick={switchExecutionModel} disabled={switchBusy}>{switchBusy ? 'Switching…' : 'Confirm Switch'}</button>
+            <button className="btn" onClick={switchExecutionModel} disabled={switchBusy}>{switchBusy ? 'Switching…' : 'Confirm'}</button>
             <button className="btn" onClick={() => { setSwitchCandidate(null); setSwitchConfirm(''); }}>Cancel</button>
           </div>
           {switchMsg ? <div className="muted" style={{ marginTop: 8 }}>{switchMsg}</div> : null}
@@ -319,7 +382,7 @@ export default function ModelArena() {
       ) : null}
 
       <div className="card glass-card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Side-by-side Compare</h3>
+        <h3 style={{ marginTop: 0 }}>Compare selected models</h3>
         {selectedModels.length === 0 ? (
           <div className="muted">Select one or two models to compare.</div>
         ) : (
@@ -342,8 +405,28 @@ export default function ModelArena() {
         )}
       </div>
 
+      <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Jason Recent Trades</h3>
+        <table className="responsive-table">
+          <thead><tr><th>Opened</th><th>Side</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>Status</th><th>PnL</th></tr></thead>
+          <tbody>
+            {jasonTrades.length === 0 ? <tr><td colSpan={7} className="muted">No trades yet.</td></tr> : jasonTrades.slice(0, 12).map((t) => (
+              <tr key={t.id}>
+                <td data-label="Opened">{t.opened_at_ms ? new Date(Number(t.opened_at_ms)).toLocaleString() : 'n/a'}</td>
+                <td data-label="Side">{String(t.side || '').toUpperCase()}</td>
+                <td data-label="Symbol">{t.symbol}</td>
+                <td data-label="Lev">{Number(t.leverage || 0).toFixed(1)}x</td>
+                <td data-label="Entry">{Number(t.entry_price || 0).toFixed(2)}</td>
+                <td data-label="Status">{t.status}</td>
+                <td data-label="PnL">{t.realized_pnl_usd == null ? 'n/a' : Number(t.realized_pnl_usd).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="card glass-card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Decision Packet Timeline</h3>
+        <h3 style={{ marginTop: 0 }}>Decision Packet Inspector</h3>
         <div className="arena-timeline-wrap">
           <div className="arena-timeline-list">
             {timelinePackets.length === 0 ? (
