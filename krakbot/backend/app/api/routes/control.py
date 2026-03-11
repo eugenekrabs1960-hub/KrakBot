@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.control import BotCommand, StrategyToggle
+from app.schemas.control import BotCommand, StrategyToggle, ExecutionVenueUpdate
 from app.services.orchestrator import OrchestratorService
 from app.services.strategy_registry import set_enabled
+from app.services.execution_preferences import get_default_execution_venue, set_default_execution_venue
 from app.core.config import settings
 
 router = APIRouter(prefix='/control', tags=['control'])
@@ -30,6 +31,17 @@ def bot_state(db: Session = Depends(get_db)):
 def toggle_strategy(payload: StrategyToggle, db: Session = Depends(get_db)):
     set_enabled(db, payload.strategy_instance_id, payload.enabled)
     return {'ok': True, 'strategy_instance_id': payload.strategy_instance_id, 'enabled': payload.enabled}
+
+
+@router.get('/execution/venue')
+def get_execution_venue(db: Session = Depends(get_db)):
+    return {'default_venue': get_default_execution_venue(db)}
+
+
+@router.post('/execution/venue')
+def set_execution_venue(payload: ExecutionVenueUpdate, db: Session = Depends(get_db)):
+    venue = set_default_execution_venue(db, payload.default_venue)
+    return {'ok': True, 'default_venue': venue}
 
 
 @router.get('/live-paper-test-mode')

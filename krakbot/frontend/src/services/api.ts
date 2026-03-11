@@ -27,6 +27,20 @@ export async function sendBotCommand(command: 'start' | 'pause' | 'resume' | 'st
   return parseJsonOrThrow(res);
 }
 
+export async function getExecutionVenue() {
+  const res = await fetch(`${API_BASE}/control/execution/venue`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setExecutionVenue(defaultVenue: 'paper' | 'hyperliquid') {
+  const res = await fetch(`${API_BASE}/control/execution/venue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ default_venue: defaultVenue }),
+  });
+  return parseJsonOrThrow(res);
+}
+
 export async function getEifFlags() {
   const res = await fetch(`${API_BASE}/control/eif-flags`);
   return parseJsonOrThrow(res);

@@ -30,6 +30,7 @@ th, td { border-bottom: 1px solid var(--border); padding: 10px; text-align: left
 .badge.info { background: rgba(79,156,255,.15); color: var(--accent); }
 .btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
 .btn:hover { border-color: var(--accent); }
+.btn.active { border-color: var(--accent); background: rgba(139,92,246,0.2); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .btn.danger { border-color: var(--bad); color: var(--bad); }
 .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }

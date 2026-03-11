@@ -8,6 +8,7 @@ from app.services.eif_capture import eif_capture
 from app.services.eif_scorecard import eif_scorecard
 from app.services.idempotency import check_or_store, update_response
 from app.services.execution_orchestration import execute_paper_order
+from app.services.execution_preferences import get_default_execution_venue
 
 router = APIRouter(prefix='/trades', tags=['trades'])
 
@@ -52,6 +53,7 @@ def paper_order(
         return check['response'] or {}
 
     side = 'buy' if payload.side.lower() == 'buy' else 'sell'
+    selected_venue = (payload.venue or get_default_execution_venue(db)).lower()
     result = execute_paper_order(
         db,
         strategy_instance_id=payload.strategy_instance_id,
@@ -60,7 +62,7 @@ def paper_order(
         qty=payload.qty,
         order_type=payload.order_type,
         limit_price=payload.limit_price,
-        venue=payload.venue,
+        venue=selected_venue,
     )
 
     event_type = 'entry' if side == 'buy' else 'exit'

@@ -9,3 +9,7 @@ class BotCommand(BaseModel):
 class StrategyToggle(BaseModel):
     strategy_instance_id: str
     enabled: bool
+
+
+class ExecutionVenueUpdate(BaseModel):
+    default_venue: Literal['paper', 'hyperliquid']
