@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
+from app.services.jason_agent import get_jason_state, list_jason_trades, run_jason_once
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -39,3 +40,21 @@ def create_decision_packet(payload: DecisionPacketRequest, db: Session = Depends
 @router.get('/decision-packets')
 def get_decision_packets(limit: int = 100, agent_id: str | None = None, symbol: str | None = None, db: Session = Depends(get_db)):
     return list_decision_packets(db, limit=limit, agent_id=agent_id, symbol=symbol)
+
+
+@router.post('/jason/run-once')
+def jason_run_once(db: Session = Depends(get_db)):
+    try:
+        return run_jason_once(db)
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)[:300]}
+
+
+@router.get('/jason/state')
+def jason_state(db: Session = Depends(get_db)):
+    return get_jason_state(db)
+
+
+@router.get('/jason/trades')
+def jason_trades(limit: int = 100, db: Session = Depends(get_db)):
+    return list_jason_trades(db, limit=limit)

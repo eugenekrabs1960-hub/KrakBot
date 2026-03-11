@@ -183,6 +183,33 @@ WALLET_INTEL_ALIGNMENT_MIN_CONFIDENCE=35
 LIVE_PAPER_TEST_MAX_ACTIVE_STRATEGIES=3
 ```
 
+## Jason Agent (GPT model in Model Arena)
+
+Jason is now wired as an Arena agent (`agent_id: jason`) with virtual Hyperliquid-style perp paper trading rules:
+
+- Starting balance: `$1000`
+- Symbols: `BTC`, `ETH`, `SOL`
+- Actions: `long`, `short`, `close`, `hold`
+- Max leverage: `20x`
+- Max allocation: `50%` of remaining balance per trade
+- Decision packets are recorded for Model Arena ranking/compare visibility
+
+Backend env:
+
+```bash
+OPENAI_API_KEY=...your key...
+JASON_AGENT_MODEL=gpt-5.4
+```
+
+Run + inspect:
+
+```bash
+curl -s -X POST http://localhost:8010/api/agents/jason/run-once
+curl -s http://localhost:8010/api/agents/jason/state
+curl -s 'http://localhost:8010/api/agents/jason/trades?limit=50'
+curl -s 'http://localhost:8010/api/agents/decision-packets?agent_id=jason&limit=50'
+```
+
 ## Tailscale WebUI Access
 
 Current node Tailscale IP can access frontend directly (tailnet-only):
