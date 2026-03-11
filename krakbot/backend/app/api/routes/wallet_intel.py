@@ -11,6 +11,7 @@ from app.schemas.wallet_intel import (
 )
 from app.services.wallet_intel import WalletIntelService
 from app.adapters.wallet_intel_providers import HeliusProvider, HeliusProviderStub
+from app.services.wallet_intel_scheduler import wallet_intel_scheduler
 
 router = APIRouter(prefix='/wallet-intel', tags=['wallet-intel'])
 
@@ -27,9 +28,33 @@ def wallet_intel_health(db: Session = Depends(get_db)):
             """
         )
     ).mappings().first()
+    latest_run = db.execute(
+        text(
+            """
+            SELECT run_id, source, status, started_at_ms, heartbeat_at_ms, finished_at_ms, duration_ms, error_text
+            FROM wallet_pipeline_run_ledger
+            ORDER BY started_at_ms DESC
+            LIMIT 1
+            """
+        )
+    ).mappings().first()
+    lock = db.execute(
+        text(
+            """
+            SELECT lock_name, owner_run_id, acquired_at_ms, heartbeat_at_ms
+            FROM wallet_pipeline_lock
+            WHERE lock_name='wallet_pipeline'
+            LIMIT 1
+            """
+        )
+    ).mappings().first()
     return {
         'ok': True,
         'latest_signal': dict(row) if row else None,
+        'scheduler': {
+            'latest_run': dict(latest_run) if latest_run else None,
+            'lock': dict(lock) if lock else None,
+        },
     }
 
 
@@ -58,6 +83,11 @@ async def run_pipeline(payload: WalletPipelineRunRequest, db: Session = Depends(
         ]
 
     return svc.run_pipeline(db, provider_events=events)
+
+
+@router.post('/admin/run-scheduled')
+async def run_scheduled_pipeline():
+    return await wallet_intel_scheduler.run_once(source='api_manual')
 
 
 @router.get('/cohorts/{cohort_id}/latest')

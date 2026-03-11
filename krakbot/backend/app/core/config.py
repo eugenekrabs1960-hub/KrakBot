@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     wallet_intel_cohort_target_size: int = 50
     wallet_intel_cohort_hysteresis_buffer: int = 15
     wallet_intel_alignment_min_confidence: float = 35.0
+    wallet_intel_scheduler_enabled: bool = False
+    wallet_intel_scheduler_interval_sec: int = 900
+    wallet_intel_scheduler_lock_ttl_sec: int = 1200
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -6,15 +6,18 @@ from app.adapters.marketdata_kraken import ingestor
 from app.api.routes import health, control, strategies, market, trades, ws, reliability, market_registry, eif, wallet_intel
 from app.core.config import settings
 from app.services.live_paper_test_mode import live_paper_test_mode
+from app.services.wallet_intel_scheduler import wallet_intel_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ingestor.start()
     await live_paper_test_mode.start()
+    await wallet_intel_scheduler.start()
     try:
         yield
     finally:
+        await wallet_intel_scheduler.stop()
         await live_paper_test_mode.stop()
         await ingestor.stop()
 
