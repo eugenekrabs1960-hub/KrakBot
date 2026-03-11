@@ -47,3 +47,12 @@ def test_hyperliquid_reconciliation_endpoints(api_base: str):
     h = hist.json()
     assert h['ok'] is True
     assert isinstance(h['items'], list)
+
+    acc = requests.get(f"{api_base}/execution/hyperliquid/snapshots/account?limit=5", timeout=TIMEOUT)
+    pos = requests.get(f"{api_base}/execution/hyperliquid/snapshots/positions?limit=5", timeout=TIMEOUT)
+    acc.raise_for_status()
+    pos.raise_for_status()
+    assert acc.json()['ok'] is True
+    assert pos.json()['ok'] is True
+    assert isinstance(acc.json()['items'], list)
+    assert isinstance(pos.json()['items'], list)

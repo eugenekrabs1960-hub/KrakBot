@@ -6,6 +6,10 @@ from app.adapters.execution.hyperliquid_adapter import HyperliquidExecutionAdapt
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.hyperliquid_reconciliation import HyperliquidReconciliationService
+from app.services.hyperliquid_state_store import (
+    list_latest_hyperliquid_account_snapshots,
+    list_latest_hyperliquid_position_snapshots,
+)
 
 router = APIRouter(prefix='/execution', tags=['execution'])
 
@@ -53,3 +57,13 @@ def hyperliquid_reconcile_history(limit: int = 20, db: Session = Depends(get_db)
         {'limit': max(1, min(200, int(limit)))},
     ).mappings().all()
     return {'ok': True, 'items': [dict(r) for r in rows]}
+
+
+@router.get('/hyperliquid/snapshots/account')
+def hyperliquid_account_snapshots(limit: int = 20, db: Session = Depends(get_db)):
+    return {'ok': True, 'items': list_latest_hyperliquid_account_snapshots(db, limit=limit)}
+
+
+@router.get('/hyperliquid/snapshots/positions')
+def hyperliquid_position_snapshots(limit: int = 50, db: Session = Depends(get_db)):
+    return {'ok': True, 'items': list_latest_hyperliquid_position_snapshots(db, limit=limit)}

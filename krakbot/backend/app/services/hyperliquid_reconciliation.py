@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.execution.hyperliquid_adapter import HyperliquidExecutionAdapter
 from app.services.checkpoints import load_checkpoint, save_checkpoint
+from app.services.hyperliquid_state_store import persist_hyperliquid_snapshots
 
 
 class HyperliquidReconciliationService:
@@ -56,6 +57,13 @@ class HyperliquidReconciliationService:
         )
         db.commit()
 
+        store_result = persist_hyperliquid_snapshots(
+            db,
+            environment=getattr(self.adapter, 'environment', 'testnet'),
+            account=account,
+            positions=positions,
+        )
+
         save_checkpoint(
             db,
             'hyperliquid_reconciliation_snapshot',
@@ -68,4 +76,5 @@ class HyperliquidReconciliationService:
             'details': details,
             'account': account,
             'positions': positions,
+            'snapshot_store': store_result,
         }
