@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
-from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once
+from app.core.config import settings
+from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -57,6 +58,19 @@ def jason_run_once(db: Session = Depends(get_db)):
         return run_jason_once(db)
     except Exception as exc:
         return {'ok': False, 'error': str(exc)[:300]}
+
+
+@router.post('/jason/run-rule-once')
+def jason_run_rule_once(db: Session = Depends(get_db)):
+    try:
+        return run_jason_rule_based_once(db)
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)[:300]}
+
+
+@router.get('/jason/loop-status')
+def jason_loop_status():
+    return {'ok': True, 'enabled': settings.jason_loop_enabled, 'interval_sec': settings.jason_loop_interval_sec}
 
 
 @router.post('/jason/execute-decision')

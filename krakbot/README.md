@@ -197,14 +197,18 @@ Jason is now wired as an Arena agent (`agent_id: jason`) with virtual Hyperliqui
 Backend env:
 
 ```bash
-OPENAI_API_KEY=...your key...
+OPENAI_API_KEY=...your key...            # optional; if missing loop falls back to rule-based strategy
 JASON_AGENT_MODEL=gpt-5.4
+JASON_LOOP_ENABLED=true
+JASON_LOOP_INTERVAL_SEC=60
 ```
 
 Run + inspect:
 
 ```bash
 curl -s -X POST http://localhost:8010/api/agents/jason/run-once
+curl -s -X POST http://localhost:8010/api/agents/jason/run-rule-once
+curl -s http://localhost:8010/api/agents/jason/loop-status
 curl -s http://localhost:8010/api/agents/jason/state
 curl -s 'http://localhost:8010/api/agents/jason/trades?limit=50'
 curl -s 'http://localhost:8010/api/agents/decision-packets?agent_id=jason&limit=50'

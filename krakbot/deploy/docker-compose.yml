@@ -24,6 +24,9 @@ services:
       LIVE_PAPER_TEST_MAX_ORDERS_PER_MINUTE: ${LIVE_PAPER_TEST_MAX_ORDERS_PER_MINUTE:-6}
       LIVE_PAPER_TEST_MIN_SECONDS_BETWEEN_ORDERS: ${LIVE_PAPER_TEST_MIN_SECONDS_BETWEEN_ORDERS:-5}
       LIVE_PAPER_TEST_FORCE_PAPER_ONLY: ${LIVE_PAPER_TEST_FORCE_PAPER_ONLY:-true}
+      JASON_LOOP_ENABLED: ${JASON_LOOP_ENABLED:-true}
+      JASON_LOOP_INTERVAL_SEC: ${JASON_LOOP_INTERVAL_SEC:-60}
+      JASON_AGENT_MODEL: ${JASON_AGENT_MODEL:-gpt-5.4}
     volumes:
       - ../backend:/app
     command: bash -lc "pip install -r requirements.txt && python -m app.db.migrate && uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload"

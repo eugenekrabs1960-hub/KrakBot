@@ -74,9 +74,11 @@ class Settings(BaseSettings):
     hyperliquid_market_collector_interval_sec: int = 60
     hyperliquid_market_collector_symbols_limit: int = 200
 
-    # Jason agent (OpenAI-driven)
+    # Jason agent (OpenAI-driven + loop)
     openai_api_key: str = ""
     jason_agent_model: str = "gpt-5.4"
+    jason_loop_enabled: bool = False
+    jason_loop_interval_sec: int = 60
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

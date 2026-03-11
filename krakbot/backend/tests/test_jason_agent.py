@@ -62,3 +62,13 @@ def test_execute_jason_decision_path(tmp_path):
 
         st = jason_agent.get_jason_state(db)
         assert st['open_trade'] is not None
+
+
+def test_rule_based_runner_without_openai(tmp_path):
+    eng = _prep_db(tmp_path / 'jason3.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = jason_agent.run_jason_rule_based_once(db)
+        assert out['ok'] is True
+        assert out['decision']['action'] in ('long', 'short', 'hold', 'close')

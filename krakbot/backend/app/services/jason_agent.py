@@ -382,6 +382,46 @@ def run_jason_once(db: Session):
     return _apply_decision(db, decision, state, snapshot)
 
 
+def run_jason_rule_based_once(db: Session):
+    state = _load_state(db)
+    snapshot = _latest_market_snapshot(db)
+    if not snapshot:
+        return {'ok': False, 'error': 'no_market_snapshot'}
+
+    if float(state.get('balance_usd', INITIAL_BALANCE)) <= 0:
+        state['active'] = False
+        _save_state(db, state)
+        db.commit()
+        return {'ok': False, 'error': 'balance_zero', 'state': state}
+
+    open_trade = _get_open_trade(db)
+    if open_trade:
+        sym = str(open_trade.get('symbol') or 'BTC').upper()
+        ret1 = float((snapshot.get(sym) or {}).get('ret_1') or 0.0)
+        if (open_trade.get('side') == 'long' and ret1 < 0) or (open_trade.get('side') == 'short' and ret1 > 0):
+            d = Decision(action='close', symbol=sym, leverage=1, allocation_pct=0, confidence=0.55, rationale='Rule fallback: momentum flipped against open position; closing risk.')
+            return _apply_decision(db, d, state, snapshot)
+        d = Decision(action='hold', symbol=sym, leverage=1, allocation_pct=0, confidence=0.52, rationale='Rule fallback: keep current position while momentum still supportive.')
+        return _apply_decision(db, d, state, snapshot)
+
+    ranked = sorted(snapshot.items(), key=lambda x: abs(float((x[1] or {}).get('ret_1') or 0.0)), reverse=True)
+    pick_sym, pick_data = ranked[0]
+    ret1 = float((pick_data or {}).get('ret_1') or 0.0)
+    if ret1 == 0:
+        d = Decision(action='hold', symbol=pick_sym, leverage=1, allocation_pct=0, confidence=0.5, rationale='Rule fallback: no clear momentum signal.')
+    else:
+        action = 'long' if ret1 > 0 else 'short'
+        d = Decision(
+            action=action,
+            symbol=pick_sym,
+            leverage=3 if abs(ret1) < 0.002 else 6,
+            allocation_pct=15 if abs(ret1) < 0.002 else 25,
+            confidence=min(0.8, 0.55 + min(abs(ret1) * 100, 0.25)),
+            rationale='Rule fallback: strongest short-horizon momentum across BTC/ETH/SOL.',
+        )
+    return _apply_decision(db, d, state, snapshot)
+
+
 def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: float, allocation_pct: float, confidence: float, rationale: str):
     state = _load_state(db)
     snapshot = _latest_market_snapshot(db)
