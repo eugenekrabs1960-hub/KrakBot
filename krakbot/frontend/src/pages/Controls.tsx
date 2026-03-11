@@ -12,6 +12,7 @@ export default function Controls() {
   const [busy, setBusy] = useState<string | null>(null);
   const [defaultVenue, setDefaultVenue] = useState<'paper' | 'hyperliquid'>('paper');
   const [venueMsg, setVenueMsg] = useState('');
+  const [cmdMsg, setCmdMsg] = useState('');
 
   useEffect(() => {
     getBotState().then((d) => setState(d.state || 'unknown')).catch(() => setState('error'));
@@ -22,11 +23,15 @@ export default function Controls() {
     const dangerous = cmd === 'stop';
     if (dangerous && (!armed || confirm !== 'STOP')) return;
     setBusy(cmd);
+    setCmdMsg('');
     try {
       const data = await sendBotCommand(cmd);
       setState(data.state || data.detail || 'unknown');
+      setCmdMsg(`Command '${cmd}' accepted.`);
       setConfirm('');
       if (dangerous) setArmed(false);
+    } catch (err: any) {
+      setCmdMsg(err?.message || `Command '${cmd}' failed.`);
     } finally {
       setBusy(null);
     }
@@ -69,6 +74,7 @@ export default function Controls() {
         </label>
         <input placeholder="Type STOP to allow stop command" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         <p className="muted" style={{ marginBottom: 0 }}>Safe actions run immediately. Stop requires explicit arm + STOP confirmation.</p>
+        {cmdMsg ? <p className="muted" style={{ marginBottom: 0 }}>{cmdMsg}</p> : null}
       </div>
 
       <div className="card glass-card" style={{ marginTop: 12 }}>

@@ -47,17 +47,18 @@ export default function ModelArena() {
   const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('24h');
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
 
+  const load = async () => {
+    const [packetRes, activeRes, execRes] = await Promise.all([
+      getAgentDecisionPackets(500).catch(() => ({ items: [] })),
+      getActivePaperModel().catch(() => ({ item: null })),
+      getActiveExecutionModel().catch(() => ({ item: null })),
+    ]);
+    setPackets(packetRes?.items || []);
+    setActivePaper(activeRes?.item || null);
+    setActiveExecution(execRes?.item || null);
+  };
+
   useEffect(() => {
-    const load = async () => {
-      const [packetRes, activeRes, execRes] = await Promise.all([
-        getAgentDecisionPackets(500).catch(() => ({ items: [] })),
-        getActivePaperModel().catch(() => ({ item: null })),
-        getActiveExecutionModel().catch(() => ({ item: null })),
-      ]);
-      setPackets(packetRes?.items || []);
-      setActivePaper(activeRes?.item || null);
-      setActiveExecution(execRes?.item || null);
-    };
     load();
   }, []);
 
@@ -234,6 +235,7 @@ export default function ModelArena() {
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <div className="toolbar">
+          <button className="btn" onClick={load}>Refresh Arena Data</button>
           <label>Symbol</label>
           <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
             <option value="all">All</option>
