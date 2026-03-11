@@ -1,4 +1,8 @@
+import csv
+import io
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -6,7 +10,9 @@ from app.adapters.execution.hyperliquid_adapter import HyperliquidExecutionAdapt
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.hyperliquid_reconciliation import HyperliquidReconciliationService
+from app.services.checkpoints import load_checkpoint
 from app.services.hyperliquid_market_data import HyperliquidMarketDataService, list_latest_training_features
+from app.services.hyperliquid_market_scheduler import hyperliquid_market_scheduler
 from app.services.hyperliquid_state_store import (
     compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
@@ -83,6 +89,28 @@ def hyperliquid_collect_market_data(symbols_limit: int = 120, db: Session = Depe
     return out.__dict__
 
 
+@router.post('/hyperliquid/collector/run-once')
+def hyperliquid_collector_run_once():
+    return hyperliquid_market_scheduler.run_once()
+
+
+@router.get('/hyperliquid/collector/status')
+def hyperliquid_collector_status(db: Session = Depends(get_db)):
+    checkpoint = load_checkpoint(db, 'hyperliquid_market_collector')
+    return {'ok': True, 'enabled': settings.hyperliquid_market_collector_enabled, 'checkpoint': checkpoint}
+
+
 @router.get('/hyperliquid/training-features')
 def hyperliquid_training_features(limit: int = 200, symbol: str | None = None, db: Session = Depends(get_db)):
     return {'ok': True, 'items': list_latest_training_features(db, limit=limit, symbol=symbol)}
+
+
+@router.get('/hyperliquid/training-features/export')
+def hyperliquid_training_features_export(limit: int = 1000, symbol: str | None = None, db: Session = Depends(get_db)):
+    rows = list_latest_training_features(db, limit=limit, symbol=symbol)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=['id', 'ts', 'environment', 'symbol', 'mid_price', 'ret_1', 'ret_5', 'ret_15', 'source'])
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({k: r.get(k) for k in writer.fieldnames})
+    return PlainTextResponse(output.getvalue(), media_type='text/csv')

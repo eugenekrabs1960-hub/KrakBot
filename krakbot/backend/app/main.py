@@ -7,6 +7,7 @@ from app.api.routes import health, control, strategies, market, trades, ws, reli
 from app.core.config import settings
 from app.services.live_paper_test_mode import live_paper_test_mode
 from app.services.wallet_intel_scheduler import wallet_intel_scheduler
+from app.services.hyperliquid_market_scheduler import hyperliquid_market_scheduler
 
 
 @asynccontextmanager
@@ -14,9 +15,11 @@ async def lifespan(app: FastAPI):
     await ingestor.start()
     await live_paper_test_mode.start()
     await wallet_intel_scheduler.start()
+    await hyperliquid_market_scheduler.start()
     try:
         yield
     finally:
+        await hyperliquid_market_scheduler.stop()
         await wallet_intel_scheduler.stop()
         await live_paper_test_mode.stop()
         await ingestor.stop()

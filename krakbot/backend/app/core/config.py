@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     hyperliquid_environment: str = "testnet"
     hyperliquid_account_address: str = ""
     hyperliquid_api_wallet: str = ""
+    hyperliquid_market_collector_enabled: bool = False
+    hyperliquid_market_collector_interval_sec: int = 60
+    hyperliquid_market_collector_symbols_limit: int = 200
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

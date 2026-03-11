@@ -60,3 +60,18 @@ def test_hyperliquid_reconciliation_endpoints(api_base: str):
     assert isinstance(acc.json()['items'], list)
     assert isinstance(pos.json()['items'], list)
     assert 'margin_utilization_pct' in risk.json()
+
+
+def test_hyperliquid_collector_and_export_endpoints(api_base: str):
+    run = requests.post(f"{api_base}/execution/hyperliquid/collector/run-once", timeout=TIMEOUT)
+    run.raise_for_status()
+    body = run.json()
+    assert 'ok' in body
+
+    status = requests.get(f"{api_base}/execution/hyperliquid/collector/status", timeout=TIMEOUT)
+    status.raise_for_status()
+    assert status.json()['ok'] is True
+
+    export = requests.get(f"{api_base}/execution/hyperliquid/training-features/export?limit=10", timeout=TIMEOUT)
+    export.raise_for_status()
+    assert 'id,ts,environment,symbol,mid_price,ret_1,ret_5,ret_15,source' in export.text.splitlines()[0]

@@ -153,29 +153,32 @@ class HyperliquidMarketDataService:
 
 
 def list_latest_training_features(db: Session, limit: int = 200, symbol: str | None = None):
-    if symbol:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
-                FROM hyperliquid_training_features
-                WHERE symbol=:symbol
-                ORDER BY id DESC
-                LIMIT :limit
-                """
-            ),
-            {'symbol': symbol, 'limit': max(1, min(5000, int(limit)))},
-        ).mappings().all()
-    else:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
-                FROM hyperliquid_training_features
-                ORDER BY id DESC
-                LIMIT :limit
-                """
-            ),
-            {'limit': max(1, min(5000, int(limit)))},
-        ).mappings().all()
-    return [dict(r) for r in rows]
+    try:
+        if symbol:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
+                    FROM hyperliquid_training_features
+                    WHERE symbol=:symbol
+                    ORDER BY id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {'symbol': symbol, 'limit': max(1, min(5000, int(limit)))},
+            ).mappings().all()
+        else:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
+                    FROM hyperliquid_training_features
+                    ORDER BY id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {'limit': max(1, min(5000, int(limit)))},
+            ).mappings().all()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
