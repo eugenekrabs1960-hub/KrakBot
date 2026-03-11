@@ -1,92 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getBotState, getEifFilterDecisions, getEifFlags, getEifSummary, sendBotCommand } from '../services/api';
+import { useEffect, useState } from 'react';
+import PageHeader from '../components/PageHeader';
+import Badge from '../components/Badge';
+import { getBotState, sendBotCommand } from '../services/api';
 
-const commands = ['start', 'pause', 'resume', 'stop', 'reload'] as const;
+const commands = ['start', 'pause', 'resume', 'reload', 'stop'] as const;
 
 export default function Controls() {
-  const [state, setState] = useState<string>('loading...');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>('');
-  const [eifEnabled, setEifEnabled] = useState<boolean>(false);
-  const [summary, setSummary] = useState<any>(null);
-  const [decisions, setDecisions] = useState<any[]>([]);
-
-  async function refreshState() {
-    setLoading(true);
-    setError('');
-    try {
-      const [bot, flags] = await Promise.all([getBotState(), getEifFlags()]);
-      setState(bot.state || 'unknown');
-      const analyticsEnabled = Boolean(flags?.eif?.analytics?.api?.enabled);
-      setEifEnabled(analyticsEnabled);
-      if (!analyticsEnabled) {
-        setSummary(null);
-        setDecisions([]);
-        return;
-      }
-      const [sum, dec] = await Promise.all([getEifSummary(), getEifFilterDecisions({ limit: 100 })]);
-      setSummary(sum);
-      setDecisions(dec?.items || []);
-    } catch (e: any) {
-      setError(e?.message || 'failed to load controls');
-      setState('error');
-      setSummary(null);
-      setDecisions([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [state, setState] = useState('loading');
+  const [armed, setArmed] = useState(false);
+  const [confirm, setConfirm] = useState('');
 
   useEffect(() => {
-    refreshState();
-    const timer = setInterval(refreshState, 12000);
-    return () => clearInterval(timer);
+    getBotState().then((d) => setState(d.state || 'unknown')).catch(() => setState('error'));
   }, []);
 
-  async function send(command: (typeof commands)[number]) {
-    const data = await sendBotCommand(command);
-    setState(data.state || data.detail || 'error');
+  async function run(cmd: (typeof commands)[number]) {
+    const dangerous = cmd === 'stop';
+    if (dangerous && (!armed || confirm !== 'STOP')) return;
+    const data = await sendBotCommand(cmd);
+    setState(data.state || data.detail || 'unknown');
+    setConfirm('');
   }
-
-  const summaryStats = useMemo(() => {
-    const blocked = decisions.filter((d) => d.allowed === false).length;
-    const total = decisions.length;
-    const skipRatio = total === 0 ? 0 : blocked / total;
-    const reasonCounts: Record<string, number> = {};
-    decisions.forEach((d) => {
-      const key = d.reason_code || 'unknown';
-      reasonCounts[key] = (reasonCounts[key] || 0) + 1;
-    });
-    const topReasons = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    const scorecards = Number(summary?.summary?.scorecard_snapshots || 0);
-    const expectedDelta = total === 0 ? 0 : (Number(summary?.summary?.allowed_decisions || 0) - blocked) / total;
-    return { skipRatio, topReasons, scorecards, expectedDelta };
-  }, [decisions, summary]);
 
   return (
     <section>
-      <h2>Controls</h2>
-      {loading && <p>Loading controls…</p>}
-      {!loading && error && <p style={{ color: '#b00020' }}>Error: {error}</p>}
-      <p>Bot state: {state}</p>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {commands.map((cmd) => (
-          <button key={cmd} onClick={() => send(cmd)}>{cmd}</button>
-        ))}
+      <PageHeader title="Controls & Safety" subtitle="Command center with operator safeguards for risky actions." />
+      <div className="card">
+        <p>Runtime State: <Badge tone={state === 'running' ? 'good' : state === 'paused' ? 'warn' : 'info'}>{state}</Badge></p>
+        <div className="toolbar">
+          {commands.map((c) => <button key={c} className={`btn ${c === 'stop' ? 'danger' : ''}`} onClick={() => run(c)}>{c}</button>)}
+        </div>
+        <hr style={{ borderColor: 'var(--border)' }} />
+        <label style={{ display: 'block', marginBottom: 8 }}>
+          <input type="checkbox" checked={armed} onChange={(e) => setArmed(e.target.checked)} /> Arm dangerous actions
+        </label>
+        <input placeholder="Type STOP to allow stop command" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       </div>
-
-      <h3>EIF Operator Summary</h3>
-      {!eifEnabled ? (
-        <p>EIF analytics disabled. Summary cards hidden until EIF_ANALYTICS_API_ENABLED=true.</p>
-      ) : (
-        <ul>
-          <li>Current regime snapshot count: {summary?.summary?.regime_snapshots ?? 0}</li>
-          <li>Skip ratio (recent window): {(summaryStats.skipRatio * 100).toFixed(1)}%</li>
-          <li>Top reason codes: {summaryStats.topReasons.length === 0 ? 'n/a' : summaryStats.topReasons.map(([k, v]) => `${k} (${v})`).join(', ')}</li>
-          <li>Recent expectancy delta (proxy): {summaryStats.expectedDelta.toFixed(3)}</li>
-          <li>Scorecard snapshots: {summaryStats.scorecards}</li>
-        </ul>
-      )}
     </section>
   );
 }

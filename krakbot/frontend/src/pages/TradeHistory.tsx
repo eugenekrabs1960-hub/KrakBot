@@ -1,116 +1,51 @@
-import { useEffect, useMemo, useState } from 'react';
-import { getEifFilterDecisions, getEifFlags, getEifTradeTrace, listTrades } from '../services/api';
-
-type Trade = {
-  strategy_instance_id: string;
-  side: string;
-  qty: number;
-  entry_price: number;
-  realized_pnl_usd?: number;
-  ts: string;
-  market?: string;
-};
+import { useEffect, useState } from 'react';
+import PageHeader from '../components/PageHeader';
+import Badge from '../components/Badge';
+import { getEifFilterDecisions, getEifTradeTrace, listTrades } from '../services/api';
 
 export default function TradeHistory() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [decisionItems, setDecisionItems] = useState<any[]>([]);
-  const [traceItems, setTraceItems] = useState<any[]>([]);
-  const [eifEnabled, setEifEnabled] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>('');
-
-  async function refresh() {
-    setLoading(true);
-    setError('');
-    try {
-      const [tradeData, flags] = await Promise.all([listTrades(25), getEifFlags()]);
-      setTrades(tradeData.items || []);
-
-      const analyticsEnabled = Boolean(flags?.eif?.analytics?.api?.enabled);
-      setEifEnabled(analyticsEnabled);
-      if (!analyticsEnabled) {
-        setDecisionItems([]);
-        setTraceItems([]);
-        return;
-      }
-
-      const [decisions, trace] = await Promise.all([
-        getEifFilterDecisions({ limit: 40 }),
-        getEifTradeTrace({ limit: 40 }),
-      ]);
-      setDecisionItems(decisions?.items || []);
-      setTraceItems(trace?.items || []);
-    } catch (e: any) {
-      setError(e?.message || 'failed to load trade history');
-      setTrades([]);
-      setDecisionItems([]);
-      setTraceItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [trades, setTrades] = useState<any[]>([]);
+  const [decisions, setDecisions] = useState<any[]>([]);
+  const [trace, setTrace] = useState<any[]>([]);
 
   useEffect(() => {
-    refresh();
-    const timer = setInterval(refresh, 15000);
+    const load = async () => {
+      const [t, d, tr] = await Promise.all([
+        listTrades(30).catch(() => ({ items: [] })),
+        getEifFilterDecisions({ limit: 30 }).catch(() => ({ items: [] })),
+        getEifTradeTrace({ limit: 30 }).catch(() => ({ items: [] })),
+      ]);
+      setTrades(t.items || []);
+      setDecisions(d.items || []);
+      setTrace(tr.items || []);
+    };
+    load();
+    const timer = setInterval(load, 15000);
     return () => clearInterval(timer);
   }, []);
 
-  const topTraces = useMemo(() => decisionItems.slice(0, 10), [decisionItems]);
-
   return (
     <section>
-      <h2>Trade History</h2>
-      {loading && <p>Loading trades/trace…</p>}
-      {!loading && error && <p style={{ color: '#b00020' }}>Error: {error}</p>}
-
-      {!loading && trades.length === 0 ? (
-        <p>No trades yet.</p>
-      ) : (
-        <ul>
-          {trades.map((t, i) => (
-            <li key={`${t.strategy_instance_id}-${t.ts}-${i}`}>
-              {t.strategy_instance_id} | {t.side} {t.qty} @ {Number(t.entry_price).toFixed(4)} | pnl: {Number(t.realized_pnl_usd || 0).toFixed(2)} | ts: {t.ts}
-            </li>
+      <PageHeader title="Trades & Decision Trace" subtitle="Inspect fills, allow/skip decisions, and reasoning chain in one place." />
+      <div className="grid" style={{ gridTemplateColumns: '1.3fr 1fr' }}>
+        <div className="card table-wrap">
+          <h3>Recent Trades</h3>
+          <table><thead><tr><th>Strategy</th><th>Side</th><th>Qty</th><th>Entry</th><th>PnL</th></tr></thead><tbody>
+            {trades.map((t, i) => <tr key={`${t.ts}-${i}`}><td>{t.strategy_instance_id}</td><td>{t.side}</td><td>{t.qty}</td><td>{Number(t.entry_price || 0).toFixed(4)}</td><td>{Number(t.realized_pnl_usd || 0).toFixed(2)}</td></tr>)}
+          </tbody></table>
+        </div>
+        <div className="card">
+          <h3>Decision Inspector</h3>
+          {decisions.slice(0, 8).map((d) => (
+            <div key={d.id} style={{ marginBottom: 10 }}>
+              <Badge tone={d.allowed ? 'good' : 'bad'}>{d.allowed ? 'ALLOW' : 'SKIP'}</Badge> {d.reason_code}
+              <div className="muted">{d.strategy_instance_id} · {d.market}</div>
+            </div>
           ))}
-        </ul>
-      )}
-
-      {!loading && !eifEnabled && <p>EIF analytics disabled. Decision trace unavailable.</p>}
-
-      {!loading && eifEnabled && (
-        <>
-          <h3>Decision Trace (recent allow/skip chain)</h3>
-          {topTraces.length === 0 ? (
-            <p>No decision trace events yet.</p>
-          ) : (
-            <ul>
-              {topTraces.map((d) => (
-                <li key={d.id}>
-                  {d.strategy_instance_id} | {d.market} | {d.allowed ? 'ALLOW' : 'SKIP'} ({d.reason_code}) | stage={d.precedence_stage || 'n/a'} | regime_snapshot={d.regime_snapshot_id || 'n/a'}
-                  <br />
-                  trace: {Array.isArray(d.trace) ? d.trace.join(' > ') : d.trace ? JSON.stringify(d.trace) : 'n/a'}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <h4>Regime snapshot context from trade trace</h4>
-          {traceItems.length === 0 ? (
-            <p>No trade trace context yet.</p>
-          ) : (
-            <ul>
-              {traceItems.slice(0, 8).map((e) => (
-                <li key={e.id}>
-                  {e.strategy_instance_id} | {e.market} | {e.event_type} | ts: {e.ts}
-                  <br />
-                  regime: {e.context?.regime ? JSON.stringify(e.context.regime) : 'n/a'}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
+          <h4>Trace Context</h4>
+          {trace.slice(0, 5).map((t) => <div key={t.id} className="muted">{t.event_type} · {t.strategy_instance_id}</div>)}
+        </div>
+      </div>
     </section>
   );
 }

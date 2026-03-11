@@ -1,49 +1,30 @@
 import { useEffect, useState } from 'react';
-
-type MarketSnap = {
-  market: string;
-  last_price: number | null;
-  ts: number | null;
-};
+import PageHeader from '../components/PageHeader';
+import StatCard from '../components/StatCard';
 
 export default function MarketData() {
-  const [snap, setSnap] = useState<MarketSnap | null>(null);
-  const [lastEvent, setLastEvent] = useState<string>('none');
+  const [snap, setSnap] = useState<any>(null);
+  const [event, setEvent] = useState('none');
 
   useEffect(() => {
-    fetch('/api/market/snapshot')
-      .then((r) => r.json())
-      .then(setSnap)
-      .catch(() => null);
-
+    fetch('/api/market/snapshot').then((r) => r.json()).then(setSnap).catch(() => setSnap(null));
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${protocol}://${location.host}/api/ws`);
     ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        setLastEvent(msg.type || 'event');
-      } catch {
-        setLastEvent('parse_error');
-      }
+      try { setEvent(JSON.parse(ev.data).type || 'event'); } catch { setEvent('parse_error'); }
     };
-
-    const ping = setInterval(() => {
-      if (ws.readyState === ws.OPEN) ws.send('ping');
-    }, 10000);
-
-    return () => {
-      clearInterval(ping);
-      ws.close();
-    };
+    return () => ws.close();
   }, []);
 
   return (
     <section>
-      <h2>Market Data</h2>
-      <p>
-        {snap?.market ?? 'SOL/USD'} last price: {snap?.last_price ?? 'N/A'}
-      </p>
-      <p>Last stream event: {lastEvent}</p>
+      <PageHeader title="Market Detail" subtitle="Realtime price feed, stream health, and market registry controls." />
+      <div className="grid kpi">
+        <StatCard label="Market" value={snap?.market || 'SOL/USD'} />
+        <StatCard label="Last Price" value={snap?.last_price ?? 'n/a'} />
+        <StatCard label="Snapshot TS" value={snap?.ts || 'n/a'} />
+        <StatCard label="Last Stream Event" value={event} />
+      </div>
     </section>
   );
 }
