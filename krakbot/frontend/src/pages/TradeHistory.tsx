@@ -39,17 +39,17 @@ export default function TradeHistory() {
       <div className="grid" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
         <div className="card table-wrap glass-card">
           <h3>What happened (Recent Trades)</h3>
-          <table><thead><tr><th>Strategy</th><th>Action</th><th>Qty</th><th>Entry</th><th>PnL</th><th>Why now</th></tr></thead><tbody>
+          <table className="responsive-table"><thead><tr><th>Strategy</th><th>Action</th><th>Qty</th><th>Entry</th><th>PnL</th><th>Why now</th></tr></thead><tbody>
             {trades.map((t, i) => {
               const latestDecision = latestDecisionByStrategy[t.strategy_instance_id];
               return (
                 <tr key={`${t.ts}-${i}`}>
-                  <td>{t.strategy_instance_id}</td>
-                  <td>{t.side}</td>
-                  <td>{t.qty}</td>
-                  <td>{Number(t.entry_price || 0).toFixed(4)}</td>
-                  <td>{Number(t.realized_pnl_usd || 0).toFixed(2)}</td>
-                  <td className="muted">{latestDecision?.reason_code || 'No recent reason code'}</td>
+                  <td data-label="Strategy">{t.strategy_instance_id}</td>
+                  <td data-label="Action">{t.side}</td>
+                  <td data-label="Qty">{t.qty}</td>
+                  <td data-label="Entry">{Number(t.entry_price || 0).toFixed(4)}</td>
+                  <td data-label="PnL">{Number(t.realized_pnl_usd || 0).toFixed(2)}</td>
+                  <td data-label="Why now" className="muted">{latestDecision?.reason_code || 'No recent reason code'}</td>
                 </tr>
               );
             })}

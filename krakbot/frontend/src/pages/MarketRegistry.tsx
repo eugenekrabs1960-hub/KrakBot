@@ -25,13 +25,15 @@ export default function MarketRegistry() {
     <section>
       <PageHeader title="Market Registry" subtitle="Enable/disable tradable markets with a safer visibility-first workflow." />
       <div className="toolbar"><input placeholder="Filter market or venue" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-      <div className="card table-wrap" style={{ marginTop: 12 }}>
-        <table><thead><tr><th>Symbol</th><th>Venue</th><th>Type</th><th>Status</th><th>Action</th></tr></thead><tbody>
+      <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
+        <table className="responsive-table"><thead><tr><th>Symbol</th><th>Venue</th><th>Type</th><th>Status</th><th>Action</th></tr></thead><tbody>
           {filtered.map((m) => (
             <tr key={m.id}>
-              <td>{m.symbol}</td><td>{m.venue}</td><td>{m.instrument_type}</td>
-              <td><Badge tone={m.enabled ? 'good' : 'warn'}>{m.enabled ? 'enabled' : 'disabled'}</Badge></td>
-              <td><button className="btn" onClick={() => toggle(m.id, m.enabled)}>{m.enabled ? 'Disable' : 'Enable'}</button></td>
+              <td data-label="Symbol">{m.symbol}</td>
+              <td data-label="Venue">{m.venue}</td>
+              <td data-label="Type">{m.instrument_type}</td>
+              <td data-label="Status"><Badge tone={m.enabled ? 'good' : 'warn'}>{m.enabled ? 'enabled' : 'disabled'}</Badge></td>
+              <td data-label="Action"><button className="btn" onClick={() => toggle(m.id, m.enabled)}>{m.enabled ? 'Disable' : 'Enable'}</button></td>
             </tr>
           ))}
         </tbody></table>

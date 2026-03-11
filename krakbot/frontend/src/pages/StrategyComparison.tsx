@@ -125,21 +125,21 @@ export default function StrategyComparison() {
       </form>
 
       <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
-        <table>
+        <table className="responsive-table">
           <thead><tr><th>Strategy</th><th>Status</th><th>Edge</th><th>PnL</th><th>Win Rate</th><th>Confidence</th></tr></thead>
           <tbody>
             {leaderboard.map((r) => (
               <tr key={r.strategy_instance_id}>
-                <td>
+                <td data-label="Strategy">
                   <strong>{r.display_name || r.name}</strong>
                   <div className="muted">{r.description || 'No description yet.'}</div>
                   <div className="muted" style={{ fontSize: 12 }}>Model: {(r.name || '').replace('_', ' ')}</div>
                 </td>
-                <td><StatusDot enabled={Boolean(r.enabled)} /></td>
-                <td>{Number(r.edge || 0).toFixed(3)}</td>
-                <td>{Number(r.pnl || 0).toFixed(2)}</td>
-                <td>{Number(r.win_rate_pct || 0).toFixed(1)}%</td>
-                <td><span className="confidence-chip">{Number(r.confidence || 0).toFixed(1)}</span></td>
+                <td data-label="Status"><StatusDot enabled={Boolean(r.enabled)} /></td>
+                <td data-label="Edge">{Number(r.edge || 0).toFixed(3)}</td>
+                <td data-label="PnL">{Number(r.pnl || 0).toFixed(2)}</td>
+                <td data-label="Win Rate">{Number(r.win_rate_pct || 0).toFixed(1)}%</td>
+                <td data-label="Confidence"><span className="confidence-chip">{Number(r.confidence || 0).toFixed(1)}</span></td>
               </tr>
             ))}
           </tbody>

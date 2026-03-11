@@ -34,7 +34,7 @@ export default function Controls() {
       <PageHeader title="Controls & Safety" subtitle="Consistent, safer operator actions with explicit stop protection and command feedback." />
       <div className="card glass-card">
         <p>Runtime State: <Badge tone={state === 'running' ? 'good' : state === 'paused' ? 'warn' : 'info'}>{state}</Badge></p>
-        <div className="toolbar">
+        <div className="toolbar quick-controls-row">
           {commands.map((c) => {
             const dangerous = c === 'stop';
             const disabled = Boolean(busy) || (dangerous && (!armed || confirm !== 'STOP'));
