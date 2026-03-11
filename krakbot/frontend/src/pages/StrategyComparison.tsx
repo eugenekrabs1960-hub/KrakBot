@@ -95,6 +95,7 @@ export default function StrategyComparison() {
                 <td>
                   <strong>{r.display_name || r.name}</strong>
                   <div className="muted">{r.description || 'No description yet.'}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>Model: {(r.name || '').replace('_', ' ')}</div>
                 </td>
                 <td><StatusDot enabled={Boolean(r.enabled)} /></td>
                 <td>{Number(r.pnl_usd || 0).toFixed(2)}</td>
