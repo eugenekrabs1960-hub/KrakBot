@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
-from app.services.jason_agent import get_jason_state, list_jason_trades, run_jason_once
+from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -19,6 +19,15 @@ class DecisionPacketRequest(BaseModel):
     risk: dict = {}
     execution: dict = {}
     outcome: dict = {}
+
+
+class JasonDecisionRequest(BaseModel):
+    action: str = Field(default='hold')
+    symbol: str = Field(default='BTC')
+    leverage: float = Field(default=1.0)
+    allocation_pct: float = Field(default=0.0)
+    confidence: float = Field(default=0.0)
+    rationale: str = Field(default='No rationale provided')
 
 
 @router.post('/decision-packets')
@@ -48,6 +57,19 @@ def jason_run_once(db: Session = Depends(get_db)):
         return run_jason_once(db)
     except Exception as exc:
         return {'ok': False, 'error': str(exc)[:300]}
+
+
+@router.post('/jason/execute-decision')
+def jason_execute_decision(payload: JasonDecisionRequest, db: Session = Depends(get_db)):
+    return execute_jason_decision(
+        db,
+        action=payload.action,
+        symbol=payload.symbol,
+        leverage=payload.leverage,
+        allocation_pct=payload.allocation_pct,
+        confidence=payload.confidence,
+        rationale=payload.rationale,
+    )
 
 
 @router.get('/jason/state')

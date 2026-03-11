@@ -41,3 +41,24 @@ def test_jason_run_once_opens_and_tracks(tmp_path, monkeypatch):
         trades = jason_agent.list_jason_trades(db, limit=10)
         assert trades['ok'] is True
         assert len(trades['items']) == 1
+
+
+def test_execute_jason_decision_path(tmp_path):
+    eng = _prep_db(tmp_path / 'jason2.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = jason_agent.execute_jason_decision(
+            db,
+            action='long',
+            symbol='ETH',
+            leverage=4,
+            allocation_pct=20,
+            confidence=0.7,
+            rationale='ETH trend stronger than BTC on short window',
+        )
+        assert out['ok'] is True
+        assert out['decision']['symbol'] == 'ETH'
+
+        st = jason_agent.get_jason_state(db)
+        assert st['open_trade'] is not None

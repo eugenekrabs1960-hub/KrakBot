@@ -329,24 +329,10 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
     return Decision(action=action, symbol=symbol, leverage=leverage, allocation_pct=allocation_pct, confidence=confidence, rationale=rationale)
 
 
-def run_jason_once(db: Session):
-    state = _load_state(db)
-    snapshot = _latest_market_snapshot(db)
-    if not snapshot:
-        return {'ok': False, 'error': 'no_market_snapshot'}
-
-    if float(state.get('balance_usd', INITIAL_BALANCE)) <= 0:
-        state['active'] = False
-        _save_state(db, state)
-        db.commit()
-        return {'ok': False, 'error': 'balance_zero', 'state': state}
-
+def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict):
     open_trade = _get_open_trade(db)
-    decision = _ask_openai(snapshot, state, open_trade)
-
     results: dict = {'decision': decision.__dict__}
 
-    # Optional close/switch behavior
     if open_trade:
         open_symbol = str(open_trade['symbol']).upper()
         must_close = decision.action == 'close' or (decision.action in ('long', 'short') and decision.symbol != open_symbol)
@@ -378,6 +364,53 @@ def run_jason_once(db: Session):
 
     db.commit()
     return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, **results}
+
+
+def run_jason_once(db: Session):
+    state = _load_state(db)
+    snapshot = _latest_market_snapshot(db)
+    if not snapshot:
+        return {'ok': False, 'error': 'no_market_snapshot'}
+
+    if float(state.get('balance_usd', INITIAL_BALANCE)) <= 0:
+        state['active'] = False
+        _save_state(db, state)
+        db.commit()
+        return {'ok': False, 'error': 'balance_zero', 'state': state}
+
+    decision = _ask_openai(snapshot, state, _get_open_trade(db))
+    return _apply_decision(db, decision, state, snapshot)
+
+
+def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: float, allocation_pct: float, confidence: float, rationale: str):
+    state = _load_state(db)
+    snapshot = _latest_market_snapshot(db)
+    if not snapshot:
+        return {'ok': False, 'error': 'no_market_snapshot'}
+
+    if float(state.get('balance_usd', INITIAL_BALANCE)) <= 0:
+        state['active'] = False
+        _save_state(db, state)
+        db.commit()
+        return {'ok': False, 'error': 'balance_zero', 'state': state}
+
+    d = Decision(
+        action=str(action or 'hold').lower(),
+        symbol=str(symbol or 'BTC').upper(),
+        leverage=float(leverage or 1),
+        allocation_pct=float(allocation_pct or 0),
+        confidence=float(confidence or 0),
+        rationale=str(rationale or 'No rationale provided')[:1000],
+    )
+    if d.action not in ('long', 'short', 'close', 'hold'):
+        d.action = 'hold'
+    if d.symbol not in ALLOWED_SYMBOLS:
+        d.symbol = 'BTC'
+    d.leverage = max(1.0, min(20.0, d.leverage))
+    d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
+    d.confidence = max(0.0, min(1.0, d.confidence))
+
+    return _apply_decision(db, d, state, snapshot)
 
 
 def get_jason_state(db: Session):
