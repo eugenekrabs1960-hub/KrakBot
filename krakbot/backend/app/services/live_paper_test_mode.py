@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import time
+import json
 from collections import defaultdict, deque
 from contextlib import suppress
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -66,7 +68,7 @@ class LivePaperTestModeService:
                 strategy_id = c['strategy_instance_id']
                 now = time.time()
 
-                decision = self._decide(c)
+                decision = self._decide(db, c)
                 can_attempt, reason = self._allow_attempt(strategy_id, now)
                 filter_eval = eif_filter_engine.evaluate(db, c, decision)
 
@@ -206,8 +208,78 @@ class LivePaperTestModeService:
         ).mappings().all()
         return [dict(r) for r in rows]
 
-    def _decide(self, candidate: dict) -> str:
+    def _market_to_symbol(self, market: str) -> str:
+        m = (market or '').upper()
+        if '/' in m:
+            return m.split('/')[0]
+        if '-PERP' in m:
+            return m.replace('-PERP', '')
+        return m
+
+    def _load_active_model(self, db):
+        if not hasattr(db, 'execute'):
+            return None
+        try:
+            row = db.execute(text("SELECT value FROM system_state WHERE key='model_lab_active_paper' LIMIT 1")).mappings().first()
+        except Exception:
+            return None
+        if not row:
+            return None
+        value = row.get('value')
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                return None
+        return value if isinstance(value, dict) else None
+
+    def _latest_ret1(self, db, symbol: str) -> float | None:
+        if not hasattr(db, 'execute'):
+            return None
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT ret_1
+                    FROM hyperliquid_training_features
+                    WHERE symbol=:symbol
+                    ORDER BY ts DESC
+                    LIMIT 1
+                    """
+                ),
+                {'symbol': symbol},
+            ).mappings().first()
+        except Exception:
+            return None
+        if not row or row.get('ret_1') is None:
+            return None
+        return float(row['ret_1'])
+
+    def _decide(self, db, candidate: dict) -> str:
         qty = float(candidate.get('current_position_qty') or 0.0)
+        market = candidate.get('market') or ''
+
+        model_ref = self._load_active_model(db)
+        if model_ref and isinstance(model_ref.get('model_path'), str):
+            model_path = Path(model_ref['model_path'])
+            model_symbol = str(model_ref.get('symbol') or '').upper()
+            this_symbol = self._market_to_symbol(market)
+            if model_path.exists() and model_symbol == this_symbol:
+                try:
+                    model = json.loads(model_path.read_text(encoding='utf-8'))
+                    thr = float(model.get('threshold_ret1', 0.0))
+                    ret1 = self._latest_ret1(db, this_symbol)
+                    if ret1 is not None:
+                        pred_long = ret1 > thr
+                        if qty > 0 and not pred_long:
+                            return 'exit'
+                        if qty <= 0 and pred_long:
+                            return 'enter'
+                        return 'hold'
+                except Exception:
+                    pass
+
+        # Fallback baseline behavior if no active model is usable.
         if qty > 0:
             return 'exit'
         return 'enter'
