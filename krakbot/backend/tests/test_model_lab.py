@@ -1,13 +1,22 @@
+from pathlib import Path
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.services.model_lab import strategy_benchmarks, train_baseline
+from app.services.model_lab import (
+    get_active_model_for_paper,
+    list_job_history,
+    set_active_model_for_paper,
+    strategy_benchmarks,
+    train_baseline,
+)
 
 
 def _prep_db(path):
     eng = create_engine(f"sqlite:///{path}", future=True)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE hyperliquid_training_features (id INTEGER PRIMARY KEY AUTOINCREMENT, ts BIGINT, symbol TEXT, environment TEXT, mid_price DOUBLE, ret_1 DOUBLE, ret_5 DOUBLE, ret_15 DOUBLE, source TEXT)"))
+        conn.execute(text("CREATE TABLE system_state (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"))
         px = 100.0
         for i in range(120):
             px += 0.1
@@ -24,6 +33,7 @@ def test_train_baseline_and_bench(tmp_path, monkeypatch):
 
     from app.services import model_lab
     monkeypatch.setattr(model_lab, 'MODEL_DIR', tmp_path / 'data' / 'models')
+    monkeypatch.setattr(model_lab, 'JOB_LOG_PATH', (tmp_path / 'data' / 'models' / 'model_lab_jobs.jsonl'))
 
     with Session() as db:
         out = train_baseline(db, symbol='BTC', limit=1000)
@@ -33,3 +43,23 @@ def test_train_baseline_and_bench(tmp_path, monkeypatch):
         bench = strategy_benchmarks(db, symbol='BTC', limit=1000)
         assert bench['ok'] is True
         assert len(bench['items']) == 3
+
+        hist = list_job_history(10)
+        assert hist['ok'] is True
+        assert len(hist['items']) >= 1
+
+
+def test_promote_toggle_requires_confirmation(tmp_path, monkeypatch):
+    eng = _prep_db(tmp_path / 'ml2.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = set_active_model_for_paper(db, symbol='BTC', model_path='/tmp/model.json', confirm_phrase='NOPE')
+        assert out['ok'] is False
+
+        ok = set_active_model_for_paper(db, symbol='BTC', model_path='/tmp/model.json', confirm_phrase='PROMOTE')
+        assert ok['ok'] is True
+
+        active = get_active_model_for_paper(db)
+        assert active['ok'] is True
+        assert active['item']['model_path'] == '/tmp/model.json'

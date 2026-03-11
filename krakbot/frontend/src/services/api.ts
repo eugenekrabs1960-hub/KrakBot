@@ -118,6 +118,22 @@ export async function getStrategyBenchmarks(symbol = 'BTC', limit = 50000) {
   return parseJsonOrThrow(res);
 }
 
+export async function getModelLabJobHistory(limit = 50) {
+  const res = await fetch(`${API_BASE}/model-lab/job-history?limit=${Math.max(1, Math.min(limit, 500))}`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getActivePaperModel() {
+  const res = await fetch(`${API_BASE}/model-lab/active-paper-model`);
+  return parseJsonOrThrow(res);
+}
+
+export async function promoteModelToPaper(symbol: string, modelPath: string, confirmPhrase = 'PROMOTE') {
+  const q = new URLSearchParams({ symbol, model_path: modelPath, confirm_phrase: confirmPhrase });
+  const res = await fetch(`${API_BASE}/model-lab/promote-to-paper?${q.toString()}`, { method: 'POST' });
+  return parseJsonOrThrow(res);
+}
+
 export async function getHyperliquidExecutionHealth() {
   const res = await fetch(`${API_BASE}/execution/hyperliquid/health`);
   return parseJsonOrThrow(res);

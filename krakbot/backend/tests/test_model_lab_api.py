@@ -30,3 +30,19 @@ def test_model_lab_endpoints_shape(api_base: str):
     l = requests.get(f"{api_base}/model-lab/latest-model?symbol=BTC", timeout=TIMEOUT)
     l.raise_for_status()
     assert 'ok' in l.json()
+
+    h = requests.get(f"{api_base}/model-lab/job-history?limit=10", timeout=TIMEOUT)
+    h.raise_for_status()
+    assert h.json()['ok'] is True
+
+    p_bad = requests.post(f"{api_base}/model-lab/promote-to-paper?symbol=BTC&model_path=/tmp/fake.json&confirm_phrase=NOPE", timeout=TIMEOUT)
+    p_bad.raise_for_status()
+    assert p_bad.json()['ok'] is False
+
+    p_ok = requests.post(f"{api_base}/model-lab/promote-to-paper?symbol=BTC&model_path=/tmp/fake.json&confirm_phrase=PROMOTE", timeout=TIMEOUT)
+    p_ok.raise_for_status()
+    assert p_ok.json()['ok'] is True
+
+    ap = requests.get(f"{api_base}/model-lab/active-paper-model", timeout=TIMEOUT)
+    ap.raise_for_status()
+    assert ap.json()['ok'] is True

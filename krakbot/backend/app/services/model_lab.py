@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import time
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / 'data' / 'models'
+JOB_LOG_PATH = MODEL_DIR / 'model_lab_jobs.jsonl'
 
 
 def _load_rows(db: Session, symbol: str, limit: int = 50000):
@@ -45,12 +45,86 @@ def _metrics(y_true: list[int], y_pred: list[int]):
     return {'accuracy': acc, 'precision': precision, 'recall': recall, 'tp': tp, 'tn': tn, 'fp': fp, 'fn': fn}
 
 
+def _append_job_log(entry: dict):
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    with JOB_LOG_PATH.open('a', encoding='utf-8') as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def list_job_history(limit: int = 50):
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    if not JOB_LOG_PATH.exists():
+        return {'ok': True, 'items': []}
+    lines = JOB_LOG_PATH.read_text(encoding='utf-8').splitlines()
+    items = []
+    for line in lines[-max(1, min(1000, int(limit))):]:
+        try:
+            items.append(json.loads(line))
+        except Exception:
+            continue
+    items.reverse()
+    return {'ok': True, 'items': items}
+
+
+def set_active_model_for_paper(db: Session, *, symbol: str, model_path: str, confirm_phrase: str):
+    if confirm_phrase != 'PROMOTE':
+        return {'ok': False, 'error': 'confirmation_required', 'required': 'PROMOTE'}
+
+    payload_obj = {'symbol': symbol, 'model_path': model_path, 'promoted_at_ms': int(time.time() * 1000)}
+    payload = json.dumps(payload_obj)
+
+    dialect = getattr(getattr(db, 'bind', None), 'dialect', None)
+    dialect_name = getattr(dialect, 'name', '')
+    if dialect_name == 'postgresql':
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_lab_active_paper', CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    else:
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_lab_active_paper', :payload, CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    db.commit()
+    return {'ok': True, 'item': payload_obj}
+
+
+def get_active_model_for_paper(db: Session):
+    row = db.execute(text("SELECT value FROM system_state WHERE key='model_lab_active_paper' LIMIT 1")).mappings().first()
+    if not row:
+        return {'ok': True, 'item': None}
+    value = row.get('value')
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            value = None
+    return {'ok': True, 'item': value}
+
+
 def train_baseline(db: Session, symbol: str = 'BTC', limit: int = 50000):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    started_at = int(time.time() * 1000)
     rows = _load_rows(db, symbol, limit=limit)
     rows = [r for r in rows if r.get('y_ret_fwd_5') is not None and r.get('ret_1') is not None]
     if len(rows) < 30:
-        return {'ok': False, 'error': 'not_enough_data', 'rows': len(rows)}
+        out = {'ok': False, 'error': 'not_enough_data', 'rows': len(rows)}
+        _append_job_log({'kind': 'train_baseline', 'symbol': symbol, 'started_at_ms': started_at, 'finished_at_ms': int(time.time() * 1000), **out})
+        return out
 
     split = max(20, int(len(rows) * 0.7))
     train = rows[:split]
@@ -88,7 +162,9 @@ def train_baseline(db: Session, symbol: str = 'BTC', limit: int = 50000):
     path = MODEL_DIR / f'model_{symbol}_{now}.json'
     path.write_text(json.dumps(artifact, indent=2), encoding='utf-8')
 
-    return {'ok': True, 'artifact_path': str(path), **artifact}
+    out = {'ok': True, 'artifact_path': str(path), **artifact}
+    _append_job_log({'kind': 'train_baseline', 'symbol': symbol, 'started_at_ms': started_at, 'finished_at_ms': int(time.time() * 1000), 'ok': True, 'artifact_path': str(path), 'metrics': m})
+    return out
 
 
 def latest_model(symbol: str = 'BTC'):
