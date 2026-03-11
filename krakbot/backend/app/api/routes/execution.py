@@ -90,6 +90,26 @@ def hyperliquid_collect_market_data(symbols_limit: int = 120, db: Session = Depe
     return out.__dict__
 
 
+@router.post('/hyperliquid/backfill-candles')
+def hyperliquid_backfill_candles(
+    symbol: str,
+    interval: str = '1m',
+    start_time_ms: int | None = None,
+    end_time_ms: int | None = None,
+    lookback_minutes: int = 1440,
+    db: Session = Depends(get_db),
+):
+    now_ms = int(__import__('time').time() * 1000)
+    end_ms = int(end_time_ms or now_ms)
+    start_ms = int(start_time_ms or (end_ms - max(1, min(60 * 24 * 30, lookback_minutes)) * 60 * 1000))
+    try:
+        svc = HyperliquidMarketDataService(environment=settings.hyperliquid_environment)
+        out = svc.backfill_candles(db, symbol=symbol.upper(), interval=interval, start_time_ms=start_ms, end_time_ms=end_ms)
+        return out.__dict__
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)[:300], 'symbol': symbol, 'interval': interval}
+
+
 @router.post('/hyperliquid/collector/run-once')
 def hyperliquid_collector_run_once():
     return hyperliquid_market_scheduler.run_once()

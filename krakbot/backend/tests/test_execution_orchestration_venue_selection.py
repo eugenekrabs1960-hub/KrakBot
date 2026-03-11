@@ -19,6 +19,7 @@ def test_unknown_venue_returns_error():
 def test_hyperliquid_mainnet_block_guard(monkeypatch):
     from app.core.config import settings
 
+    monkeypatch.setattr(settings, 'hyperliquid_enabled', True, raising=False)
     monkeypatch.setattr(settings, 'hyperliquid_environment', 'mainnet', raising=False)
 
     out = execute_paper_order(

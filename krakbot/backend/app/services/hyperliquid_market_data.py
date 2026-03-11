@@ -20,6 +20,18 @@ class CollectResult:
     symbols_count: int
 
 
+@dataclass
+class BackfillResult:
+    ok: bool
+    symbol: str
+    interval: str
+    start_time_ms: int
+    end_time_ms: int
+    candles_received: int
+    mids_written: int
+    features_written: int
+
+
 class HyperliquidMarketDataService:
     def __init__(self, base_url: str | None = None, environment: str | None = None, post=None):
         self.base_url = (base_url or settings.hyperliquid_base_url).rstrip('/')
@@ -88,7 +100,7 @@ class HyperliquidMarketDataService:
             )
         db.commit()
 
-        features_written = self._compute_feature_rows(db, ts=now_ms, symbols=[s for s, _ in selected])
+        features_written = self._compute_feature_rows(db, ts=now_ms, symbols=[s for s, _ in selected], source='hyperliquid_public_v1')
         return CollectResult(
             ok=True,
             ts=now_ms,
@@ -97,7 +109,62 @@ class HyperliquidMarketDataService:
             symbols_count=len(meta.get('universe') or []) if isinstance(meta, dict) else 0,
         )
 
-    def _compute_feature_rows(self, db: Session, *, ts: int, symbols: list[str]) -> int:
+    def backfill_candles(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        interval: str = '1m',
+        start_time_ms: int,
+        end_time_ms: int,
+    ) -> BackfillResult:
+        req = {
+            'type': 'candleSnapshot',
+            'req': {
+                'coin': symbol,
+                'interval': interval,
+                'startTime': int(start_time_ms),
+                'endTime': int(end_time_ms),
+            },
+        }
+        data = self._info(req)
+        candles = data if isinstance(data, list) else []
+
+        mids_written = 0
+        for c in candles:
+            ts = int(c.get('t') or c.get('time') or c.get('T') or 0)
+            close = c.get('c')
+            if not ts or close is None:
+                continue
+            try:
+                mid_price = float(close)
+            except Exception:
+                continue
+            db.execute(
+                text(
+                    """
+                    INSERT INTO hyperliquid_market_mids(ts, environment, symbol, mid_price)
+                    VALUES (:ts, :environment, :symbol, :mid_price)
+                    """
+                ),
+                {'ts': ts, 'environment': self.environment, 'symbol': symbol, 'mid_price': mid_price},
+            )
+            mids_written += 1
+        db.commit()
+
+        features_written = self._compute_feature_rows(db, ts=None, symbols=[symbol], source='hyperliquid_backfill_v1')
+        return BackfillResult(
+            ok=True,
+            symbol=symbol,
+            interval=interval,
+            start_time_ms=int(start_time_ms),
+            end_time_ms=int(end_time_ms),
+            candles_received=len(candles),
+            mids_written=mids_written,
+            features_written=features_written,
+        )
+
+    def _compute_feature_rows(self, db: Session, *, ts: int | None, symbols: list[str], source: str = 'hyperliquid_public_v1') -> int:
         written = 0
         for s in symbols:
             rows = db.execute(
@@ -125,6 +192,7 @@ class HyperliquidMarketDataService:
                     return None
                 return (curr - prev) / prev
 
+            write_ts = int(rows[0]['ts']) if ts is None else int(ts)
             db.execute(
                 text(
                     """
@@ -132,18 +200,19 @@ class HyperliquidMarketDataService:
                       ts, environment, symbol, mid_price, ret_1, ret_5, ret_15, source
                     )
                     VALUES (
-                      :ts, :environment, :symbol, :mid_price, :ret_1, :ret_5, :ret_15, 'hyperliquid_public_v1'
+                      :ts, :environment, :symbol, :mid_price, :ret_1, :ret_5, :ret_15, :source
                     )
                     """
                 ),
                 {
-                    'ts': ts,
+                    'ts': write_ts,
                     'environment': self.environment,
                     'symbol': s,
                     'mid_price': curr,
                     'ret_1': ret_at(1),
                     'ret_5': ret_at(5),
                     'ret_15': ret_at(15),
+                    'source': source,
                 },
             )
             written += 1

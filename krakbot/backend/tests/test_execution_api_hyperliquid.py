@@ -85,3 +85,10 @@ def test_hyperliquid_collector_and_export_endpoints(api_base: str):
     labeled.raise_for_status()
     lb = labeled.json()
     assert 'ok' in lb
+
+
+def test_hyperliquid_backfill_endpoint_shape(api_base: str):
+    r = requests.post(f"{api_base}/execution/hyperliquid/backfill-candles?symbol=BTC&interval=1m&lookback_minutes=120", timeout=TIMEOUT)
+    r.raise_for_status()
+    body = r.json()
+    assert 'ok' in body

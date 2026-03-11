@@ -24,13 +24,17 @@ def execute_paper_order(
     gateway.register('hyperliquid', HyperliquidExecutionAdapter(environment=settings.hyperliquid_environment))
 
     selected_venue = (venue or 'paper').lower()
-    if selected_venue == 'hyperliquid' and settings.hyperliquid_environment != 'testnet':
-        return {
-            'accepted': False,
-            'error_code': 'unsafe_environment',
-            'message': 'hyperliquid live execution is blocked unless environment is testnet',
-            'market': market,
-        }
+    if selected_venue == 'hyperliquid':
+        if not settings.hyperliquid_enabled:
+            # Safe backward-compatible fallback for paper-order API when HL is disabled.
+            selected_venue = 'paper'
+        elif settings.hyperliquid_environment != 'testnet':
+            return {
+                'accepted': False,
+                'error_code': 'unsafe_environment',
+                'message': 'hyperliquid live execution is blocked unless environment is testnet',
+                'market': market,
+            }
 
     orchestrator = ExecutionOrchestrator(gateway=gateway)
     try:
