@@ -84,6 +84,21 @@ export async function getWalletIntelAlignmentSummary(lookbackDays = 7) {
   return parseJsonOrThrow(res);
 }
 
+export async function getHyperliquidExecutionHealth() {
+  const res = await fetch(`${API_BASE}/execution/hyperliquid/health`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getHyperliquidExecutionAccount() {
+  const res = await fetch(`${API_BASE}/execution/hyperliquid/account`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getHyperliquidExecutionPositions() {
+  const res = await fetch(`${API_BASE}/execution/hyperliquid/positions`);
+  return parseJsonOrThrow(res);
+}
+
 export async function getEifRegimes(params: { market?: string; strategy_instance_id?: string; limit?: number; offset?: number } = {}) {
   const search = new URLSearchParams();
   if (params.market) search.set('market', params.market);
