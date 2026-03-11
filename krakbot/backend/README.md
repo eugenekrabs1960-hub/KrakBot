@@ -46,6 +46,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8010
 - Market registry APIs and enable/disable flow
 - Kraken ingestion subscription now driven by enabled market registry rows
 
+## Tests
+
+```bash
+# from repo root
+PYTHONPATH=backend ./backend/.venv/bin/python -m pytest -q \
+  backend/tests/test_paper_fill_pricing.py \
+  backend/tests/test_model_lab.py \
+  backend/tests/test_model_lab_api.py
+```
+
 ## API endpoints
 - `GET /api/health`
 - `GET /api/market/snapshot`
