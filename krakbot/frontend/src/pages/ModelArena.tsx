@@ -56,6 +56,7 @@ export default function ModelArena() {
   const [agentFilter, setAgentFilter] = useState('all');
   const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('24h');
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
+  const [showInspector, setShowInspector] = useState(false);
 
   const load = async () => {
     const [packetRes, activeRes, execRes, jsState, jsTrades] = await Promise.all([
@@ -323,12 +324,14 @@ export default function ModelArena() {
         </div>
       </div>
 
-      <div className="arena-grid">
-        {rankedModels.length === 0 ? (
-          <div className="card glass-card">No decision packets in this filter scope.</div>
-        ) : (
-          rankedModels.map((model, idx) => (
-            <article key={model.id} className={`card glass-card arena-card ${selected.includes(model.id) ? 'selected' : ''}`}>
+      <div className="card glass-card" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Leaderboard</h3>
+        <div className="arena-grid">
+          {rankedModels.length === 0 ? (
+            <div className="card glass-card">No decision packets in this filter scope.</div>
+          ) : (
+            rankedModels.map((model, idx) => (
+              <article key={model.id} className={`card glass-card arena-card ${selected.includes(model.id) ? 'selected' : ''}`}>
               <div className="arena-card-head">
                 <div>
                   <div className="muted">Rank #{idx + 1}</div>
@@ -359,9 +362,10 @@ export default function ModelArena() {
                   {activeExecution?.agent_id === model.id ? 'Active' : 'Set Active'}
                 </button>
               </div>
-            </article>
-          ))
-        )}
+              </article>
+            ))
+          )}
+        </div>
       </div>
 
       {switchCandidate ? (
@@ -425,7 +429,15 @@ export default function ModelArena() {
         </table>
       </div>
 
-      <div className="card glass-card" style={{ marginTop: 12 }}>
+      <div className="card glass-card compact" style={{ marginTop: 12 }}>
+        <div className="toolbar" style={{ justifyContent: 'space-between' }}>
+          <strong>Decision Packet Inspector</strong>
+          <button className="btn" onClick={() => setShowInspector((v) => !v)}>{showInspector ? 'Hide Inspector' : 'Show Inspector'}</button>
+        </div>
+        <div className="muted">Keep this collapsed for cleaner day-to-day monitoring. Open it when you need deep packet forensics.</div>
+      </div>
+
+      {showInspector && <div className="card glass-card" style={{ marginTop: 12 }}>
         <h3 style={{ marginTop: 0 }}>Decision Packet Inspector</h3>
         <div className="arena-timeline-wrap">
           <div className="arena-timeline-list">
@@ -476,7 +488,7 @@ export default function ModelArena() {
             )}
           </div>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }
