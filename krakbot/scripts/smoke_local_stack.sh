@@ -19,8 +19,12 @@ json_post() {
 echo "[smoke] health"
 json_get "$API_BASE/health" >/dev/null
 
-echo "[smoke] control stop->start"
-json_post "$API_BASE/control/bot" '{"command":"stop"}' >/dev/null
+echo "[smoke] control start-safe"
+STATE=$(json_get "$API_BASE/control/bot" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state","unknown"))')
+if [[ "$STATE" == "running" ]]; then
+  json_post "$API_BASE/control/bot" '{"command":"pause"}' >/dev/null || true
+fi
+json_post "$API_BASE/control/bot" '{"command":"stop"}' >/dev/null || true
 json_post "$API_BASE/control/bot" '{"command":"start"}' >/dev/null
 json_get "$API_BASE/control/bot" >/dev/null
 

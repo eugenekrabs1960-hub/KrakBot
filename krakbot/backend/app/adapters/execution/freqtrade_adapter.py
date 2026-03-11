@@ -35,7 +35,12 @@ class FreqtradeExecutionAdapter(ExecutionEngine):
         return float(row['price'])
 
     def submit_order(self, intent: OrderIntent) -> dict:
-        fill_price = self._latest_market_trade_price(intent.market)
+        market_price = self._latest_market_trade_price(intent.market)
+        if intent.order_type == 'limit' and intent.limit_price is not None:
+            fill_price = float(intent.limit_price)
+        else:
+            fill_price = market_price
+
         if fill_price is None:
             return {
                 'accepted': False,

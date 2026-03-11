@@ -22,7 +22,7 @@ class _FakeDB:
         return _FakeResult(row)
 
 
-def test_success_uses_latest_market_trade_price_exactly(monkeypatch):
+def test_limit_success_uses_limit_price_for_fill(monkeypatch):
     db = _FakeDB(latest_price=321.1234)
     adapter = FreqtradeExecutionAdapter(db)
 
@@ -51,8 +51,8 @@ def test_success_uses_latest_market_trade_price_exactly(monkeypatch):
     )
 
     assert result['accepted'] is True
-    assert result['fill_price'] == 321.1234
-    assert captured['fill_price'] == 321.1234
+    assert result['fill_price'] == 100.0
+    assert captured['fill_price'] == 100.0
 
 
 def test_failure_when_no_market_trade_price_exists(monkeypatch):

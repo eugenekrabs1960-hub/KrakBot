@@ -32,6 +32,10 @@ class OrchestratorService:
             'reload': current,
         }.get(command)
 
+        # Idempotent no-op commands should be accepted (e.g., stop when already stopped).
+        if target == current:
+            command = 'reload'
+
         if command != 'reload' and command not in self.allowed.get(current, set()):
             raise ValueError(f'invalid transition: {current} -> {command}')
 
