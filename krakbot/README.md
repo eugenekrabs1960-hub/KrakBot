@@ -183,6 +183,31 @@ WALLET_INTEL_ALIGNMENT_MIN_CONFIDENCE=35
 LIVE_PAPER_TEST_MAX_ACTIVE_STRATEGIES=3
 ```
 
+## Tailscale WebUI Access
+
+Current node Tailscale IP can access frontend directly (tailnet-only):
+
+```bash
+http://100.106.146.9:5173
+```
+
+Verification command used:
+
+```bash
+curl -I http://100.106.146.9:5173
+# expected: HTTP/1.1 200 OK
+```
+
+If you want a nicer Tailscale Serve URL instead of `:5173`, run once with sudo on host:
+
+```bash
+sudo tailscale set --operator=$USER
+sudo tailscale serve --bg --http 18790 127.0.0.1:5173
+tailscale serve status
+```
+
+Then open the shown tailnet URL on port `18790`.
+
 ## Known Working Verification
 
 Start stack:
