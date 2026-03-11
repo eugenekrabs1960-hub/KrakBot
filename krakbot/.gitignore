@@ -26,3 +26,6 @@ research/reports/*
 !research/reports/plots/
 research/reports/plots/*
 !research/reports/plots/.gitkeep
+
+# TypeScript build cache
+frontend/*.tsbuildinfo
