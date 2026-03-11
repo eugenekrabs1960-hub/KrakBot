@@ -116,6 +116,46 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   padding: 12px;
 }
 
+.arena-timeline-wrap {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) 1.2fr;
+  gap: 12px;
+}
+.arena-timeline-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.arena-timeline-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.arena-timeline-item.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.45);
+}
+.arena-packet-detail { min-height: 220px; }
+.arena-json {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 190px;
+  overflow: auto;
+}
+
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { height: auto; position: sticky; top: 0; z-index: 20; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px 12px; backdrop-filter: blur(8px); background: rgba(11,11,18,0.92); }
@@ -128,6 +168,7 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   .leader-row { grid-template-columns: 1fr; }
   .leader-roi { text-align: left; }
   .arena-compare-grid { grid-template-columns: 1fr; }
+  .arena-timeline-wrap { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 700px) {

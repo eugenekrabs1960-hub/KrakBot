@@ -24,14 +24,28 @@ function scoreModel(model: ArenaModel) {
   return model.pnl * 0.5 + model.winRate * 0.35 + model.avgConfidence * 15 + model.trades * 0.02;
 }
 
+function prettyJson(value: unknown) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? '');
+  }
+}
+
 export default function ModelArena() {
   const [packets, setPackets] = useState<any[]>([]);
   const [activePaper, setActivePaper] = useState<any>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const [symbolFilter, setSymbolFilter] = useState('all');
+  const [agentFilter, setAgentFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('24h');
+  const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
       const [packetRes, activeRes] = await Promise.all([
-        getAgentDecisionPackets(300).catch(() => ({ items: [] })),
+        getAgentDecisionPackets(500).catch(() => ({ items: [] })),
         getActivePaperModel().catch(() => ({ item: null })),
       ]);
       setPackets(packetRes?.items || []);
@@ -40,9 +54,35 @@ export default function ModelArena() {
     load();
   }, []);
 
+  const timeCutoff = useMemo(() => {
+    if (timeFilter === 'all') return 0;
+    const now = Date.now();
+    if (timeFilter === '1h') return now - 60 * 60 * 1000;
+    if (timeFilter === '6h') return now - 6 * 60 * 60 * 1000;
+    return now - 24 * 60 * 60 * 1000;
+  }, [timeFilter]);
+
+  const filteredPackets = useMemo(() => {
+    return packets.filter((p) => {
+      const ts = Number(p.ts || 0);
+      if (timeCutoff > 0 && ts < timeCutoff) return false;
+      if (symbolFilter !== 'all' && String(p.symbol || '').toUpperCase() !== symbolFilter) return false;
+      if (agentFilter !== 'all' && String(p.agent_id || '') !== agentFilter) return false;
+      return true;
+    });
+  }, [packets, timeCutoff, symbolFilter, agentFilter]);
+
+  const uniqueSymbols = useMemo(() => {
+    return Array.from(new Set(packets.map((p) => String(p.symbol || '').toUpperCase()).filter(Boolean))).sort();
+  }, [packets]);
+
+  const uniqueAgents = useMemo(() => {
+    return Array.from(new Set(packets.map((p) => String(p.agent_id || '')).filter(Boolean))).sort();
+  }, [packets]);
+
   const rankedModels = useMemo<ArenaModel[]>(() => {
     const byAgent = new Map<string, any[]>();
-    for (const p of packets) {
+    for (const p of filteredPackets) {
       const key = String(p.agent_id || 'unassigned');
       if (!byAgent.has(key)) byAgent.set(key, []);
       byAgent.get(key)!.push(p);
@@ -104,9 +144,7 @@ export default function ModelArena() {
     });
 
     return models.sort((a, b) => scoreModel(b) - scoreModel(a));
-  }, [packets]);
-
-  const [selected, setSelected] = useState<string[]>([]);
+  }, [filteredPackets]);
 
   useEffect(() => {
     if (rankedModels.length === 0) {
@@ -123,6 +161,20 @@ export default function ModelArena() {
 
   const selectedModels = rankedModels.filter((m) => selected.includes(m.id)).slice(0, 2);
 
+  const comparisonAgentSet = useMemo(() => new Set(selectedModels.map((m) => m.id)), [selectedModels]);
+
+  const timelinePackets = useMemo(() => {
+    const source = comparisonAgentSet.size > 0
+      ? filteredPackets.filter((p) => comparisonAgentSet.has(String(p.agent_id || '')))
+      : filteredPackets;
+    return source.slice(0, 80);
+  }, [filteredPackets, comparisonAgentSet]);
+
+  const focusedPacket = useMemo(() => {
+    if (focusedPacketId == null) return timelinePackets[0] || null;
+    return timelinePackets.find((p) => Number(p.id) === focusedPacketId) || timelinePackets[0] || null;
+  }, [timelinePackets, focusedPacketId]);
+
   const toggleSelection = (id: string) => {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -135,7 +187,7 @@ export default function ModelArena() {
     <section>
       <PageHeader
         title="Model Arena"
-        subtitle="Ranked model cards and side-by-side agent comparison for paper-first execution selection."
+        subtitle="Ranked model cards, side-by-side comparison, and decision timeline with reason/risk/execution drill-down."
       />
 
       <div className="card glass-card compact" style={{ marginBottom: 12 }}>
@@ -143,9 +195,35 @@ export default function ModelArena() {
         <span className="muted">{activePaper?.model_path || 'none selected'}</span>
       </div>
 
+      <div className="card glass-card" style={{ marginBottom: 12 }}>
+        <div className="toolbar">
+          <label>Symbol</label>
+          <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
+            <option value="all">All</option>
+            {uniqueSymbols.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+
+          <label>Agent</label>
+          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
+            <option value="all">All</option>
+            {uniqueAgents.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+
+          <label>Window</label>
+          <select value={timeFilter} onChange={(e) => setTimeFilter(e.target.value as any)}>
+            <option value="1h">Last 1h</option>
+            <option value="6h">Last 6h</option>
+            <option value="24h">Last 24h</option>
+            <option value="all">All</option>
+          </select>
+
+          <span className="muted">Packets in view: {filteredPackets.length}</span>
+        </div>
+      </div>
+
       <div className="arena-grid">
         {rankedModels.length === 0 ? (
-          <div className="card glass-card">No agent decision packets yet. Start agent traffic to populate Arena rankings.</div>
+          <div className="card glass-card">No decision packets in this filter scope.</div>
         ) : (
           rankedModels.map((model, idx) => (
             <article key={model.id} className={`card glass-card arena-card ${selected.includes(model.id) ? 'selected' : ''}`}>
@@ -193,6 +271,59 @@ export default function ModelArena() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="card glass-card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Decision Packet Timeline</h3>
+        <div className="arena-timeline-wrap">
+          <div className="arena-timeline-list">
+            {timelinePackets.length === 0 ? (
+              <div className="muted">No packets in timeline scope.</div>
+            ) : timelinePackets.map((p) => {
+              const isActive = Number(p.id) === Number(focusedPacket?.id);
+              return (
+                <button
+                  key={`${p.id}-${p.ts}`}
+                  className={`arena-timeline-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setFocusedPacketId(Number(p.id))}
+                >
+                  <div>
+                    <strong>{String(p.agent_id || 'unknown')}</strong>
+                    <div className="muted">{String(p.symbol || 'n/a')} · {String(p.action || 'n/a').toUpperCase()}</div>
+                  </div>
+                  <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleString() : 'n/a'}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="arena-packet-detail">
+            {!focusedPacket ? (
+              <div className="muted">Pick a packet to inspect details.</div>
+            ) : (
+              <>
+                <h4 style={{ marginTop: 0 }}>Packet #{focusedPacket.id}</h4>
+                <div className="muted" style={{ marginBottom: 8 }}>
+                  {focusedPacket.ts ? new Date(Number(focusedPacket.ts)).toLocaleString() : 'n/a'} · {String(focusedPacket.agent_id || 'unknown')} · {String(focusedPacket.symbol || 'n/a')} · {String(focusedPacket.action || 'n/a').toUpperCase()}
+                </div>
+                <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  <div className="card compact">
+                    <strong>Reason</strong>
+                    <p className="muted" style={{ marginBottom: 0 }}>{focusedPacket.rationale || 'No rationale provided.'}</p>
+                  </div>
+                  <div className="card compact">
+                    <strong>Risk</strong>
+                    <pre className="arena-json">{prettyJson(focusedPacket.risk_json)}</pre>
+                  </div>
+                  <div className="card compact">
+                    <strong>Execution</strong>
+                    <pre className="arena-json">{prettyJson(focusedPacket.execution_json)}</pre>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
