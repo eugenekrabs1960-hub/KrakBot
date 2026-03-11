@@ -80,3 +80,8 @@ def test_hyperliquid_collector_and_export_endpoints(api_base: str):
     job.raise_for_status()
     jb = job.json()
     assert 'ok' in jb
+
+    labeled = requests.post(f"{api_base}/execution/hyperliquid/training-features/build-labeled-v1?symbol=BTC&limit=80", timeout=TIMEOUT)
+    labeled.raise_for_status()
+    lb = labeled.json()
+    assert 'ok' in lb

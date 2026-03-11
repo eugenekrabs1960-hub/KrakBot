@@ -13,7 +13,7 @@ from app.services.hyperliquid_reconciliation import HyperliquidReconciliationSer
 from app.services.checkpoints import load_checkpoint
 from app.services.hyperliquid_market_data import HyperliquidMarketDataService, list_latest_training_features
 from app.services.hyperliquid_market_scheduler import hyperliquid_market_scheduler
-from app.services.hyperliquid_dataset_jobs import export_training_dataset_csv
+from app.services.hyperliquid_dataset_jobs import build_labeled_dataset_v1, export_training_dataset_csv
 from app.services.hyperliquid_state_store import (
     compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
@@ -127,5 +127,19 @@ def hyperliquid_training_features_export_job(
 ):
     try:
         return export_training_dataset_csv(db, symbol=symbol, from_ts=from_ts, to_ts=to_ts, limit=limit)
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)[:300]}
+
+
+@router.post('/hyperliquid/training-features/build-labeled-v1')
+def hyperliquid_training_features_build_labeled_v1(
+    symbol: str,
+    from_ts: int | None = None,
+    to_ts: int | None = None,
+    limit: int = 50000,
+    db: Session = Depends(get_db),
+):
+    try:
+        return build_labeled_dataset_v1(db, symbol=symbol, from_ts=from_ts, to_ts=to_ts, limit=limit)
     except Exception as exc:
         return {'ok': False, 'error': str(exc)[:300]}
