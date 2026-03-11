@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.services.hyperliquid_state_store import (
+    compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
     list_latest_hyperliquid_position_snapshots,
     persist_hyperliquid_snapshots,
@@ -37,3 +38,9 @@ def test_state_store_persist_and_list(tmp_path):
         assert len(pos) == 1
         assert acc[0]['environment'] == 'testnet'
         assert pos[0]['market'] == 'SOL-PERP'
+
+        risk = compute_latest_hyperliquid_risk_snapshot(db)
+        assert risk['ok'] is True
+        assert risk['positions_count'] == 1
+        assert risk['total_notional_usd'] == 100.0
+        assert risk['position_concentration_pct'] == 100.0

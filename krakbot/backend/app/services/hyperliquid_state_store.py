@@ -105,3 +105,61 @@ def list_latest_hyperliquid_position_snapshots(db: Session, limit: int = 50):
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+def compute_latest_hyperliquid_risk_snapshot(db: Session):
+    account_rows = list_latest_hyperliquid_account_snapshots(db, limit=1)
+    position_rows = list_latest_hyperliquid_position_snapshots(db, limit=500)
+
+    account = account_rows[0] if account_rows else None
+    if not position_rows:
+        return {
+            'ok': True,
+            'as_of_ts': account.get('ts') if account else None,
+            'margin_utilization_pct': 0.0,
+            'total_notional_usd': 0.0,
+            'position_concentration_pct': 0.0,
+            'liq_distance_bands': {'high_risk_lt_10pct': 0, 'medium_10_to_25pct': 0, 'low_gt_25pct': 0},
+            'positions_count': 0,
+        }
+
+    latest_ts = max(int(r.get('ts') or 0) for r in position_rows)
+    latest_positions = [r for r in position_rows if int(r.get('ts') or 0) == latest_ts]
+
+    notionals = [abs(float(r.get('qty') or 0.0) * float(r.get('avg_entry_price') or 0.0)) for r in latest_positions]
+    total_notional = sum(notionals)
+    top_notional = max(notionals) if notionals else 0.0
+    concentration = (top_notional / total_notional * 100.0) if total_notional > 0 else 0.0
+
+    high = med = low = 0
+    for r in latest_positions:
+        entry = float(r.get('avg_entry_price') or 0.0)
+        liq = r.get('liquidation_price')
+        if not entry or liq is None:
+            low += 1
+            continue
+        dist_pct = abs(entry - float(liq)) / abs(entry) * 100.0
+        if dist_pct < 10:
+            high += 1
+        elif dist_pct < 25:
+            med += 1
+        else:
+            low += 1
+
+    equity = float((account or {}).get('equity_usd') or 0.0)
+    maint = float((account or {}).get('maintenance_margin_usd') or 0.0)
+    margin_util = (maint / equity * 100.0) if equity > 0 else 0.0
+
+    return {
+        'ok': True,
+        'as_of_ts': max(latest_ts, int((account or {}).get('ts') or 0)),
+        'margin_utilization_pct': margin_util,
+        'total_notional_usd': total_notional,
+        'position_concentration_pct': concentration,
+        'liq_distance_bands': {
+            'high_risk_lt_10pct': high,
+            'medium_10_to_25pct': med,
+            'low_gt_25pct': low,
+        },
+        'positions_count': len(latest_positions),
+    }

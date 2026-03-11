@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.services.hyperliquid_reconciliation import HyperliquidReconciliationService
 from app.services.hyperliquid_state_store import (
+    compute_latest_hyperliquid_risk_snapshot,
     list_latest_hyperliquid_account_snapshots,
     list_latest_hyperliquid_position_snapshots,
 )
@@ -67,3 +68,8 @@ def hyperliquid_account_snapshots(limit: int = 20, db: Session = Depends(get_db)
 @router.get('/hyperliquid/snapshots/positions')
 def hyperliquid_position_snapshots(limit: int = 50, db: Session = Depends(get_db)):
     return {'ok': True, 'items': list_latest_hyperliquid_position_snapshots(db, limit=limit)}
+
+
+@router.get('/hyperliquid/risk-snapshot')
+def hyperliquid_risk_snapshot(db: Session = Depends(get_db)):
+    return compute_latest_hyperliquid_risk_snapshot(db)

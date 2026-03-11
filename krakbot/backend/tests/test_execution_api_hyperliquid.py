@@ -50,9 +50,13 @@ def test_hyperliquid_reconciliation_endpoints(api_base: str):
 
     acc = requests.get(f"{api_base}/execution/hyperliquid/snapshots/account?limit=5", timeout=TIMEOUT)
     pos = requests.get(f"{api_base}/execution/hyperliquid/snapshots/positions?limit=5", timeout=TIMEOUT)
+    risk = requests.get(f"{api_base}/execution/hyperliquid/risk-snapshot", timeout=TIMEOUT)
     acc.raise_for_status()
     pos.raise_for_status()
+    risk.raise_for_status()
     assert acc.json()['ok'] is True
     assert pos.json()['ok'] is True
+    assert risk.json()['ok'] is True
     assert isinstance(acc.json()['items'], list)
     assert isinstance(pos.json()['items'], list)
+    assert 'margin_utilization_pct' in risk.json()
