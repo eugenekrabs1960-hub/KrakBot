@@ -42,6 +42,14 @@ class _BlockRisk:
         return RiskDecision(allowed=False, reason_code='max_notional', details={'cap': 1000})
 
 
+class _Publisher:
+    def __init__(self):
+        self.events = []
+
+    def publish(self, topic: str, payload: dict):
+        self.events.append((topic, payload))
+
+
 def test_gateway_register_and_get():
     g = VenueGateway()
     a = _FakeAdapter()
@@ -56,7 +64,8 @@ def test_orchestrator_runs_adapter_when_risk_allows():
     a = _FakeAdapter()
     g.register('hyperliquid', a)
 
-    orch = ExecutionOrchestrator(gateway=g)
+    pub = _Publisher()
+    orch = ExecutionOrchestrator(gateway=g, publisher=pub)
     out = orch.execute_intent(
         OrderIntent(
             strategy_instance_id='inst_1',
@@ -71,6 +80,8 @@ def test_orchestrator_runs_adapter_when_risk_allows():
     assert out.order_state is not None
     assert out.order_state.venue == 'fake'
     assert a.calls == 1
+    topics = [t for t, _ in pub.events]
+    assert topics == ['execution.intent.received', 'execution.order.completed']
 
 
 def test_orchestrator_blocks_when_risk_denies():
@@ -78,7 +89,8 @@ def test_orchestrator_blocks_when_risk_denies():
     a = _FakeAdapter()
     g.register('hyperliquid', a)
 
-    orch = ExecutionOrchestrator(gateway=g, risk=_BlockRisk())
+    pub = _Publisher()
+    orch = ExecutionOrchestrator(gateway=g, risk=_BlockRisk(), publisher=pub)
     out = orch.execute_intent(
         OrderIntent(
             strategy_instance_id='inst_1',
@@ -93,3 +105,5 @@ def test_orchestrator_blocks_when_risk_denies():
     assert out.error_code == 'risk_blocked'
     assert out.message == 'max_notional'
     assert a.calls == 0
+    topics = [t for t, _ in pub.events]
+    assert topics == ['execution.intent.received', 'execution.risk.blocked']

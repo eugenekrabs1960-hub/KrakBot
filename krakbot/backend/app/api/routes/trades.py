@@ -2,13 +2,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.adapters.execution.base import OrderIntent
-from app.adapters.execution.freqtrade_adapter import FreqtradeExecutionAdapter
 from app.db.session import get_db
 from app.schemas.trade import PaperOrderRequest
 from app.services.eif_capture import eif_capture
 from app.services.eif_scorecard import eif_scorecard
 from app.services.idempotency import check_or_store, update_response
+from app.services.execution_orchestration import execute_paper_order
 
 router = APIRouter(prefix='/trades', tags=['trades'])
 
@@ -52,17 +51,15 @@ def paper_order(
     if check['replayed']:
         return check['response'] or {}
 
-    adapter = FreqtradeExecutionAdapter(db)
     side = 'buy' if payload.side.lower() == 'buy' else 'sell'
-    result = adapter.submit_order(
-        OrderIntent(
-            strategy_instance_id=payload.strategy_instance_id,
-            market=payload.market,
-            side=side,
-            qty=payload.qty,
-            order_type='limit' if payload.order_type == 'limit' else 'market',
-            limit_price=payload.limit_price,
-        )
+    result = execute_paper_order(
+        db,
+        strategy_instance_id=payload.strategy_instance_id,
+        market=payload.market,
+        side=side,
+        qty=payload.qty,
+        order_type=payload.order_type,
+        limit_price=payload.limit_price,
     )
 
     event_type = 'entry' if side == 'buy' else 'exit'
