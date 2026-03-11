@@ -33,3 +33,17 @@ def test_hyperliquid_execution_account_positions_shape(api_base: str):
     assert acc.json()['ok'] is True
     assert pos.json()['ok'] is True
     assert isinstance(pos.json()['items'], list)
+
+
+def test_hyperliquid_reconciliation_endpoints(api_base: str):
+    run = requests.post(f"{api_base}/execution/hyperliquid/reconcile", timeout=TIMEOUT)
+    run.raise_for_status()
+    body = run.json()
+    assert body['ok'] is True
+    assert body['status'] in {'ok', 'drift_detected'}
+
+    hist = requests.get(f"{api_base}/execution/hyperliquid/reconcile/history?limit=5", timeout=TIMEOUT)
+    hist.raise_for_status()
+    h = hist.json()
+    assert h['ok'] is True
+    assert isinstance(h['items'], list)
