@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import {
   getActivePaperModel,
+  getAgentDecisionPackets,
   getLatestModel,
   getModelLabJobHistory,
   getStrategyBenchmarks,
@@ -16,23 +17,26 @@ export default function ModelLab() {
   const [model, setModel] = useState<any>(null);
   const [wallets, setWallets] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
+  const [packets, setPackets] = useState<any[]>([]);
   const [activePaper, setActivePaper] = useState<any>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState('');
 
   const load = async () => {
-    const [b, m, w, j, ap] = await Promise.all([
+    const [b, m, w, j, p, ap] = await Promise.all([
       getStrategyBenchmarks(symbol, 50000).catch(() => ({ items: [] })),
       getLatestModel(symbol).catch(() => null),
       getWalletCohortLatest('top_sol_active_wallets').catch(() => ({ members: [] })),
       getModelLabJobHistory(20).catch(() => ({ items: [] })),
+      getAgentDecisionPackets(20, undefined, symbol).catch(() => ({ items: [] })),
       getActivePaperModel().catch(() => ({ item: null })),
     ]);
     setBench(b?.items || []);
     setModel(m?.item ? { ...m.item, path: m.path } : null);
     setWallets((w?.members || []).slice(0, 10));
     setJobs(j?.items || []);
+    setPackets(p?.items || []);
     setActivePaper(ap?.item || null);
   };
 
@@ -144,6 +148,26 @@ export default function ModelLab() {
                 <td data-label="Symbol">{j.symbol || 'n/a'}</td>
                 <td data-label="Status">{j.ok ? 'ok' : `error: ${j.error || 'unknown'}`}</td>
                 <td data-label="Artifact">{j.artifact_path || 'n/a'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Agent Decision Packets ({symbol})</h3>
+        <table className="responsive-table">
+          <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Confidence</th><th>Rationale</th><th>Risk</th><th>Execution</th></tr></thead>
+          <tbody>
+            {packets.length === 0 ? <tr><td colSpan={7} className="muted">No decision packets yet.</td></tr> : packets.map((p, idx) => (
+              <tr key={`${p.id}-${idx}`}>
+                <td data-label="Time">{p.ts ? new Date(Number(p.ts)).toLocaleString() : 'n/a'}</td>
+                <td data-label="Agent">{p.agent_id}</td>
+                <td data-label="Action">{p.action}</td>
+                <td data-label="Confidence">{p.confidence == null ? 'n/a' : Number(p.confidence).toFixed(3)}</td>
+                <td data-label="Rationale">{p.rationale || 'n/a'}</td>
+                <td data-label="Risk">{typeof p.risk_json === 'object' ? JSON.stringify(p.risk_json) : String(p.risk_json || 'n/a')}</td>
+                <td data-label="Execution">{typeof p.execution_json === 'object' ? JSON.stringify(p.execution_json) : String(p.execution_json || 'n/a')}</td>
               </tr>
             ))}
           </tbody>

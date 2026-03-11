@@ -134,6 +134,14 @@ export async function promoteModelToPaper(symbol: string, modelPath: string, con
   return parseJsonOrThrow(res);
 }
 
+export async function getAgentDecisionPackets(limit = 100, agentId?: string, symbol?: string) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (agentId) q.set('agent_id', agentId);
+  if (symbol) q.set('symbol', symbol);
+  const res = await fetch(`${API_BASE}/agents/decision-packets?${q.toString()}`);
+  return parseJsonOrThrow(res);
+}
+
 export async function getHyperliquidExecutionHealth() {
   const res = await fetch(`${API_BASE}/execution/hyperliquid/health`);
   return parseJsonOrThrow(res);
