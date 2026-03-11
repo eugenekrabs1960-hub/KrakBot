@@ -282,7 +282,15 @@ export default function ModelArena() {
                 <button className={`btn ${selected.includes(model.id) ? 'active' : ''}`} onClick={() => toggleSelection(model.id)}>
                   {selected.includes(model.id) ? 'Selected for Compare' : 'Compare'}
                 </button>
-                <button className={`btn ${activeExecution?.agent_id === model.id ? 'active' : ''}`} onClick={() => setSwitchCandidate(model.id)}>
+                <button
+                  className={`btn ${activeExecution?.agent_id === model.id ? 'active' : ''}`}
+                  onClick={() => {
+                    if (activeExecution?.agent_id === model.id) return;
+                    setSwitchMsg('');
+                    setSwitchCandidate(model.id);
+                  }}
+                  disabled={activeExecution?.agent_id === model.id}
+                >
                   {activeExecution?.agent_id === model.id ? 'Active for Execution' : 'Set Active Execution'}
                 </button>
               </div>

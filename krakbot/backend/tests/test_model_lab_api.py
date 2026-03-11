@@ -46,3 +46,15 @@ def test_model_lab_endpoints_shape(api_base: str):
     ap = requests.get(f"{api_base}/model-lab/active-paper-model", timeout=TIMEOUT)
     ap.raise_for_status()
     assert ap.json()['ok'] is True
+
+    ex = requests.get(f"{api_base}/model-lab/active-execution-model", timeout=TIMEOUT)
+    ex.raise_for_status()
+    assert ex.json()['ok'] is True
+
+    ex_bad = requests.post(f"{api_base}/model-lab/set-active-execution-model?agent_id=agent_a&confirm_phrase=NOPE", timeout=TIMEOUT)
+    ex_bad.raise_for_status()
+    assert ex_bad.json()['ok'] is False
+
+    ex_ok = requests.post(f"{api_base}/model-lab/set-active-execution-model?agent_id=agent_a&confirm_phrase=SWITCH", timeout=TIMEOUT)
+    ex_ok.raise_for_status()
+    assert ex_ok.json()['ok'] is True
