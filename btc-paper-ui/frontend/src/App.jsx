@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createChart } from 'lightweight-charts'
 
 const API = 'http://127.0.0.1:8000'
-const MODE_ORDER = ['btc_15m_conservative', 'btc_5m_breakout_retest']
+const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_breakout_retest']
 
 function SharedChart({ state, theme }) {
   const ref = useRef(null)
   const [chartError, setChartError] = useState('')
-  const baseMode = state?.modes?.btc_5m_breakout_retest?.market_data?.[0]?.ohlcv?.length
-    ? state?.modes?.btc_5m_breakout_retest
+  const baseMode = state?.modes?.btc_15m_breakout_retest?.market_data?.[0]?.ohlcv?.length
+    ? state?.modes?.btc_15m_breakout_retest
     : state?.modes?.btc_15m_conservative
 
   useEffect(() => {
@@ -26,7 +26,7 @@ function SharedChart({ state, theme }) {
     try {
       const modeColors = {
         btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
-        btc_5m_breakout_retest: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
+        btc_15m_breakout_retest: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
       }
 
       const chart = createChart(container, {
@@ -100,7 +100,7 @@ function SharedChart({ state, theme }) {
 
 function fmt2(x) { return Number(x ?? 0).toFixed(2) }
 
-function ModePanel({ modeKey, m, onAck, theme }) {
+function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
   const openPos = (m?.open_positions || [])[0]
   const latestClosed = (m?.closed_trades || []).slice(-1)[0]
@@ -256,7 +256,7 @@ export default function App() {
   return (
     <div className={`wrap theme-${theme}`}>
       <div className='top'>
-        <h2>BTC Paper Dashboard (Parallel Modes)</h2>
+        <h2>BTC Paper Dashboard (15m Baseline vs 15m Experiment)</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <span className='badge'>PAPER MODE</span>
           <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
@@ -267,7 +267,7 @@ export default function App() {
       {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
       <SharedChart state={state} theme={theme} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
-        {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} theme={theme} />)}
+        {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
       </div>
     </div>
   )

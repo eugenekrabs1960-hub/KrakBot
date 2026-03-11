@@ -1,12 +1,6 @@
-from dotenv import load_dotenv
-from kraken_client import from_env
-
-
 def main() -> None:
-    load_dotenv()
-    client = from_env()
-    resp = client.private_post("Balance")
-    print(resp)
+    print("Kraken private auth checks are disabled in this paper-only repo state.")
+    print("No private Balance call is performed.")
 
 
 if __name__ == "__main__":
