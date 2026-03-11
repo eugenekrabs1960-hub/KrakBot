@@ -21,6 +21,22 @@ See architecture: `../kraken_bots/KRAKBOT_MVP_ARCHITECTURE.md`
 
 This is an architecture-aligned scaffold (contracts + module boundaries), ready for phased implementation.
 
+## Web UI redesign (implemented)
+
+The frontend now ships with an operator-focused redesign:
+
+- App shell with responsive left nav (mobile collapses to horizontal strip)
+- Overview KPI dashboard
+- Strategy comparison matrix
+- Strategy detail deep-dive page
+- Trades + decision trace inspector
+- Market detail panel and polished market registry table
+- Controls with safety arming + typed confirmation for dangerous actions
+- Benchmark & wallet intelligence panel
+- Reusable tokens/components (`tokens.css`, `AppShell`, `PageHeader`, `StatCard`, `Badge`)
+
+See implementation tracker: `docs/ui-redesign-implementation-plan.md`.
+
 ## Paper Fill Pricing Policy (Strict)
 
 Paper-order fills use **only** the latest `market_trades.price` for the requested market.
