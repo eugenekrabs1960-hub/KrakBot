@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -21,23 +22,94 @@ class HeliusProvider:
 
     async def fetch_wallet_events(self, *, cursor: str | None = None, limit: int = 200):
         if not self.api_key or not self.watchlist:
-            return [], None
+            return [], cursor
 
         out: list[ProviderWalletEvent] = []
-        for address in self.watchlist:
-            txs = self._fetch_address_transactions(address=address, limit=min(100, limit))
-            for tx in txs:
-                evt = self._to_event(address, tx)
-                if evt is not None:
-                    out.append(evt)
-        return out[:limit], None
+        cursor_map = self._decode_cursor(cursor)
+        next_cursor_map = dict(cursor_map)
 
-    def _fetch_address_transactions(self, *, address: str, limit: int = 100) -> list[dict[str, Any]]:
+        per_addr_limit = max(10, min(100, int(settings.wallet_intel_helius_page_limit)))
+        max_pages = max(1, int(settings.wallet_intel_helius_max_pages_per_run))
+
+        for address in self.watchlist:
+            before = cursor_map.get(address)
+            pages = 0
+            while len(out) < limit and pages < max_pages:
+                txs = self._fetch_address_transactions(address=address, limit=min(per_addr_limit, limit), before=before)
+                if not txs:
+                    break
+
+                for tx in txs:
+                    evt = self._to_event(address, tx)
+                    if evt is not None:
+                        out.append(evt)
+                        if len(out) >= limit:
+                            break
+
+                pages += 1
+                last_sig = self._tx_signature(txs[-1])
+                if not last_sig or len(txs) < per_addr_limit:
+                    before = last_sig
+                    break
+                before = last_sig
+
+            if before:
+                next_cursor_map[address] = before
+
+        return out[:limit], json.dumps(next_cursor_map, sort_keys=True)
+
+    def _decode_cursor(self, cursor: str | None) -> dict[str, str]:
+        if not cursor:
+            return {}
+        try:
+            parsed = json.loads(cursor)
+            if isinstance(parsed, dict):
+                return {str(k): str(v) for k, v in parsed.items() if v}
+        except Exception:
+            return {}
+        return {}
+
+    def _tx_signature(self, tx: dict[str, Any]) -> str | None:
+        signature = str(tx.get("signature") or tx.get("transactionSignature") or "").strip()
+        return signature or None
+
+    def _fetch_address_transactions(self, *, address: str, limit: int = 100, before: str | None = None) -> list[dict[str, Any]]:
         url = f"{self.base_url}/v0/addresses/{address}/transactions"
-        resp = requests.get(url, params={"api-key": self.api_key, "limit": limit}, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        return data if isinstance(data, list) else []
+        params: dict[str, Any] = {"api-key": self.api_key, "limit": limit}
+        if before:
+            params["before"] = before
+
+        retries = max(1, int(settings.wallet_intel_helius_retry_attempts))
+        backoff_ms = max(100, int(settings.wallet_intel_helius_retry_backoff_ms))
+
+        last_err: Exception | None = None
+        for attempt in range(retries):
+            try:
+                resp = requests.get(url, params=params, timeout=20)
+                # Retry on explicit throttling and 5xx.
+                if resp.status_code in {429, 500, 502, 503, 504}:
+                    wait_s = (backoff_ms * (2 ** attempt)) / 1000.0
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            wait_s = max(wait_s, float(retry_after))
+                        except ValueError:
+                            pass
+                    time.sleep(wait_s)
+                    continue
+
+                resp.raise_for_status()
+                data = resp.json()
+                return data if isinstance(data, list) else []
+            except requests.RequestException as exc:
+                last_err = exc
+                if attempt == retries - 1:
+                    break
+                time.sleep((backoff_ms * (2 ** attempt)) / 1000.0)
+
+        if last_err:
+            raise last_err
+        return []
 
     def _to_event(self, address: str, tx: dict[str, Any]) -> ProviderWalletEvent | None:
         signature = str(tx.get("signature") or tx.get("transactionSignature") or "")
@@ -108,11 +180,11 @@ class HeliusProviderStub:
                 payload={"kind": "swap", "asset": "SOL", "side_hint": "buy", "qty": 1.25, "price_ref": settings.wallet_intel_default_price_ref_usd},
             )
         ]
-        return events[:limit], None
+        return events[:limit], cursor
 
 
 class DuneProviderStub:
     name = "dune"
 
     async def fetch_wallet_events(self, *, cursor: str | None = None, limit: int = 500):
-        return [], None
+        return [], cursor

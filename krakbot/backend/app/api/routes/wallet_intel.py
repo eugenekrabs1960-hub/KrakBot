@@ -48,12 +48,16 @@ def wallet_intel_health(db: Session = Depends(get_db)):
             """
         )
     ).mappings().first()
+    cursor_state = db.execute(
+        text("SELECT checkpoint FROM worker_checkpoints WHERE worker_name='wallet_intel_helius_cursor' LIMIT 1")
+    ).mappings().first()
     return {
         'ok': True,
         'latest_signal': dict(row) if row else None,
         'scheduler': {
             'latest_run': dict(latest_run) if latest_run else None,
             'lock': dict(lock) if lock else None,
+            'cursor_state': dict(cursor_state) if cursor_state else None,
         },
     }
 

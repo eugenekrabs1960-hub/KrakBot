@@ -14,6 +14,7 @@ from app.adapters.wallet_intel_providers import HeliusProvider, HeliusProviderSt
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.wallet_intel import WalletIntelService
+from app.services.checkpoints import load_checkpoint, save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +52,13 @@ class WalletIntelSchedulerService:
                 logger.exception('wallet_intel_scheduler loop error: %s', exc)
             await asyncio.sleep(max(15, int(settings.wallet_intel_scheduler_interval_sec)))
 
-    async def _fetch_provider_events(self):
+    async def _fetch_provider_events(self, *, cursor: str | None = None):
         provider = HeliusProvider()
-        fetched, _ = await provider.fetch_wallet_events(limit=200)
+        fetched, next_cursor = await provider.fetch_wallet_events(cursor=cursor, limit=200)
         if not fetched:
             provider = HeliusProviderStub()
-            fetched, _ = await provider.fetch_wallet_events(limit=200)
-        return [
+            fetched, next_cursor = await provider.fetch_wallet_events(cursor=cursor, limit=200)
+        events = [
             {
                 'provider': x.provider,
                 'chain': x.chain,
@@ -68,6 +69,7 @@ class WalletIntelSchedulerService:
             }
             for x in fetched
         ]
+        return events, next_cursor
 
     def _acquire_lock(self, db, run_id: str, now_ms: int) -> bool:
         ttl_ms = max(60, int(settings.wallet_intel_scheduler_lock_ttl_sec)) * 1000
@@ -143,13 +145,25 @@ class WalletIntelSchedulerService:
             )
             db.commit()
 
-            events = await self._fetch_provider_events()
+            checkpoint = load_checkpoint(db, 'wallet_intel_helius_cursor') or {}
+            current_cursor = checkpoint.get('cursor') if isinstance(checkpoint, dict) else None
+            events, next_cursor = await self._fetch_provider_events(cursor=current_cursor)
 
             self._heartbeat(db, run_id=run_id, now_ms=int(time.time() * 1000))
             db.commit()
 
             pipeline_result = WalletIntelService().run_pipeline(db, provider_events=events)
+            pipeline_result['fetch_cursor_before'] = current_cursor
+            pipeline_result['fetch_cursor_after'] = next_cursor
+            pipeline_result['fetched_events'] = len(events)
             finished_ms = int(time.time() * 1000)
+            if next_cursor:
+                save_checkpoint(db, 'wallet_intel_helius_cursor', {
+                    'cursor': next_cursor,
+                    'updated_at_ms': finished_ms,
+                    'last_run_id': run_id,
+                })
+
             db.execute(
                 text(
                     """

@@ -46,11 +46,12 @@ class WalletIntelService:
 
     def ingest_raw_event(self, db: Session, *, wallet_id: str, provider: str, provider_event_id: str, chain: str, event_ts: int, payload: dict):
         raw_id = f"raw_{uuid.uuid4().hex[:12]}"
-        db.execute(
+        result = db.execute(
             text(
                 """
                 INSERT INTO wallet_raw_event(id, wallet_id, provider, provider_event_id, chain, event_ts, ingest_ts, payload_json, schema_version)
                 VALUES (:id, :wallet_id, :provider, :provider_event_id, :chain, :event_ts, :ingest_ts, CAST(:payload AS jsonb), :schema_version)
+                ON CONFLICT (provider, provider_event_id) DO NOTHING
                 """
             ),
             {
@@ -66,6 +67,8 @@ class WalletIntelService:
             },
         )
         db.commit()
+        if result.rowcount == 0:
+            return None
         return raw_id
 
     def normalize_event(self, db: Session, *, wallet_id: str, raw_id: str, event_ts: int, payload: dict):
@@ -713,6 +716,8 @@ class WalletIntelService:
         run_id = f"wrun_{uuid.uuid4().hex[:10]}"
         now_ms = int(time.time() * 1000)
         provider_events = provider_events or []
+        ingested = 0
+        deduped = 0
 
         for e in provider_events:
             wallet_id = self.ensure_wallet(db, chain=e.get("chain", "solana"), address=e["wallet_address"])
@@ -725,11 +730,15 @@ class WalletIntelService:
                 event_ts=int(e.get("event_ts", now_ms)),
                 payload=e.get("payload", {}),
             )
+            if not raw_id:
+                deduped += 1
+                continue
             can_id = self.normalize_event(db, wallet_id=wallet_id, raw_id=raw_id, event_ts=int(e.get("event_ts", now_ms)), payload=e.get("payload", {}))
             self.infer_event(db, wallet_id=wallet_id, canonical_id=can_id, event_ts=int(e.get("event_ts", now_ms)), payload=e.get("payload", {}))
+            ingested += 1
 
         self.classify_wallets(db, run_id=run_id, now_ms=now_ms)
         self.compute_eligibility(db, run_id=run_id, now_ms=now_ms)
         self.compute_scores(db, run_id=run_id, now_ms=now_ms)
         signal = self.build_cohort_and_signal(db, run_id=run_id, now_ms=now_ms)
-        return {"ok": True, "run_id": run_id, "signal": signal}
+        return {"ok": True, "run_id": run_id, "signal": signal, "ingested_events": ingested, "deduped_events": deduped}

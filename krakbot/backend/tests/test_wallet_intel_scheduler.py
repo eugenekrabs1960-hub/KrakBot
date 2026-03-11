@@ -35,6 +35,15 @@ def _prepare_sqlite_db(path):
             )
             """
         ))
+        conn.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS worker_checkpoints (
+              worker_name TEXT PRIMARY KEY,
+              checkpoint TEXT NOT NULL,
+              updated_at TEXT
+            )
+            """
+        ))
     return engine
 
 
@@ -47,9 +56,9 @@ def test_scheduler_single_run_lock(monkeypatch, tmp_path):
     # Swap SessionLocal used inside service module to our sqlite session factory.
     monkeypatch.setattr('app.services.wallet_intel_scheduler.SessionLocal', Session)
 
-    async def fake_fetch(self):
+    async def fake_fetch(self, cursor=None):
         await asyncio.sleep(0)
-        return []
+        return [], cursor
 
     monkeypatch.setattr(WalletIntelSchedulerService, '_fetch_provider_events', fake_fetch)
 
