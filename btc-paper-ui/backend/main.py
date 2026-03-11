@@ -21,6 +21,8 @@ PAPER_FEE_PCT = 0.40
 # 5m experiment controls (change one variable at a time)
 AGGR_MAX_SPREAD_PCT = 0.05
 AGGR_CHOP_ENTRY_BAND_FRAC = 0.35
+AGGR_MIN_RISK_PCT = 0.15
+AGGR_MAX_RISK_PCT = 0.90
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
@@ -117,8 +119,8 @@ def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
 
     # 2) tighter trade construction: bounded stop distance + stronger R:R floor
     risk_pct = abs(entry - stop) / max(entry, 1) * 100
-    if risk_pct < 0.20 or risk_pct > 0.80:
-        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_risk_band", "reason": "Aggressive gate blocked: stop distance outside 0.20%-0.80% risk band."}, 1.25)
+    if risk_pct < AGGR_MIN_RISK_PCT or risk_pct > AGGR_MAX_RISK_PCT:
+        return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_risk_band", "reason": f"Aggressive gate blocked: stop distance outside {AGGR_MIN_RISK_PCT:.2f}%-{AGGR_MAX_RISK_PCT:.2f}% risk band."}, 1.25)
     if rr < 1.40:
         return normalize_decision({"status": "WAIT", "regime_label": "aggr_filter_rr", "reason": "Aggressive gate blocked: risk/reward below tightened 5m threshold (1.40)."}, 1.25)
 
