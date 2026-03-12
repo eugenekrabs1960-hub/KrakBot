@@ -27,6 +27,7 @@ EXPERIMENT_MIN_RISK_PCT = 0.18
 EXPERIMENT_MAX_RISK_PCT = 1.20
 BRK_RETEST_LOOKBACK = 8
 MAX_OPEN_POSITIONS_PER_MODE = 2
+CONSERVATIVE_MIN_REWARD_TO_FEE = 1.50
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
@@ -302,6 +303,44 @@ def normalize_decision(d: dict[str, Any], rr_min: float):
         if not ok:
             n.update({"status": "WAIT", "side": "", "entry_price": 0, "stop_loss": 0, "take_profit": 0, "risk_reward_ratio": 0, "invalidation": "", "reason": "Missing executable trade fields."})
     return n
+
+
+def conservative_fee_efficiency_gate(d):
+    """Paper-only fee-adjusted efficiency gate for frozen 15m conservative baseline."""
+    if d.get("status") != "PROPOSE_TRADE":
+        return d
+
+    side = d.get("side")
+    entry = float(d.get("entry_price") or 0)
+    tp = float(d.get("take_profit") or 0)
+    qty = 1.0
+    fee_pct = PAPER_FEE_PCT / 100.0
+    if side not in {"BUY", "SELL"} or entry <= 0 or tp <= 0:
+        return normalize_decision({
+            "status": "WAIT",
+            "regime_label": "cons15_fee_efficiency_block",
+            "reason": "Projected gross reward is too small relative to estimated round-trip fees.",
+        }, MODE_CONFIGS["btc_15m_conservative"]["rr_min"])
+
+    projected_entry_fee = entry * qty * fee_pct
+    projected_exit_fee = tp * qty * fee_pct
+    projected_round_trip_fees = projected_entry_fee + projected_exit_fee
+    projected_gross_reward = ((tp - entry) if side == "BUY" else (entry - tp)) * qty
+    reward_to_fee_ratio = projected_gross_reward / projected_round_trip_fees if projected_round_trip_fees > 0 else 0.0
+
+    if projected_gross_reward <= 0 or reward_to_fee_ratio < CONSERVATIVE_MIN_REWARD_TO_FEE:
+        return normalize_decision({
+            "status": "WAIT",
+            "regime_label": "cons15_fee_efficiency_block",
+            "reason": "Projected gross reward is too small relative to estimated round-trip fees.",
+        }, MODE_CONFIGS["btc_15m_conservative"]["rr_min"])
+
+    d["projected_entry_fee"] = round2(projected_entry_fee)
+    d["projected_exit_fee"] = round2(projected_exit_fee)
+    d["projected_round_trip_fees"] = round2(projected_round_trip_fees)
+    d["projected_gross_reward"] = round2(projected_gross_reward)
+    d["reward_to_fee_ratio"] = round2(reward_to_fee_ratio)
+    return d
 
 
 def aggressive_quality_gate(candles, d, bid, ask, spread_pct):
@@ -812,6 +851,9 @@ async def execute_mode_scan(mode: str):
         fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
         if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
             d = fb
+
+    if mode == "btc_15m_conservative" and d.get("status") == "PROPOSE_TRADE":
+        d = conservative_fee_efficiency_gate(d)
 
     # Tightening applies ONLY to the 15m experiment mode; 15m baseline remains frozen.
     if mode == "btc_15m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
