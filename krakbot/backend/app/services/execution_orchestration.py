@@ -6,6 +6,7 @@ from app.execution.gateway import VenueGateway
 from app.execution.models import OrderIntent, VenueContext
 from app.execution.orchestrator import ExecutionOrchestrator
 from app.execution.venue_adapters import FreqtradeVenueAdapter
+from app.services.live_trading_guard import enforce_live_trading_order_guard
 
 
 def execute_paper_order(
@@ -29,12 +30,23 @@ def execute_paper_order(
             # Safe backward-compatible fallback for paper-order API when HL is disabled.
             selected_venue = 'paper'
         elif settings.hyperliquid_environment != 'testnet':
-            return {
-                'accepted': False,
-                'error_code': 'unsafe_environment',
-                'message': 'hyperliquid live execution is blocked unless environment is testnet',
-                'market': market,
-            }
+            # Mainnet requires explicit live trading guard enablement and caps.
+            px_ref = float(limit_price or 0.0)
+            if px_ref <= 0:
+                px_ref = 1.0
+            notional = abs(float(qty or 0.0) * px_ref)
+            guard = enforce_live_trading_order_guard(
+                db,
+                strategy_instance_id=strategy_instance_id,
+                notional_usd=notional,
+            )
+            if not guard.get('ok'):
+                return {
+                    'accepted': False,
+                    'error_code': guard.get('error_code') or 'live_trading_guard_block',
+                    'message': guard.get('message') or 'live trading blocked by guard policy',
+                    'market': market,
+                }
 
     orchestrator = ExecutionOrchestrator(gateway=gateway)
     try:

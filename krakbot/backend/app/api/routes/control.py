@@ -2,11 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.control import BotCommand, StrategyToggle, ExecutionVenueUpdate
+from app.schemas.control import (
+    BotCommand,
+    StrategyToggle,
+    ExecutionVenueUpdate,
+    LiveTradingDisableRequest,
+    LiveTradingEnableRequest,
+)
 from app.services.orchestrator import OrchestratorService
 from app.services.strategy_registry import set_enabled
 from app.services.execution_preferences import get_default_execution_venue, set_default_execution_venue
 from app.core.config import settings
+from app.services.live_trading_guard import (
+    disable_live_trading_guard,
+    enable_live_trading_guard,
+    get_live_trading_guard,
+)
 
 router = APIRouter(prefix='/control', tags=['control'])
 
@@ -71,3 +82,24 @@ def eif_flags():
             'analytics': {'api': {'enabled': settings.eif_analytics_api_enabled}},
         }
     }
+
+
+@router.get('/live-trading')
+def get_live_trading_guard_state(db: Session = Depends(get_db)):
+    return get_live_trading_guard(db)
+
+
+@router.post('/live-trading/enable')
+def enable_live_trading(payload: LiveTradingEnableRequest, db: Session = Depends(get_db)):
+    return enable_live_trading_guard(
+        db,
+        confirm_phrase=payload.confirm_phrase,
+        max_notional_usd_per_order=payload.max_notional_usd_per_order,
+        max_daily_loss_usd=payload.max_daily_loss_usd,
+        allowed_agents=payload.allowed_agents,
+    )
+
+
+@router.post('/live-trading/disable')
+def disable_live_trading(payload: LiveTradingDisableRequest, db: Session = Depends(get_db)):
+    return disable_live_trading_guard(db, confirm_phrase=payload.confirm_phrase)

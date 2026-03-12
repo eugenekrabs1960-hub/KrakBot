@@ -214,6 +214,27 @@ curl -s 'http://localhost:8010/api/agents/jason/trades?limit=50'
 curl -s 'http://localhost:8010/api/agents/decision-packets?agent_id=jason&limit=50'
 ```
 
+## Live Trading Guard (real-money lockbox)
+
+Real Hyperliquid mainnet execution is blocked unless explicitly enabled via guard API.
+
+```bash
+# View guard state
+curl -s http://localhost:8010/api/control/live-trading
+
+# Enable (explicit phrase + caps + allowlist)
+curl -s -X POST http://localhost:8010/api/control/live-trading/enable \
+  -H 'content-type: application/json' \
+  -d '{"confirm_phrase":"LIVE_ON","max_notional_usd_per_order":250,"max_daily_loss_usd":100,"allowed_agents":["jason"]}'
+
+# Disable
+curl -s -X POST http://localhost:8010/api/control/live-trading/disable \
+  -H 'content-type: application/json' \
+  -d '{"confirm_phrase":"LIVE_OFF"}'
+```
+
+Paper remains default/safe.
+
 ## Tailscale WebUI Access
 
 Current node Tailscale IP can access frontend directly (tailnet-only):

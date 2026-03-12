@@ -13,3 +13,14 @@ class StrategyToggle(BaseModel):
 
 class ExecutionVenueUpdate(BaseModel):
     default_venue: Literal['paper', 'hyperliquid']
+
+
+class LiveTradingEnableRequest(BaseModel):
+    confirm_phrase: str
+    max_notional_usd_per_order: float = 250.0
+    max_daily_loss_usd: float = 100.0
+    allowed_agents: list[str] = ['jason']
+
+
+class LiveTradingDisableRequest(BaseModel):
+    confirm_phrase: str
