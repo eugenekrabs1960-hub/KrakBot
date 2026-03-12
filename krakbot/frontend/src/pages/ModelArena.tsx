@@ -298,6 +298,7 @@ export default function ModelArena() {
         pnl: t.realized_pnl_usd == null
           ? (t.unrealized_pnl_usd == null ? 'n/a' : `${Number(t.unrealized_pnl_usd).toFixed(2)} (uPnL)`)
           : Number(t.realized_pnl_usd).toFixed(2),
+        status: String(t.status || (t.realized_pnl_usd == null ? 'open' : 'closed')).toLowerCase(),
         verified: true,
       }));
     }
@@ -313,11 +314,16 @@ export default function ModelArena() {
         leverage: p.execution_json?.leverage ? `${p.execution_json.leverage}x` : 'n/a',
         entry: p.execution_json?.entry_price ? Number(p.execution_json.entry_price).toFixed(2) : 'n/a',
         pnl: p.outcome_json?.realized_pnl_usd != null ? Number(p.outcome_json.realized_pnl_usd).toFixed(2) : 'n/a',
+        status: 'inferred',
         verified: false,
       }));
   }, [expandedModel, expandedModelPackets, jasonTrades]);
 
   const expandedLatestPacket = useMemo(() => expandedModelPackets[0] || null, [expandedModelPackets]);
+  const activeTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'open'), [expandedTradeRows]);
+  const closedTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'closed'), [expandedTradeRows]);
+  const inferredTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'inferred'), [expandedTradeRows]);
+
 
   const expandedStrategySummary = useMemo(() => {
     if (!expandedModelPackets.length) return 'No strategy narrative yet.';
@@ -547,12 +553,15 @@ export default function ModelArena() {
                 ? 'Verified ledger rows (PnL reflects closed trades only).'
                 : 'Inferred from decision packets (PnL/leverage may be partial if model has no execution ledger).'}
             </div>
+
+            <div style={{ marginTop: 10 }}><strong>Active Positions ({activeTradeRows.length})</strong></div>
             <table className="responsive-table" style={{ marginTop: 8 }}>
-              <thead><tr><th>Time</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th><th>Source</th></tr></thead>
+              <thead><tr><th>Time</th><th>Status</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th><th>Source</th></tr></thead>
               <tbody>
-                {expandedTradeRows.length === 0 ? <tr><td colSpan={7} className="muted">No executed trades logged yet.</td></tr> : expandedTradeRows.map((r) => (
+                {activeTradeRows.length === 0 ? <tr><td colSpan={8} className="muted">No active positions.</td></tr> : activeTradeRows.map((r: any) => (
                   <tr key={r.key}>
                     <td data-label="Time">{r.ts ? new Date(Number(r.ts)).toLocaleString() : 'n/a'}</td>
+                    <td data-label="Status">open</td>
                     <td data-label="Action">{String(r.action || '').toUpperCase()}</td>
                     <td data-label="Symbol">{r.symbol || 'n/a'}</td>
                     <td data-label="Lev">{r.leverage}</td>
@@ -563,6 +572,48 @@ export default function ModelArena() {
                 ))}
               </tbody>
             </table>
+
+            <div style={{ marginTop: 12 }}><strong>Closed Positions ({closedTradeRows.length})</strong></div>
+            <table className="responsive-table" style={{ marginTop: 8 }}>
+              <thead><tr><th>Time</th><th>Status</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th><th>Source</th></tr></thead>
+              <tbody>
+                {closedTradeRows.length === 0 ? <tr><td colSpan={8} className="muted">No closed positions.</td></tr> : closedTradeRows.map((r: any) => (
+                  <tr key={r.key}>
+                    <td data-label="Time">{r.ts ? new Date(Number(r.ts)).toLocaleString() : 'n/a'}</td>
+                    <td data-label="Status">closed</td>
+                    <td data-label="Action">{String(r.action || '').toUpperCase()}</td>
+                    <td data-label="Symbol">{r.symbol || 'n/a'}</td>
+                    <td data-label="Lev">{r.leverage}</td>
+                    <td data-label="Entry">{r.entry}</td>
+                    <td data-label="PnL">{r.pnl}</td>
+                    <td data-label="Source">{r.verified ? 'ledger' : 'inferred'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {inferredTradeRows.length > 0 ? (
+              <>
+                <div style={{ marginTop: 12 }}><strong>Inferred Rows ({inferredTradeRows.length})</strong></div>
+                <table className="responsive-table" style={{ marginTop: 8 }}>
+                  <thead><tr><th>Time</th><th>Status</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th><th>Source</th></tr></thead>
+                  <tbody>
+                    {inferredTradeRows.map((r: any) => (
+                      <tr key={r.key}>
+                        <td data-label="Time">{r.ts ? new Date(Number(r.ts)).toLocaleString() : 'n/a'}</td>
+                        <td data-label="Status">inferred</td>
+                        <td data-label="Action">{String(r.action || '').toUpperCase()}</td>
+                        <td data-label="Symbol">{r.symbol || 'n/a'}</td>
+                        <td data-label="Lev">{r.leverage}</td>
+                        <td data-label="Entry">{r.entry}</td>
+                        <td data-label="PnL">{r.pnl}</td>
+                        <td data-label="Source">inferred</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : null}
           </div>
         </div>
       )}
