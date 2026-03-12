@@ -198,9 +198,19 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   const activeStrategy = latest.active_strategy_entry || (hstate.strategy_registry || {})[activeStrategyKey] || {}
   const metrics = (hstate.metrics || {}).strategy_overall?.[activeStrategyKey] || {}
   const positions = hstate.positions || []
+  const closedTrades = hstate.closed_trades || []
   const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
   const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
   const freeCollateral = Math.max(0, 1000 - marginUsed)
+
+  const PAPER_START_BALANCE = 1000
+  const realizedPnl = closedTrades.reduce((s, t) => s + Number(t.net_realized_pnl ?? t.realized_pnl ?? 0), 0)
+  const unrealizedPnl = positions.reduce((s, p) => s + Number(p.unrealized_pnl_net ?? p.unrealized_pnl ?? 0), 0)
+  const netPnl = realizedPnl + unrealizedPnl
+  const totalFees = closedTrades.reduce((s, t) => s + Number(t.estimated_total_fees ?? t.total_fees ?? 0), 0) + positions.reduce((s, p) => s + Number(p.estimated_total_fees ?? 0), 0)
+  const equity = PAPER_START_BALANCE + netPnl
+
+  const pnlColor = (v) => (Number(v) > 0 ? '#16a34a' : Number(v) < 0 ? '#dc2626' : 'inherit')
 
   return (
     <div className='panel' style={{ marginBottom: 12, borderColor: '#7e22ce' }}>
@@ -246,6 +256,18 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <div>Expectancy (net): {fmt2(metrics.expectancy_net)} | Median time-to-close: {metrics.median_time_to_close_min ?? 0} min</div>
       </div>
 
+      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+        <strong>Paper account summary (simulator baseline)</strong>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:6 }}>
+          <div><strong>Starting balance</strong><div>{fmt2(PAPER_START_BALANCE)}</div></div>
+          <div><strong>Realized PnL</strong><div style={{ color: pnlColor(realizedPnl) }}>{fmt2(realizedPnl)}</div></div>
+          <div><strong>Unrealized PnL</strong><div style={{ color: pnlColor(unrealizedPnl) }}>{fmt2(unrealizedPnl)}</div></div>
+          <div><strong>Net PnL</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(netPnl)}</div></div>
+          <div><strong>Total fees</strong><div>{fmt2(totalFees)}</div></div>
+          <div><strong>Current equity</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(equity)}</div></div>
+        </div>
+      </div>
+
       <div style={{ marginTop: 10 }}>
         <button onClick={onScan}>Run Hyperliquid Mock Scan</button>
         <button style={{ marginLeft: 8 }} onClick={onMockOpen}>Mock Open Paper Position</button>
@@ -268,6 +290,37 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
           </tbody>
         </table>
       </details>
+
+      <details style={{ marginTop: 10 }}>
+        <summary>Closed futures trades PnL ({closedTrades.length})</summary>
+        <table className='rows' style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th>Close time</th><th>Reason</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {closedTrades.slice(-12).reverse().map((t, i) => {
+              const gross = Number(t.gross_realized_pnl ?? 0)
+              const feesPaid = Number(t.estimated_total_fees ?? t.total_fees ?? 0)
+              const net = Number(t.net_realized_pnl ?? t.realized_pnl ?? 0)
+              const entryNotional = Number(t.entry_price ?? 0) * Number(t.qty ?? 0)
+              const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
+              return (
+                <tr key={i}>
+                  <td>{fmtLA(t.close_time)}</td>
+                  <td>{t.close_reason || '-'}</td>
+                  <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
+                  <td>{fmt2(feesPaid)}</td>
+                  <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
+                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </details>
+
       <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>*Free collateral is a simulator placeholder estimate for paper training view.</div>
     </div>
   )
