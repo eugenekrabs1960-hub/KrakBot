@@ -61,6 +61,7 @@ export default function ModelArena() {
   const [universeText, setUniverseText] = useState('');
   const [gateCfg, setGateCfg] = useState<any>(null);
   const [bucketText, setBucketText] = useState('');
+  const [gateUiMsg, setGateUiMsg] = useState('');
   const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -75,6 +76,21 @@ export default function ModelArena() {
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
   const [showInspector, setShowInspector] = useState(false);
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
+
+
+  const DEFAULT_GATE_CFG = {
+    max_open_positions: 3,
+    min_open_interval_sec: 300,
+    slot_confidence: { '1': 0.6, '2': 0.7, '3': 0.8 },
+    max_per_position_allocation_pct: 15,
+    max_total_allocation_pct: 45,
+    max_same_direction_allocation_pct: 35,
+    max_bucket_positions: 2,
+    slot3_exceptional_confidence: 0.9,
+    require_diversification_for_slot_2_3: true,
+  } as any;
+
+  const BUCKET_PRESET_DEFAULT = 'BTC:BTC_MAJORS,ETH:ETH_ECOSYSTEM,SOL:SOL_ECOSYSTEM,BNB:BTC_MAJORS,DOGE:SPECULATIVE,PEPE:SPECULATIVE,BONK:SPECULATIVE,AVAX:ALT_L1,ADA:ALT_L1,DOT:ALT_L1,LINK:INFRA,ARB:ETH_ECOSYSTEM,OP:ETH_ECOSYSTEM,MATIC:ETH_ECOSYSTEM,AAVE:ETH_ECOSYSTEM,UNI:ETH_ECOSYSTEM,JTO:SOL_ECOSYSTEM,JUP:SOL_ECOSYSTEM,WIF:SPECULATIVE,RAY:SOL_ECOSYSTEM';
 
   const loadCore = async () => {
     setLoadingCore(true);
@@ -116,6 +132,19 @@ export default function ModelArena() {
 
 
 
+
+
+  function validateGateConfig(cfg: any): string {
+    if (!cfg) return 'Missing gate config';
+    const s1 = Number(cfg?.slot_confidence?.['1'] ?? 0);
+    const s2 = Number(cfg?.slot_confidence?.['2'] ?? 0);
+    const s3 = Number(cfg?.slot_confidence?.['3'] ?? 0);
+    if (!(s1 <= s2 && s2 <= s3)) return 'Slot confidence must be non-decreasing (s1 <= s2 <= s3).';
+    if (Number(cfg.max_open_positions || 0) < 1 || Number(cfg.max_open_positions || 0) > 10) return 'Max open positions must be 1..10';
+    if (Number(cfg.max_total_allocation_pct || 0) > 50) return 'Max total allocation should stay <= 50%';
+    if (Number(cfg.max_same_direction_allocation_pct || 0) > Number(cfg.max_total_allocation_pct || 0)) return 'Directional cap cannot exceed total cap';
+    return '';
+  }
   async function saveUniverse() {
     const symbols = universeText
       .split(',')
@@ -130,12 +159,40 @@ export default function ModelArena() {
 
   async function saveGateConfig() {
     if (!gateCfg) return;
+    const err = validateGateConfig(gateCfg);
+    if (err) { setGateUiMsg(err); return; }
+    setGateUiMsg('');
     try {
       await setJasonPortfolioGate(gateCfg);
+      setGateUiMsg('Gate config saved.');
       await loadSecondary();
-    } catch {}
+    } catch { setGateUiMsg('Failed to save gate config.'); }
   }
 
+
+
+  async function applyGatePreset(mode: 'conservative'|'balanced'|'aggressive') {
+    const base = { ...DEFAULT_GATE_CFG };
+    if (mode === 'conservative') {
+      base.slot_confidence = { '1': 0.65, '2': 0.75, '3': 0.85 };
+      base.min_open_interval_sec = 420;
+    } else if (mode === 'aggressive') {
+      base.slot_confidence = { '1': 0.58, '2': 0.68, '3': 0.78 };
+      base.min_open_interval_sec = 180;
+    }
+    setGateCfg(base);
+    setGateUiMsg(`Applied ${mode} preset. Save to persist.`);
+  }
+
+  async function resetGateDefaults() {
+    setGateCfg({ ...DEFAULT_GATE_CFG });
+    setGateUiMsg('Default gate config loaded. Save to persist.');
+  }
+
+  async function applyBucketDefaultPreset() {
+    setBucketText(BUCKET_PRESET_DEFAULT);
+    setGateUiMsg('Default bucket preset loaded. Save Buckets to persist.');
+  }
   async function saveBuckets() {
     const pairs = bucketText.split(',').map(x => x.trim()).filter(Boolean);
     const map: Record<string,string> = {};
@@ -581,9 +638,14 @@ export default function ModelArena() {
                 </div>
                 <div className="toolbar" style={{ marginTop: 8 }}>
                   <button className="btn" onClick={saveGateConfig}>Save Gate Config</button>
+                  <button className="btn" onClick={() => applyGatePreset('conservative')}>Preset: Conservative</button>
+                  <button className="btn" onClick={() => applyGatePreset('balanced')}>Preset: Balanced</button>
+                  <button className="btn" onClick={() => applyGatePreset('aggressive')}>Preset: Aggressive</button>
+                  <button className="btn" onClick={resetGateDefaults}>Reset Defaults</button>
                 </div>
               </>
             ) : <div className="muted">Loading gate config...</div>}
+            {gateUiMsg ? <div className="muted" style={{ marginTop: 8 }}>{gateUiMsg}</div> : null}
           </div>
           ) : null}
 
@@ -594,6 +656,7 @@ export default function ModelArena() {
             <textarea value={bucketText} onChange={(e)=>setBucketText(e.target.value)} rows={3} style={{ width: '100%' }} />
             <div className="toolbar" style={{ marginTop: 8 }}>
               <button className="btn" onClick={saveBuckets}>Save Buckets</button>
+              <button className="btn" onClick={applyBucketDefaultPreset}>Load Default Buckets</button>
             </div>
           </div>
           ) : null}
