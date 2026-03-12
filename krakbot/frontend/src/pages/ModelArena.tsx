@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import {
   getActiveExecutionModel,
-  getActivePaperModel,
   getAgentDecisionPackets,
-  getJasonState,
   getJasonTrades,
   setActiveExecutionModel,
 } from '../services/api';
@@ -42,9 +40,7 @@ function prettyJson(value: unknown) {
 
 export default function ModelArena() {
   const [packets, setPackets] = useState<any[]>([]);
-  const [activePaper, setActivePaper] = useState<any>(null);
   const [activeExecution, setActiveExecution] = useState<any>(null);
-  const [jasonState, setJasonState] = useState<any>(null);
   const [jasonTrades, setJasonTrades] = useState<any[]>([]);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -61,17 +57,13 @@ export default function ModelArena() {
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   const load = async () => {
-    const [packetRes, activeRes, execRes, jsState, jsTrades] = await Promise.all([
+    const [packetRes, execRes, jsTrades] = await Promise.all([
       getAgentDecisionPackets(500).catch(() => ({ items: [] })),
-      getActivePaperModel().catch(() => ({ item: null })),
       getActiveExecutionModel().catch(() => ({ item: null })),
-      getJasonState().catch(() => ({ state: null, open_trade: null })),
       getJasonTrades(30).catch(() => ({ items: [] })),
     ]);
     setPackets(packetRes?.items || []);
-    setActivePaper(activeRes?.item || null);
     setActiveExecution(execRes?.item || null);
-    setJasonState(jsState || null);
     setJasonTrades(jsTrades?.items || []);
   };
 
@@ -208,22 +200,6 @@ export default function ModelArena() {
     return timelinePackets.find((p) => Number(p.id) === focusedPacketId) || timelinePackets[0] || null;
   }, [timelinePackets, focusedPacketId]);
 
-  const digest = useMemo(() => {
-    const totalAgents = rankedModels.length;
-    const totalPackets = filteredPackets.length;
-    const leader = rankedModels[0] || null;
-    const jState = jasonState?.state || {};
-    const jOpen = jasonState?.open_trade || null;
-    return {
-      totalAgents,
-      totalPackets,
-      leader,
-      jBalance: Number(jState.balance_usd || 0),
-      jActive: Boolean(jState.active),
-      jOpen,
-    };
-  }, [rankedModels, filteredPackets, jasonState]);
-
   const expandedModel = useMemo(
     () => rankedModels.find((m) => m.id === expandedModelId) || rankedModels[0] || null,
     [rankedModels, expandedModelId],
@@ -321,56 +297,21 @@ export default function ModelArena() {
         subtitle="Clean operator view: who is active, what changed recently, and why each trade happened."
       />
 
-      <div className="grid arena-digest-grid" style={{ marginBottom: 12 }}>
-        <div className="card glass-card compact arena-active-banner">
-          <div className="muted">Active Execution</div>
-          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{activeExecution?.agent_id || 'none selected'}</div>
-        </div>
-        <div className="card glass-card compact">
-          <div className="muted">Agents in view</div>
-          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.totalAgents}</div>
-        </div>
-        <div className="card glass-card compact">
-          <div className="muted">Decision packets</div>
-          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.totalPackets}</div>
-        </div>
-        <div className="card glass-card compact">
-          <div className="muted">Leader now</div>
-          <div className="kpi-value" style={{ fontSize: '1.1rem' }}>{digest.leader?.label || 'n/a'}</div>
-        </div>
-      </div>
-
-      <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', marginBottom: 12 }}>
-        <div className="card glass-card">
-          <h3 style={{ marginTop: 0 }}>What just happened (trades only)</h3>
-          <div className="trace-list">
-            {timelinePackets
-              .filter((p) => ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(String(p.action || '').toLowerCase()))
-              .slice(0, 10)
-              .map((p) => (
-                <div key={`digest-${p.id}`} className="arena-event-row">
-                  <div>
-                    <strong>{String(p.agent_id || 'unknown') === 'jason' ? 'GPT 5.4' : String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')}
-                    <div className="muted">{p.rationale || 'No rationale provided.'}</div>
-                  </div>
-                  <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
+      <div className="card glass-card" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Recent trade actions</h3>
+        <div className="trace-list">
+          {timelinePackets
+            .filter((p) => ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(String(p.action || '').toLowerCase()))
+            .slice(0, 10)
+            .map((p) => (
+              <div key={`digest-${p.id}`} className="arena-event-row">
+                <div>
+                  <strong>{String(p.agent_id || 'unknown') === 'jason' ? 'GPT 5.4' : String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')}
+                  <div className="muted">{p.rationale || 'No rationale provided.'}</div>
                 </div>
-              ))}
-          </div>
-        </div>
-
-        <div className="card glass-card">
-          <h3 style={{ marginTop: 0 }}>GPT 5.4 Snapshot</h3>
-          <div className="muted">Running: {digest.jActive ? 'yes' : 'no'}</div>
-          <div className="muted">Balance: {digest.jBalance.toFixed(2)} USD</div>
-          {digest.jOpen ? (
-            <>
-              <div className="muted">Open: {digest.jOpen.side?.toUpperCase()} {digest.jOpen.symbol}</div>
-              <div className="muted">Leverage: {Number(digest.jOpen.leverage || 0).toFixed(2)}x</div>
-              <div className="muted">Entry: {Number(digest.jOpen.entry_price || 0).toFixed(2)}</div>
-            </>
-          ) : <div className="muted">Open: none</div>}
-          <button className="btn" style={{ marginTop: 8 }} onClick={load}>Refresh</button>
+                <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
+              </div>
+            ))}
         </div>
       </div>
 
@@ -519,26 +460,6 @@ export default function ModelArena() {
             ))}
           </div>
         )}
-      </div>
-
-      <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>GPT 5.4 Recent Trades</h3>
-        <table className="responsive-table">
-          <thead><tr><th>Opened</th><th>Side</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>Status</th><th>PnL</th></tr></thead>
-          <tbody>
-            {jasonTrades.length === 0 ? <tr><td colSpan={7} className="muted">No trades yet.</td></tr> : jasonTrades.slice(0, 12).map((t) => (
-              <tr key={t.id}>
-                <td data-label="Opened">{t.opened_at_ms ? new Date(Number(t.opened_at_ms)).toLocaleString() : 'n/a'}</td>
-                <td data-label="Side">{String(t.side || '').toUpperCase()}</td>
-                <td data-label="Symbol">{t.symbol}</td>
-                <td data-label="Lev">{Number(t.leverage || 0).toFixed(1)}x</td>
-                <td data-label="Entry">{Number(t.entry_price || 0).toFixed(2)}</td>
-                <td data-label="Status">{t.status}</td>
-                <td data-label="PnL">{t.realized_pnl_usd == null ? 'n/a' : Number(t.realized_pnl_usd).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
 
       <div className="card glass-card compact" style={{ marginTop: 12 }}>

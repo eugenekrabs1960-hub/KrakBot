@@ -185,7 +185,7 @@ LIVE_PAPER_TEST_MAX_ACTIVE_STRATEGIES=3
 
 ## Jason Agent (GPT model in Model Arena)
 
-Jason is now wired as an Arena agent (`agent_id: jason`) with virtual Hyperliquid-style perp paper trading rules:
+A default Arena model agent is wired as `agent_id: jason` (display label can differ in UI) with virtual Hyperliquid-style perp paper trading rules:
 
 - Starting balance: `$1000`
 - Symbols: `BTC`, `ETH`, `SOL`
@@ -202,6 +202,12 @@ JASON_AGENT_MODEL=gpt-5.4
 JASON_LOOP_ENABLED=true
 JASON_LOOP_INTERVAL_SEC=60
 ```
+
+Adding more models later (API-key providers or OAuth-driven workers):
+
+- Give each model a unique `agent_id`.
+- Post decisions to `/api/agents/decision-packets` for Arena visibility.
+- If model should execute trades, route through execution APIs with guardrails enabled.
 
 Run + inspect:
 
