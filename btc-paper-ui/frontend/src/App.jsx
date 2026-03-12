@@ -101,6 +101,19 @@ function SharedChart({ state, theme }) {
 
 function fmt2(x) { return Number(x ?? 0).toFixed(2) }
 
+function fmtLA(ts) {
+  if (!ts) return '-'
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return String(ts)
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).format(d)
+}
+
 function prettyStatus(status) {
   return String(status || 'insufficient_data').replaceAll('_', ' ')
 }
@@ -193,7 +206,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <span className='badge'>PAPER ONLY · NO LIVE EXECUTION</span>
       </div>
       <div style={{ fontSize: 12, marginTop: 6 }}>
-        <strong>Track:</strong> {hstate.track} | <strong>Symbol:</strong> {hstate.symbol} | <strong>Latest:</strong> {latest.timestamp || '-'}
+        <strong>Track:</strong> {hstate.track} | <strong>Symbol:</strong> {hstate.symbol} | <strong>Latest:</strong> {fmtLA(latest.timestamp)}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
@@ -235,7 +248,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
           <tbody>
             {positions.slice(-10).map((p, i) => (
               <tr key={i}>
-                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.entry_liquidity || '-'} / {p.exit_liquidity || '-'}</td><td>{p.estimated_total_fees}</td><td>{p.open_time}</td>
+                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.entry_liquidity || '-'} / {p.exit_liquidity || '-'}</td><td>{p.estimated_total_fees}</td><td>{fmtLA(p.open_time)}</td>
               </tr>
             ))}
           </tbody>
@@ -271,7 +284,7 @@ function ModePanel({ modeKey, m, onAck }) {
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
-      <div style={{ fontSize: 12, opacity: .85 }}>Timeframe: {m?.timeframe} | Last scan: {m?.latest_scan_time}</div>
+      <div style={{ fontSize: 12, opacity: .85 }}>Timeframe: {m?.timeframe} | Last scan: {fmtLA(m?.latest_scan_time)}</div>
       {m?.notify_user && (
         <div style={{ marginTop: 8, border: '1px solid var(--danger)', padding: 8, borderRadius: 6 }}>
           <strong style={{ color: 'var(--danger)' }}>{m.notify_user.message}</strong>
@@ -319,8 +332,8 @@ function ModePanel({ modeKey, m, onAck }) {
           <div>Invalidation: {d.invalidation || '-'}</div>
           <div>Risk/Reward: {d.risk_reward_ratio || 0}</div>
           <div>Reason: {d.reason || '-'}</div>
-          <div>Latest scan time: {m?.latest_scan_time || '-'}</div>
-          <div>Latest decision time: {m?.latest_decision_time || '-'}</div>
+          <div>Latest scan time: {fmtLA(m?.latest_scan_time)}</div>
+          <div>Latest decision time: {fmtLA(m?.latest_decision_time)}</div>
 
           <div style={{ marginTop: 8 }}><strong>Open trade</strong></div>
           {openPos ? (
@@ -330,7 +343,7 @@ function ModePanel({ modeKey, m, onAck }) {
               <div>Gross unrealized PnL: {openPos.gross_unrealized_pnl ?? '-'}</div>
               <div>Net unrealized PnL: {openPos.net_unrealized_pnl ?? openPos.unrealized_pnl ?? '-'}</div>
               <div>Unrealized PnL (net): {openPos.unrealized_pnl}</div>
-              <div>Open time: {openPos.open_time}</div>
+              <div>Open time: {fmtLA(openPos.open_time)}</div>
               <div>Age: {tradeAge} min</div>
             </>
           ) : <div>None</div>}
@@ -345,6 +358,7 @@ function ModePanel({ modeKey, m, onAck }) {
               <div>Entry fee: {latestClosed.entry_fee ?? '-'}</div>
               <div>Close fee: {latestClosed.close_fee ?? '-'}</div>
               <div>Total fees: {latestClosed.total_fees ?? '-'}</div>
+              <div>Close time: {fmtLA(latestClosed.close_time)}</div>
               <div>Close reason: {latestClosed.close_reason}</div>
             </>
           ) : <div>None</div>}
@@ -357,7 +371,7 @@ function ModePanel({ modeKey, m, onAck }) {
           <thead><tr><th>Time</th><th>Status</th><th>Regime</th><th>R:R</th></tr></thead>
           <tbody>
             {(m?.history || []).slice(-8).reverse().map((r, i) => (
-              <tr key={i}><td>{r.timestamp}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>
+              <tr key={i}><td>{fmtLA(r.timestamp)}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>
             ))}
           </tbody>
         </table>
