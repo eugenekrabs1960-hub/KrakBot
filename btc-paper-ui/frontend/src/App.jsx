@@ -105,12 +105,19 @@ function prettyStatus(status) {
   return String(status || 'insufficient_data').replaceAll('_', ' ')
 }
 
-function scoreForMode(m) {
+function scoreMetaForMode(m) {
   const selected = m?.shadow_routing?.selected_strategy
   const candidates = m?.shadow_routing?.ranked_candidates || []
   const hit = candidates.find(c => c.strategy_key === m?.mode)
-  if (selected === m?.mode) return m?.shadow_routing?.selected_score ?? hit?.score ?? 0
-  return hit?.score ?? 0
+  const score = selected === m?.mode ? (m?.shadow_routing?.selected_score ?? hit?.score) : hit?.score
+  const eligible = hit?.eligible
+  const reason = hit?.reason || m?.shadow_routing?.selection_reason || 'score unavailable'
+
+  if (!hit) return { label: 'score unavailable', reason: 'No shadow-routing candidate data for this strategy.', numeric: null }
+  if (eligible === false || score === -9999 || score === -9999.0) return { label: 'not eligible', reason, numeric: null }
+  if (m?.strategy_status === 'insufficient_data') return { label: 'insufficient data', reason, numeric: score ?? null }
+  if (typeof score !== 'number' || Number.isNaN(score)) return { label: 'score unavailable', reason, numeric: null }
+  return { label: fmt2(score), reason, numeric: score }
 }
 
 function StrategyScorecard({ m }) {
@@ -119,7 +126,7 @@ function StrategyScorecard({ m }) {
   const metrics = m?.strategy_metrics || {}
   const learn = m?.learning_summary || {}
   const patterns = learn?.failure_patterns || {}
-  const score = scoreForMode(m)
+  const scoreMeta = scoreMetaForMode(m)
   return (
     <div className='panel' style={{ marginBottom: 12, background: 'var(--cardSoft)' }}>
       <h4 style={{ marginTop: 0, marginBottom: 8 }}>{sr.label || m?.mode}</h4>
@@ -129,7 +136,7 @@ function StrategyScorecard({ m }) {
         <div><strong>Status</strong><div>{prettyStatus(m?.strategy_status)}</div></div>
         <div><strong>Current regime</strong><div>{reg.regime || '-'}</div></div>
         <div><strong>Regime confidence</strong><div>{reg.confidence ?? '-'}</div></div>
-        <div><strong>Strategy score</strong><div>{fmt2(score)}</div></div>
+        <div><strong>Strategy score</strong><div>{scoreMeta.label}</div><div style={{ opacity: 0.75 }}>{scoreMeta.reason}</div></div>
         <div><strong>Win rate</strong><div>{fmt2(metrics.win_rate)}%</div></div>
         <div><strong>Expectancy</strong><div>{fmt2(metrics.expectancy)}</div></div>
         <div><strong>Net realized PnL</strong><div>{fmt2(metrics.realized_pnl)}</div></div>
