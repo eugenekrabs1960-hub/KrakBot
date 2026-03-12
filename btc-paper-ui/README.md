@@ -33,6 +33,8 @@ Local-only paper-trading dashboard.
   - `POST /api/hyperliquid/mock-open` (manual paper helper)
   - read-only Hyperliquid public market data (`allMids` + `candleSnapshot`) for scans
   - fallback synthetic feed only if public API is temporarily unavailable
+  - Hyperliquid perps base fee model in paper simulation (maker 1.5 bps / taker 4.5 bps)
+  - funding tracked as placeholder (`funding_mode=placeholder_zero`) until a real funding accrual model is introduced
   - no private execution and no live trading routes
 
 ## API

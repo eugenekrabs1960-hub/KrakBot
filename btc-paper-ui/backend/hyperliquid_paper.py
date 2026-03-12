@@ -27,9 +27,12 @@ class FuturesRiskLimits:
 
 @dataclass
 class FuturesFeeModel:
-    maker_bps: float = 2.0
+    # Hyperliquid perps base-rate defaults (tier 0): maker 0.015%, taker 0.045%
+    maker_bps: float = 1.5
     taker_bps: float = 4.5
     funding_rate_placeholder_bps_8h: float = 0.0
+    funding_mode: str = 'placeholder_zero'
+    fee_source: str = 'hyperliquid_perps_base_tier_0'
 
 
 @dataclass
@@ -43,6 +46,8 @@ class FuturesPosition:
     liquidation_price_estimate: float
     open_time: str
     fee_model: str = 'maker_taker_bps'
+    entry_liquidity: str = 'taker'
+    exit_liquidity: str = 'taker'
     estimated_entry_fee: float = 0.0
     estimated_exit_fee: float = 0.0
     estimated_total_fees: float = 0.0
@@ -157,6 +162,11 @@ class HyperliquidFuturesPaperTrack:
             'latest': None,
             'risk_limits': asdict(self.risk),
             'fee_model': asdict(self.fees),
+            'execution_fee_assumption': {
+                'entry_liquidity': 'taker',
+                'exit_liquidity': 'taker',
+                'note': 'Paper simulator assumes taker fills for conservative cost modeling.',
+            },
             'learning': {
                 'notes': 'Mock/public-style futures simulator track initialized.',
                 'status': 'training_bootstrap',
@@ -172,9 +182,12 @@ class HyperliquidFuturesPaperTrack:
             return round2(max(1.0, entry - move))
         return round2(entry + move)
 
-    def _estimate_fees(self, notional: float) -> tuple[float, float, float]:
-        entry_fee = notional * (self.fees.taker_bps / 10000.0)
-        exit_fee = notional * (self.fees.taker_bps / 10000.0)
+    def _fee_bps(self, liquidity: str) -> float:
+        return self.fees.maker_bps if liquidity == 'maker' else self.fees.taker_bps
+
+    def _estimate_fees(self, notional: float, entry_liquidity: str = 'taker', exit_liquidity: str = 'taker') -> tuple[float, float, float]:
+        entry_fee = notional * (self._fee_bps(entry_liquidity) / 10000.0)
+        exit_fee = notional * (self._fee_bps(exit_liquidity) / 10000.0)
         return round2(entry_fee), round2(exit_fee), round2(entry_fee + exit_fee)
 
     def _regime_from_market(self, tick: dict[str, float], candles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -285,7 +298,9 @@ class HyperliquidFuturesPaperTrack:
 
         margin_used = notional / lev
         liq = self._estimate_liq_price(side, px, lev)
-        efee, xfee, tfee = self._estimate_fees(notional)
+        entry_liq = self.state.get('execution_fee_assumption', {}).get('entry_liquidity', 'taker')
+        exit_liq = self.state.get('execution_fee_assumption', {}).get('exit_liquidity', 'taker')
+        efee, xfee, tfee = self._estimate_fees(notional, entry_liq, exit_liq)
 
         p = FuturesPosition(
             symbol=self.state['symbol'],
@@ -296,6 +311,8 @@ class HyperliquidFuturesPaperTrack:
             margin_used=round2(margin_used),
             liquidation_price_estimate=liq,
             open_time=now_iso(),
+            entry_liquidity=entry_liq,
+            exit_liquidity=exit_liq,
             estimated_entry_fee=efee,
             estimated_exit_fee=xfee,
             estimated_total_fees=tfee,

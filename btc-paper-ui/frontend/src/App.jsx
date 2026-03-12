@@ -180,6 +180,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   const regime = latest.regime || {}
   const risk = hstate.risk_limits || {}
   const fees = hstate.fee_model || {}
+  const feeAssumption = hstate.execution_fee_assumption || {}
   const positions = hstate.positions || []
   const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
   const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
@@ -206,7 +207,10 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <div><strong>Decision</strong><div>{latest?.decision?.status || '-'}</div></div>
         <div><strong>Maker fee (bps)</strong><div>{fees.maker_bps ?? '-'}</div></div>
         <div><strong>Taker fee (bps)</strong><div>{fees.taker_bps ?? '-'}</div></div>
+        <div><strong>Fee source</strong><div>{fees.fee_source || '-'}</div></div>
+        <div><strong>Funding mode</strong><div>{fees.funding_mode || '-'}</div></div>
         <div><strong>Funding placeholder (bps/8h)</strong><div>{fees.funding_rate_placeholder_bps_8h ?? '-'}</div></div>
+        <div><strong>PnL fee assumption</strong><div>{feeAssumption.entry_liquidity || '-'} / {feeAssumption.exit_liquidity || '-'}</div></div>
         <div><strong>Exposure used</strong><div>{fmt2(exposure)}</div></div>
         <div><strong>Max exposure</strong><div>{fmt2(risk.max_total_exposure_usd ?? 0)}</div></div>
         <div><strong>Max position notional</strong><div>{fmt2(risk.max_position_notional_usd ?? 0)}</div></div>
@@ -225,13 +229,13 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <table className='rows' style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Side</th><th>Qty</th><th>Entry</th><th>Leverage</th><th>Margin</th><th>Liq. est</th><th>Fees est</th><th>Open time</th>
+              <th>Side</th><th>Qty</th><th>Entry</th><th>Leverage</th><th>Margin</th><th>Liq. est</th><th>Fee mode</th><th>Fees est</th><th>Open time</th>
             </tr>
           </thead>
           <tbody>
             {positions.slice(-10).map((p, i) => (
               <tr key={i}>
-                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.estimated_total_fees}</td><td>{p.open_time}</td>
+                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.entry_liquidity || '-'} / {p.exit_liquidity || '-'}</td><td>{p.estimated_total_fees}</td><td>{p.open_time}</td>
               </tr>
             ))}
           </tbody>
