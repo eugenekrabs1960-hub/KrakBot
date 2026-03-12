@@ -22,6 +22,17 @@ INITIAL_BALANCE = 1000.0
 RISK_PROFILE_KEY = 'agent_jason_risk_profile'
 RISK_PROFILES = {'conservative','balanced','aggressive'}
 MAX_SNAPSHOT_AGE_MS = 20 * 60 * 1000
+SYMBOL_BLACKLIST_PREFIXES = ('TEST', 'DEV', 'FAKE')
+SYMBOL_BLACKLIST_VALUES = {'0G', '2Z'}
+TOP100_SYMBOLS = {
+    'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TRX','AVAX','DOT','LINK','MATIC','TON','SHIB','LTC',
+    'BCH','NEAR','UNI','ATOM','ETC','ICP','APT','FIL','ARB','OP','AAVE','INJ','XLM','SUI','HBAR',
+    'MKR','VET','ALGO','QNT','EGLD','AXS','SAND','MANA','THETA','XTZ','EOS','GRT','FLOW','CHZ','NEO',
+    'SNX','KAVA','RUNE','DYDX','CRV','LDO','APE','IMX','GMX','COMP','ZEC','DASH','CAKE','1INCH','ENJ',
+    'BAT','WOO','JASMY','IOTA','KSM','ZIL','ROSE','CELO','HOT','QTUM','RVN','ICX','ONT','SC','WAVES',
+    'ANKR','XDC','KLAY','MINA','FTM','GALA','BLUR','AR','STX','JTO','JUP','BONK','PEPE','SEI','PYTH',
+    'TIA','STRK','PENDLE','WIF','SUSHI','YFI','WLD','ORDI','RAY','RNDR','FET','GNO','CFX','LRC','KAS'
+}
 BENCHMARK_EXPORT_DIR = Path('/tmp/krakbot_training')
 
 
@@ -170,17 +181,36 @@ def get_risk_profile(db: Session):
 
 def _is_tradable_symbol(sym: str, row: dict, now_ms: int) -> bool:
     s = str(sym or '').upper().strip()
-    if not s or len(s) > 16:
+    if not s or len(s) < 3 or len(s) > 12:
         return False
-    if not re.match(r'^[A-Z0-9_\-]+$', s):
+    if not re.match(r'^[A-Z][A-Z0-9]{2,11}$', s):
         return False
+    if s in SYMBOL_BLACKLIST_VALUES or any(s.startswith(p) for p in SYMBOL_BLACKLIST_PREFIXES):
+        return False
+    if s not in TOP100_SYMBOLS:
+        return False
+
     ts = int(row.get('ts') or 0)
     if ts <= 0 or (now_ms - ts) > MAX_SNAPSHOT_AGE_MS:
         return False
+
     mid = float(row.get('mid_price') or 0.0)
     if mid <= 0:
         return False
+
+    # avoid micro/degenerate quote artifacts and implausible infinities
+    if mid < 1e-4 or mid > 10_000_000:
+        return False
+
+    # require non-trivial movement signal availability
+    r1 = abs(float(row.get('ret_1') or 0.0))
+    r5 = abs(float(row.get('ret_5') or 0.0))
+    r15 = abs(float(row.get('ret_15') or 0.0))
+    if max(r1, r5, r15) == 0:
+        return False
+
     return True
+
 
 def _latest_market_snapshot(db: Session) -> dict:
     rows = db.execute(
@@ -414,7 +444,7 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
     symbol = str(data.get('symbol') or 'BTC').upper()
     tradable = list(snapshot.keys())
     if symbol not in tradable:
-        symbol = tradable[0] if tradable else 'BTC'
+        symbol = 'BTC' if 'BTC' in tradable else (tradable[0] if tradable else 'BTC')
     leverage = float(data.get('leverage') or 1)
     allocation_pct = float(data.get('allocation_pct') or 0)
     confidence = float(data.get('confidence') or 0)
@@ -592,7 +622,7 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
         d.action = 'hold'
     tradable = list(snapshot.keys())
     if d.symbol not in tradable:
-        d.symbol = tradable[0] if tradable else 'BTC'
+        d.symbol = 'BTC' if 'BTC' in tradable else (tradable[0] if tradable else 'BTC')
     d.leverage = max(1.0, min(20.0, d.leverage))
     d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
     d.confidence = max(0.0, min(1.0, d.confidence))

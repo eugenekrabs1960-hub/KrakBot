@@ -200,3 +200,30 @@ def test_benchmark_export_job_writes_csv(tmp_path):
         assert out['ok'] is True
         assert Path(out['path']).exists()
         assert Path(out['manifest_path']).exists()
+
+
+def test_symbol_filter_rejects_short_or_blacklisted_symbols(tmp_path):
+    eng = _prep_db(tmp_path / 'jason10.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    from app.services.jason_agent import _is_tradable_symbol, _now_ms
+    now = _now_ms()
+    base = {'ts': now, 'mid_price': 1.0, 'ret_1': 0.001, 'ret_5': 0.001, 'ret_15': 0.001}
+
+    assert _is_tradable_symbol('BTC', base, now) is True
+    assert _is_tradable_symbol('DOGE', base, now) is True
+    assert _is_tradable_symbol('0G', base, now) is False
+    assert _is_tradable_symbol('2Z', base, now) is False
+    assert _is_tradable_symbol('AB', base, now) is False
+    assert _is_tradable_symbol('TESTCOIN', base, now) is False
+
+
+def test_non_top100_symbol_rejected(tmp_path):
+    eng = _prep_db(tmp_path / 'jason11.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    from app.services.jason_agent import _is_tradable_symbol, _now_ms
+    now = _now_ms()
+    row = {'ts': now, 'mid_price': 1.0, 'ret_1': 0.001, 'ret_5': 0.001, 'ret_15': 0.001}
+    assert _is_tradable_symbol('DOGE', row, now) is True
+    assert _is_tradable_symbol('ZZZZ', row, now) is False
