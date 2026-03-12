@@ -422,6 +422,21 @@ export default function ModelArena() {
     return null;
   }, [packets]);
 
+  const tuningHints = useMemo(() => {
+    const reasons = (policyHealth?.deny_reason_counts || []) as Array<{reason: string; count: number}>;
+    if (!reasons.length) return [] as string[];
+    const top = reasons[0]?.reason;
+    const hints: string[] = [];
+    if (top === 'open_too_soon_after_last_position') hints.push('Pacing is the main blocker. Consider reducing min_open_interval_sec (e.g. 300 → 240) if you want more activity.');
+    if (top === 'confidence_too_low_for_slot') hints.push('Slot confidence thresholds are the main blocker. Consider lowering slot2/slot3 thresholds slightly or improving model prompt quality.');
+    if (top === 'projected_allocation_too_high') hints.push('Total/per-position allocation caps are limiting opens. Review max_per_position_allocation_pct and max_total_allocation_pct.');
+    if (top === 'projected_directional_exposure_too_high') hints.push('Directional concentration is high. Either reduce same-side aggressiveness or increase diversification across symbols/buckets.');
+    if (top === 'correlation_bucket_limit') hints.push('Correlation bucket limit is binding. Consider expanding allowed buckets map for diversification.');
+    if (top === 'slot_limit_reached') hints.push('Max open positions reached often. Keep as-is for discipline, or raise max_open_positions carefully (e.g. 3 → 4).');
+    if (!hints.length) hints.push('No dominant blocker detected. Keep current gate settings and monitor allow/deny rates over a larger window.');
+    return hints;
+  }, [policyHealth]);
+
   const activeTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'open'), [expandedTradeRows]);
   const closedTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'closed'), [expandedTradeRows]);
   const inferredTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'inferred'), [expandedTradeRows]);
@@ -791,6 +806,14 @@ export default function ModelArena() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="card compact" style={{ marginTop: 10 }}>
+            <strong>Auto tuning hints</strong>
+            <ul style={{ margin: '8px 0 0 16px' }}>
+              {tuningHints.map((h, i) => <li key={`hint-${i}`} className="muted">{h}</li>)}
+              {tuningHints.length === 0 ? <li className="muted">No hints yet (need deny history).</li> : null}
+            </ul>
           </div>
 
           <div className="card compact" style={{ marginTop: 10 }}>
