@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -178,3 +179,24 @@ def test_open_market_symbol_allowed_and_benchmark_logged(tmp_path):
         ctx = str(row.get('context_json') or '')
         assert 'benchmark_reasoning' in ctx
         assert 'BTC' in ctx and 'ETH' in ctx and 'SOL' in ctx
+
+
+def test_benchmark_export_job_writes_csv(tmp_path):
+    eng = _prep_db(tmp_path / 'jason9.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        jason_agent.execute_jason_decision(
+            db,
+            action='long',
+            symbol='BTC',
+            leverage=3,
+            allocation_pct=10,
+            confidence=0.6,
+            rationale='seed row',
+            decision_source='oauth_gpt54',
+        )
+        out = jason_agent.export_benchmark_reasoning_csv(db, limit=50)
+        assert out['ok'] is True
+        assert Path(out['path']).exists()
+        assert Path(out['manifest_path']).exists()

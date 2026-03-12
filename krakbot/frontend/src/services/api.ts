@@ -241,3 +241,10 @@ export async function getJasonBenchmarkReasoning(limit = 200) {
   const res = await fetch(`${API_BASE}/agents/jason/benchmark-reasoning?limit=${bounded}`);
   return parseJsonOrThrow(res);
 }
+
+
+export async function exportJasonBenchmarkReasoningCsv(limit = 5000) {
+  const bounded = Math.max(1, Math.min(limit, 50000));
+  const res = await fetch(`${API_BASE}/agents/jason/benchmark-reasoning/export-job?limit=${bounded}`, { method: 'POST' });
+  return parseJsonOrThrow(res);
+}

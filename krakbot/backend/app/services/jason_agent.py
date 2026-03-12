@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import re
 import time
+from pathlib import Path
 from dataclasses import dataclass
 
 import requests
@@ -19,6 +22,7 @@ INITIAL_BALANCE = 1000.0
 RISK_PROFILE_KEY = 'agent_jason_risk_profile'
 RISK_PROFILES = {'conservative','balanced','aggressive'}
 MAX_SNAPSHOT_AGE_MS = 20 * 60 * 1000
+BENCHMARK_EXPORT_DIR = Path('/tmp/krakbot_training')
 
 
 @dataclass
@@ -649,6 +653,66 @@ def export_benchmark_reasoning_rows(db: Session, *, agent_id: str = JASON_AGENT_
             'sol': br.get('SOL') or {},
         })
     return {'ok': True, 'items': out, 'count': len(out)}
+
+
+def export_benchmark_reasoning_csv(db: Session, *, agent_id: str = JASON_AGENT_ID, limit: int = 5000):
+    payload = export_benchmark_reasoning_rows(db, agent_id=agent_id, limit=limit)
+    items = payload.get('items') or []
+
+    BENCHMARK_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    now_ms = _now_ms()
+    prefix = f'jason_benchmark_{agent_id}_{now_ms}'
+    csv_path = BENCHMARK_EXPORT_DIR / f'{prefix}.csv'
+    manifest_path = BENCHMARK_EXPORT_DIR / f'{prefix}.manifest.json'
+
+    fieldnames = [
+        'packet_id','ts','agent_id','trade_symbol','trade_action','trade_confidence','trade_rationale',
+        'btc_bias','btc_score','btc_ret_1','btc_ret_5','btc_ret_15','btc_reasoning',
+        'eth_bias','eth_score','eth_ret_1','eth_ret_5','eth_ret_15','eth_reasoning',
+        'sol_bias','sol_score','sol_ret_1','sol_ret_5','sol_ret_15','sol_reasoning',
+    ]
+
+    with csv_path.open('w', newline='', encoding='utf-8') as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for it in items:
+            btc = it.get('btc') or {}
+            eth = it.get('eth') or {}
+            sol = it.get('sol') or {}
+            w.writerow({
+                'packet_id': it.get('packet_id'),
+                'ts': it.get('ts'),
+                'agent_id': it.get('agent_id'),
+                'trade_symbol': it.get('trade_symbol'),
+                'trade_action': it.get('trade_action'),
+                'trade_confidence': it.get('trade_confidence'),
+                'trade_rationale': it.get('trade_rationale'),
+                'btc_bias': btc.get('bias'), 'btc_score': btc.get('score'), 'btc_ret_1': btc.get('ret_1'), 'btc_ret_5': btc.get('ret_5'), 'btc_ret_15': btc.get('ret_15'), 'btc_reasoning': btc.get('reasoning'),
+                'eth_bias': eth.get('bias'), 'eth_score': eth.get('score'), 'eth_ret_1': eth.get('ret_1'), 'eth_ret_5': eth.get('ret_5'), 'eth_ret_15': eth.get('ret_15'), 'eth_reasoning': eth.get('reasoning'),
+                'sol_bias': sol.get('bias'), 'sol_score': sol.get('score'), 'sol_ret_1': sol.get('ret_1'), 'sol_ret_5': sol.get('ret_5'), 'sol_ret_15': sol.get('ret_15'), 'sol_reasoning': sol.get('reasoning'),
+            })
+
+    dataset_hash = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+    manifest = {
+        'schema_version': 'arena_benchmark_v1',
+        'kind': 'jason_benchmark_reasoning',
+        'created_at_ms': now_ms,
+        'agent_id': agent_id,
+        'rows': len(items),
+        'limit': limit,
+        'dataset_hash_sha256': dataset_hash,
+        'file_path': str(csv_path),
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+
+    return {
+        'ok': True,
+        'path': str(csv_path),
+        'manifest_path': str(manifest_path),
+        'rows': len(items),
+        'dataset_hash_sha256': dataset_hash,
+    }
+
 
 def list_jason_trades(db: Session, limit: int = 100):
     rows = db.execute(
