@@ -218,6 +218,10 @@ curl -s http://localhost:8010/api/agents/jason/loop-status
 curl -s http://localhost:8010/api/agents/jason/state
 curl -s 'http://localhost:8010/api/agents/jason/trades?limit=50'
 curl -s 'http://localhost:8010/api/agents/decision-packets?agent_id=jason&limit=50'
+# oauth worker decision post (explicit source telemetry)
+curl -s -X POST http://localhost:8010/api/agents/jason/execute-oauth-decision \
+  -H 'content-type: application/json' \
+  -d '{"action":"hold","symbol":"BTC","leverage":1,"allocation_pct":0,"confidence":0.55,"rationale":"waiting for setup"}'
 ```
 
 ## Live Trading Guard (real-money lockbox)

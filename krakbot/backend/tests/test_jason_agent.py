@@ -57,12 +57,17 @@ def test_execute_jason_decision_path(tmp_path):
             allocation_pct=20,
             confidence=0.7,
             rationale='ETH trend stronger than BTC on short window',
+            decision_source='oauth_gpt54',
         )
         assert out['ok'] is True
         assert out['decision']['symbol'] == 'ETH'
 
         st = jason_agent.get_jason_state(db)
         assert st['open_trade'] is not None
+
+        row = db.execute(text("SELECT execution_json FROM agent_decision_packets ORDER BY id DESC LIMIT 1")).mappings().first()
+        assert row is not None
+        assert 'oauth_gpt54' in str(row.get('execution_json'))
 
 
 def test_rule_based_runner_without_openai(tmp_path):

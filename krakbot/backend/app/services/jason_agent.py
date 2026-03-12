@@ -329,7 +329,7 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
     return Decision(action=action, symbol=symbol, leverage=leverage, allocation_pct=allocation_pct, confidence=confidence, rationale=rationale)
 
 
-def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict):
+def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict, decision_source: str):
     open_trade = _get_open_trade(db)
     results: dict = {'decision': decision.__dict__}
 
@@ -356,9 +356,9 @@ def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict
         action=decision.action,
         confidence=decision.confidence,
         rationale=decision.rationale,
-        context={'snapshot': snapshot, 'state': state},
+        context={'snapshot': snapshot, 'state': state, 'decision_source': decision_source},
         risk={'max_leverage': 20, 'max_allocation_pct': 50, 'paper_money': True},
-        execution={'mode': 'virtual_hyperliquid_perps', 'result': results},
+        execution={'mode': 'virtual_hyperliquid_perps', 'decision_source': decision_source, 'result': results},
         outcome={'balance_usd': state.get('balance_usd')},
     )
 
@@ -379,7 +379,7 @@ def run_jason_once(db: Session):
         return {'ok': False, 'error': 'balance_zero', 'state': state}
 
     decision = _ask_openai(snapshot, state, _get_open_trade(db))
-    return _apply_decision(db, decision, state, snapshot)
+    return _apply_decision(db, decision, state, snapshot, decision_source='oauth_gpt54')
 
 
 def run_jason_rule_based_once(db: Session):
@@ -400,9 +400,9 @@ def run_jason_rule_based_once(db: Session):
         ret1 = float((snapshot.get(sym) or {}).get('ret_1') or 0.0)
         if (open_trade.get('side') == 'long' and ret1 < 0) or (open_trade.get('side') == 'short' and ret1 > 0):
             d = Decision(action='close', symbol=sym, leverage=1, allocation_pct=0, confidence=0.55, rationale='Rule fallback: momentum flipped against open position; closing risk.')
-            return _apply_decision(db, d, state, snapshot)
+            return _apply_decision(db, d, state, snapshot, decision_source='rule_fallback')
         d = Decision(action='hold', symbol=sym, leverage=1, allocation_pct=0, confidence=0.52, rationale='Rule fallback: keep current position while momentum still supportive.')
-        return _apply_decision(db, d, state, snapshot)
+        return _apply_decision(db, d, state, snapshot, decision_source='rule_fallback')
 
     ranked = sorted(snapshot.items(), key=lambda x: abs(float((x[1] or {}).get('ret_1') or 0.0)), reverse=True)
     pick_sym, pick_data = ranked[0]
@@ -419,10 +419,10 @@ def run_jason_rule_based_once(db: Session):
             confidence=min(0.8, 0.55 + min(abs(ret1) * 100, 0.25)),
             rationale='Rule fallback: strongest short-horizon momentum across BTC/ETH/SOL.',
         )
-    return _apply_decision(db, d, state, snapshot)
+    return _apply_decision(db, d, state, snapshot, decision_source='rule_fallback')
 
 
-def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: float, allocation_pct: float, confidence: float, rationale: str):
+def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: float, allocation_pct: float, confidence: float, rationale: str, decision_source: str = 'oauth_gpt54'):
     state = _load_state(db)
     snapshot = _latest_market_snapshot(db)
     if not snapshot:
@@ -450,7 +450,11 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
     d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
     d.confidence = max(0.0, min(1.0, d.confidence))
 
-    return _apply_decision(db, d, state, snapshot)
+    src = str(decision_source or 'oauth_gpt54').lower()
+    if src not in ('oauth_gpt54', 'rule_fallback'):
+        src = 'oauth_gpt54'
+
+    return _apply_decision(db, d, state, snapshot, decision_source=src)
 
 
 def get_jason_state(db: Session):

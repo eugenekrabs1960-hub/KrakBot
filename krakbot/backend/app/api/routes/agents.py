@@ -29,6 +29,7 @@ class JasonDecisionRequest(BaseModel):
     allocation_pct: float = Field(default=0.0)
     confidence: float = Field(default=0.0)
     rationale: str = Field(default='No rationale provided')
+    decision_source: str = Field(default='oauth_gpt54')
 
 
 @router.post('/decision-packets')
@@ -83,6 +84,21 @@ def jason_execute_decision(payload: JasonDecisionRequest, db: Session = Depends(
         allocation_pct=payload.allocation_pct,
         confidence=payload.confidence,
         rationale=payload.rationale,
+        decision_source=payload.decision_source,
+    )
+
+
+@router.post('/jason/execute-oauth-decision')
+def jason_execute_oauth_decision(payload: JasonDecisionRequest, db: Session = Depends(get_db)):
+    return execute_jason_decision(
+        db,
+        action=payload.action,
+        symbol=payload.symbol,
+        leverage=payload.leverage,
+        allocation_pct=payload.allocation_pct,
+        confidence=payload.confidence,
+        rationale=payload.rationale,
+        decision_source='oauth_gpt54',
     )
 
 
