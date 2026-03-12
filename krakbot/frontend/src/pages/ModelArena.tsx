@@ -8,6 +8,8 @@ import {
   getJasonRiskProfile,
   getHyperliquidExecutionHealth,
   getLiveTradingGuard,
+  getJasonUniverse,
+  setJasonUniverse,
   setJasonRiskProfile,
   setActiveExecutionModel,
 } from '../services/api';
@@ -52,6 +54,7 @@ export default function ModelArena() {
   const [riskProfile, setRiskProfile] = useState<'conservative'|'balanced'|'aggressive'>('balanced');
   const [hlHealth, setHlHealth] = useState<any>(null);
   const [liveGuard, setLiveGuard] = useState<any>(null);
+  const [universeText, setUniverseText] = useState('');
   const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -79,18 +82,20 @@ export default function ModelArena() {
   };
 
   const loadSecondary = async () => {
-    const [jsTrades, jsState, risk, hl, guard] = await Promise.all([
+    const [jsTrades, jsState, risk, hl, guard, uni] = await Promise.all([
       getJasonTrades(20).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
       getHyperliquidExecutionHealth().catch(() => ({ item: null })),
       getLiveTradingGuard().catch(() => ({ item: null })),
+      getJasonUniverse().catch(() => ({ symbols: [] })),
     ]);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
     setRiskProfile((risk?.profile || 'balanced') as any);
     setHlHealth(hl?.item || null);
     setLiveGuard(guard?.item || null);
+    setUniverseText((uni?.symbols || []).join(','));
   };
 
   const refreshAll = async () => {
@@ -98,6 +103,18 @@ export default function ModelArena() {
     void loadSecondary();
   };
 
+
+
+  async function saveUniverse() {
+    const symbols = universeText
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    try {
+      await setJasonUniverse(symbols);
+      await loadSecondary();
+    } catch {}
+  }
   useEffect(() => {
     void loadCore();
     const t = setTimeout(() => { void loadSecondary(); }, 50);
@@ -494,6 +511,16 @@ export default function ModelArena() {
               );
             })()}
           </div>
+          {expandedModel.id === 'jason' ? (
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Tradable Universe</strong>
+            <div className="muted" style={{ marginBottom: 6 }}>Editable comma-separated symbols (default top-100 set).</div>
+            <textarea value={universeText} onChange={(e) => setUniverseText(e.target.value)} rows={3} style={{ width: '100%' }} />
+            <div className="toolbar" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={saveUniverse}>Save Universe</button>
+            </div>
+          </div>
+          ) : null}
           <div className="card compact" style={{ marginBottom: 10 }}>
             <strong>Risk Profile</strong>
             <div className="toolbar" style={{ marginTop: 8 }}>

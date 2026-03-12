@@ -34,6 +34,7 @@ TOP100_SYMBOLS = {
     'TIA','STRK','PENDLE','WIF','SUSHI','YFI','WLD','ORDI','RAY','RNDR','FET','GNO','CFX','LRC','KAS'
 }
 BENCHMARK_EXPORT_DIR = Path('/tmp/krakbot_training')
+UNIVERSE_KEY = 'agent_jason_tradable_universe'
 
 
 @dataclass
@@ -179,7 +180,50 @@ def get_risk_profile(db: Session):
 
 
 
-def _is_tradable_symbol(sym: str, row: dict, now_ms: int) -> bool:
+
+def _load_tradable_universe(db: Session) -> set[str]:
+    row = db.execute(text("SELECT value FROM system_state WHERE key=:k LIMIT 1"), {'k': UNIVERSE_KEY}).mappings().first()
+    if not row:
+        return set(TOP100_SYMBOLS)
+    v = row.get('value')
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except Exception:
+            v = {'symbols': []}
+    symbols = [str(x).upper().strip() for x in (v or {}).get('symbols', []) if str(x).strip()]
+    out = {x for x in symbols if re.match(r'^[A-Z][A-Z0-9]{2,11}$', x)}
+    return out or set(TOP100_SYMBOLS)
+
+
+def get_tradable_universe(db: Session):
+    syms = sorted(_load_tradable_universe(db))
+    return {'ok': True, 'symbols': syms, 'count': len(syms)}
+
+
+def set_tradable_universe(db: Session, symbols: list[str]):
+    cleaned = sorted({str(x).upper().strip() for x in (symbols or []) if str(x).strip()})
+    cleaned = [x for x in cleaned if re.match(r'^[A-Z][A-Z0-9]{2,11}$', x)]
+    if len(cleaned) < 3:
+        return {'ok': False, 'error': 'universe_too_small'}
+    payload = json.dumps({'symbols': cleaned})
+    if _dialect_name(db) == 'postgresql':
+        db.execute(text("""
+            INSERT INTO system_state(key, value, updated_at)
+            VALUES (:k, CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+        """), {'k': UNIVERSE_KEY, 'payload': payload})
+    else:
+        db.execute(text("""
+            INSERT INTO system_state(key, value, updated_at)
+            VALUES (:k, :payload, CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        """), {'k': UNIVERSE_KEY, 'payload': payload})
+    db.commit()
+    return {'ok': True, 'symbols': cleaned, 'count': len(cleaned)}
+
+
+def _is_tradable_symbol(sym: str, row: dict, now_ms: int, allowed: set[str]) -> bool:
     s = str(sym or '').upper().strip()
     if not s or len(s) < 3 or len(s) > 12:
         return False
@@ -187,7 +231,7 @@ def _is_tradable_symbol(sym: str, row: dict, now_ms: int) -> bool:
         return False
     if s in SYMBOL_BLACKLIST_VALUES or any(s.startswith(p) for p in SYMBOL_BLACKLIST_PREFIXES):
         return False
-    if s not in TOP100_SYMBOLS:
+    if s not in allowed:
         return False
 
     ts = int(row.get('ts') or 0)
@@ -225,11 +269,12 @@ def _latest_market_snapshot(db: Session) -> dict:
     ).mappings().all()
     out: dict[str, dict] = {}
     now_ms = _now_ms()
+    allowed = _load_tradable_universe(db)
     for r in rows:
         sym = str(r.get('symbol') or '').upper()
         if sym in out:
             continue
-        if not _is_tradable_symbol(sym, r, now_ms):
+        if not _is_tradable_symbol(sym, r, now_ms, allowed):
             continue
         out[sym] = {
             'ts': int(r.get('ts') or 0),

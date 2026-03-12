@@ -210,12 +210,12 @@ def test_symbol_filter_rejects_short_or_blacklisted_symbols(tmp_path):
     now = _now_ms()
     base = {'ts': now, 'mid_price': 1.0, 'ret_1': 0.001, 'ret_5': 0.001, 'ret_15': 0.001}
 
-    assert _is_tradable_symbol('BTC', base, now) is True
-    assert _is_tradable_symbol('DOGE', base, now) is True
-    assert _is_tradable_symbol('0G', base, now) is False
-    assert _is_tradable_symbol('2Z', base, now) is False
-    assert _is_tradable_symbol('AB', base, now) is False
-    assert _is_tradable_symbol('TESTCOIN', base, now) is False
+    assert _is_tradable_symbol('BTC', base, now, {'BTC','DOGE'}) is True
+    assert _is_tradable_symbol('DOGE', base, now, {'BTC','DOGE'}) is True
+    assert _is_tradable_symbol('0G', base, now, {'BTC','DOGE'}) is False
+    assert _is_tradable_symbol('2Z', base, now, {'BTC','DOGE'}) is False
+    assert _is_tradable_symbol('AB', base, now, {'BTC','DOGE'}) is False
+    assert _is_tradable_symbol('TESTCOIN', base, now, {'BTC','DOGE'}) is False
 
 
 def test_non_top100_symbol_rejected(tmp_path):
@@ -225,5 +225,5 @@ def test_non_top100_symbol_rejected(tmp_path):
     from app.services.jason_agent import _is_tradable_symbol, _now_ms
     now = _now_ms()
     row = {'ts': now, 'mid_price': 1.0, 'ret_1': 0.001, 'ret_5': 0.001, 'ret_15': 0.001}
-    assert _is_tradable_symbol('DOGE', row, now) is True
-    assert _is_tradable_symbol('ZZZZ', row, now) is False
+    assert _is_tradable_symbol('DOGE', row, now, {'DOGE'}) is True
+    assert _is_tradable_symbol('ZZZZ', row, now, {'DOGE'}) is False

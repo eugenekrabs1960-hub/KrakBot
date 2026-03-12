@@ -266,3 +266,18 @@ export async function getLiveTradingGuard() {
   const res = await fetch(`${API_BASE}/control/live-trading`);
   return parseJsonOrThrow(res);
 }
+
+
+export async function getJasonUniverse() {
+  const res = await fetch(`${API_BASE}/agents/jason/universe`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setJasonUniverse(symbols: string[]) {
+  const res = await fetch(`${API_BASE}/agents/jason/universe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols }),
+  });
+  return parseJsonOrThrow(res);
+}

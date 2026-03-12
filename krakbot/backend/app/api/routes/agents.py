@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
 from app.core.config import settings
-from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile, export_benchmark_reasoning_rows, export_benchmark_reasoning_csv
+from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile, export_benchmark_reasoning_rows, export_benchmark_reasoning_csv, get_tradable_universe, set_tradable_universe
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -34,6 +34,10 @@ class JasonDecisionRequest(BaseModel):
 
 class JasonRiskProfileRequest(BaseModel):
     profile: str = Field(default='balanced')
+
+
+class JasonUniverseRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
 
 
 @router.post('/decision-packets')
@@ -128,9 +132,19 @@ def jason_trades(limit: int = 100, db: Session = Depends(get_db)):
 
 @router.get('/jason/benchmark-reasoning')
 def jason_benchmark_reasoning(limit: int = 500, db: Session = Depends(get_db)):
-    return export_benchmark_reasoning_rows, export_benchmark_reasoning_csv(db, limit=limit)
+    return export_benchmark_reasoning_rows(db, limit=limit)
 
 
 @router.post('/jason/benchmark-reasoning/export-job')
 def jason_benchmark_reasoning_export_job(limit: int = 5000, db: Session = Depends(get_db)):
     return export_benchmark_reasoning_csv(db, limit=limit)
+
+
+@router.get('/jason/universe')
+def jason_universe(db: Session = Depends(get_db)):
+    return get_tradable_universe(db)
+
+
+@router.post('/jason/universe')
+def jason_set_universe(payload: JasonUniverseRequest, db: Session = Depends(get_db)):
+    return set_tradable_universe(db, payload.symbols)
