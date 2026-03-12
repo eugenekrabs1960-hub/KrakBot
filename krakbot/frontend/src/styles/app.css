@@ -137,6 +137,23 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
 }
 .arena-stats strong { font-variant-numeric: tabular-nums; font-size: 1.02rem; }
 .arena-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.arena-board { display: grid; gap: 8px; }
+.arena-board-row {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.arena-board-row.active { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(139,92,246,0.45); }
+.arena-board-pnl { font-weight: 700; font-variant-numeric: tabular-nums; }
 .arena-compare-pane {
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.02);

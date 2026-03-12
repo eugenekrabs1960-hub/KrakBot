@@ -58,6 +58,7 @@ export default function ModelArena() {
   const [timeFilter, setTimeFilter] = useState<'1h' | '6h' | '24h' | 'all'>('6h');
   const [focusedPacketId, setFocusedPacketId] = useState<number | null>(null);
   const [showInspector, setShowInspector] = useState(false);
+  const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   const load = async () => {
     const [packetRes, activeRes, execRes, jsState, jsTrades] = await Promise.all([
@@ -179,6 +180,7 @@ export default function ModelArena() {
   useEffect(() => {
     if (rankedModels.length === 0) {
       setSelected([]);
+      setExpandedModelId(null);
       return;
     }
     setSelected((prev) => {
@@ -187,6 +189,7 @@ export default function ModelArena() {
       const add = rankedModels.map((m) => m.id).filter((id) => !filtered.includes(id));
       return [...filtered, ...add].slice(0, 2);
     });
+    setExpandedModelId((prev) => prev && rankedModels.some((m) => m.id === prev) ? prev : rankedModels[0].id);
   }, [rankedModels]);
 
   const selectedModels = rankedModels.filter((m) => selected.includes(m.id)).slice(0, 2);
@@ -219,6 +222,44 @@ export default function ModelArena() {
       jOpen,
     };
   }, [rankedModels, filteredPackets, jasonState]);
+
+  const expandedModel = useMemo(
+    () => rankedModels.find((m) => m.id === expandedModelId) || rankedModels[0] || null,
+    [rankedModels, expandedModelId],
+  );
+
+  const expandedModelPackets = useMemo(() => {
+    if (!expandedModel) return [] as any[];
+    return filteredPackets.filter((p) => String(p.agent_id || '') === expandedModel.id).slice(0, 40);
+  }, [filteredPackets, expandedModel]);
+
+  const expandedTradeRows = useMemo(() => {
+    if (!expandedModel) return [] as any[];
+    if (expandedModel.id === 'jason' && jasonTrades.length > 0) {
+      return jasonTrades.slice(0, 20).map((t) => ({
+        key: `jt-${t.id}`,
+        ts: t.opened_at_ms,
+        action: t.side,
+        symbol: t.symbol,
+        leverage: `${Number(t.leverage || 0).toFixed(1)}x`,
+        entry: Number(t.entry_price || 0).toFixed(2),
+        pnl: t.realized_pnl_usd == null ? 'n/a' : Number(t.realized_pnl_usd).toFixed(2),
+      }));
+    }
+
+    return expandedModelPackets
+      .filter((p) => ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(String(p.action || '').toLowerCase()))
+      .slice(0, 20)
+      .map((p) => ({
+        key: `dp-${p.id}`,
+        ts: p.ts,
+        action: String(p.action || '').toUpperCase(),
+        symbol: p.symbol,
+        leverage: p.execution_json?.leverage ? `${p.execution_json.leverage}x` : 'n/a',
+        entry: p.execution_json?.entry_price ? Number(p.execution_json.entry_price).toFixed(2) : 'n/a',
+        pnl: p.outcome_json?.realized_pnl_usd != null ? Number(p.outcome_json.realized_pnl_usd).toFixed(2) : 'n/a',
+      }));
+  }, [expandedModel, expandedModelPackets, jasonTrades]);
 
   const toggleSelection = (id: string) => {
     setSelected((prev) => {
@@ -337,50 +378,73 @@ export default function ModelArena() {
       </div>
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Leaderboard</h3>
-        <div className="muted" style={{ marginBottom: 10 }}>Top cards are ranked by blended score (PnL, win-rate, confidence, activity).</div>
-        <div className="arena-grid">
+        <h3 style={{ marginTop: 0 }}>Battle Board</h3>
+        <div className="muted" style={{ marginBottom: 10 }}>Click a model row to open its reasoning and trade log.</div>
+        <div className="arena-board">
           {rankedModels.length === 0 ? (
-            <div className="card glass-card">No decision packets in this filter scope.</div>
-          ) : (
-            rankedModels.map((model, idx) => (
-              <article key={model.id} className={`card glass-card arena-card ${selected.includes(model.id) ? 'selected' : ''}`}>
-              <div className="arena-card-head">
-                <div>
-                  <div className="muted">Rank #{idx + 1}</div>
-                  <h3>{model.label}</h3>
-                </div>
-                <span className={`badge ${model.status === 'online' ? 'good' : 'warn'}`}>{model.status}</span>
+            <div className="muted">No decision packets in this filter scope.</div>
+          ) : rankedModels.map((model, idx) => (
+            <button key={model.id} className={`arena-board-row ${expandedModel?.id === model.id ? 'active' : ''}`} onClick={() => setExpandedModelId(model.id)}>
+              <div>
+                <strong>#{idx + 1} {model.label}</strong>
+                <div className="muted">{model.symbols.join(', ') || 'n/a'} · {model.trades} trades / {model.decisions} decisions</div>
               </div>
-              <div className="arena-stats">
-                <div><span className="muted">PnL</span><strong>{model.pnl.toFixed(2)} USD</strong></div>
-                <div><span className="muted">Win rate</span><strong>{pct(model.winRate)}</strong></div>
-                <div><span className="muted">Trades</span><strong>{model.trades}</strong></div>
-                <div><span className="muted">Decisions</span><strong>{model.decisions}</strong></div>
-                <div><span className="muted">Confidence</span><strong>{pct(model.avgConfidence * 100)}</strong></div>
-              </div>
-              <div className="muted">Symbols: {model.symbols.length > 0 ? model.symbols.join(', ') : 'n/a'}</div>
-              <div className="toolbar">
-                <button className={`btn ${selected.includes(model.id) ? 'active' : ''}`} onClick={() => toggleSelection(model.id)}>
-                  {selected.includes(model.id) ? 'Selected' : 'Compare'}
-                </button>
-                <button
-                  className={`btn ${activeExecution?.agent_id === model.id ? 'active' : ''}`}
-                  onClick={() => {
-                    if (activeExecution?.agent_id === model.id) return;
-                    setSwitchMsg('');
-                    setSwitchCandidate(model.id);
-                  }}
-                  disabled={activeExecution?.agent_id === model.id}
-                >
-                  {activeExecution?.agent_id === model.id ? 'Active' : 'Set Active'}
-                </button>
-              </div>
-              </article>
-            ))
-          )}
+              <div className="arena-board-pnl">{model.pnl.toFixed(2)} USD</div>
+            </button>
+          ))}
         </div>
       </div>
+
+      {expandedModel && (
+        <div className="card glass-card" style={{ marginBottom: 12 }}>
+          <div className="arena-card-head">
+            <div>
+              <h3 style={{ marginTop: 0 }}>{expandedModel.label}</h3>
+              <div className="muted">{expandedModel.status} · Win {pct(expandedModel.winRate)} · Confidence {pct(expandedModel.avgConfidence * 100)}</div>
+            </div>
+            <div className="toolbar">
+              <button className={`btn ${selected.includes(expandedModel.id) ? 'active' : ''}`} onClick={() => toggleSelection(expandedModel.id)}>
+                {selected.includes(expandedModel.id) ? 'Selected' : 'Compare'}
+              </button>
+              <button
+                className={`btn ${activeExecution?.agent_id === expandedModel.id ? 'active' : ''}`}
+                onClick={() => {
+                  if (activeExecution?.agent_id === expandedModel.id) return;
+                  setSwitchMsg('');
+                  setSwitchCandidate(expandedModel.id);
+                }}
+                disabled={activeExecution?.agent_id === expandedModel.id}
+              >
+                {activeExecution?.agent_id === expandedModel.id ? 'Active' : 'Set Active'}
+              </button>
+            </div>
+          </div>
+
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Current strategy reasoning</strong>
+            <p className="muted" style={{ marginBottom: 0 }}>{expandedModel.latestReason}</p>
+          </div>
+
+          <div className="card table-wrap compact">
+            <strong>Trade history</strong>
+            <table className="responsive-table" style={{ marginTop: 8 }}>
+              <thead><tr><th>Time</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th></tr></thead>
+              <tbody>
+                {expandedTradeRows.length === 0 ? <tr><td colSpan={6} className="muted">No executed trades logged yet.</td></tr> : expandedTradeRows.map((r) => (
+                  <tr key={r.key}>
+                    <td data-label="Time">{r.ts ? new Date(Number(r.ts)).toLocaleString() : 'n/a'}</td>
+                    <td data-label="Action">{String(r.action || '').toUpperCase()}</td>
+                    <td data-label="Symbol">{r.symbol || 'n/a'}</td>
+                    <td data-label="Lev">{r.leverage}</td>
+                    <td data-label="Entry">{r.entry}</td>
+                    <td data-label="PnL">{r.pnl}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {switchCandidate ? (
         <div className="card glass-card" style={{ marginTop: 12 }}>
