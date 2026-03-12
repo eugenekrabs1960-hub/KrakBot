@@ -101,6 +101,70 @@ function SharedChart({ state, theme }) {
 
 function fmt2(x) { return Number(x ?? 0).toFixed(2) }
 
+function prettyStatus(status) {
+  return String(status || 'insufficient_data').replaceAll('_', ' ')
+}
+
+function scoreForMode(m) {
+  const selected = m?.shadow_routing?.selected_strategy
+  const candidates = m?.shadow_routing?.ranked_candidates || []
+  const hit = candidates.find(c => c.strategy_key === m?.mode)
+  if (selected === m?.mode) return m?.shadow_routing?.selected_score ?? hit?.score ?? 0
+  return hit?.score ?? 0
+}
+
+function StrategyScorecard({ m }) {
+  const reg = m?.current_regime || {}
+  const sr = m?.strategy_registry_entry || {}
+  const metrics = m?.strategy_metrics || {}
+  const learn = m?.learning_summary || {}
+  const patterns = learn?.failure_patterns || {}
+  const score = scoreForMode(m)
+  return (
+    <div className='panel' style={{ marginBottom: 12, background: 'var(--cardSoft)' }}>
+      <h4 style={{ marginTop: 0, marginBottom: 8 }}>{sr.label || m?.mode}</h4>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12 }}>
+        <div><strong>Strategy</strong><div>{m?.mode}</div></div>
+        <div><strong>Family</strong><div>{sr.family || '-'}</div></div>
+        <div><strong>Status</strong><div>{prettyStatus(m?.strategy_status)}</div></div>
+        <div><strong>Current regime</strong><div>{reg.regime || '-'}</div></div>
+        <div><strong>Regime confidence</strong><div>{reg.confidence ?? '-'}</div></div>
+        <div><strong>Strategy score</strong><div>{fmt2(score)}</div></div>
+        <div><strong>Win rate</strong><div>{fmt2(metrics.win_rate)}%</div></div>
+        <div><strong>Expectancy</strong><div>{fmt2(metrics.expectancy)}</div></div>
+        <div><strong>Net realized PnL</strong><div>{fmt2(metrics.realized_pnl)}</div></div>
+        <div><strong>Net unrealized PnL</strong><div>{fmt2(metrics.unrealized_pnl)}</div></div>
+        <div><strong>Total fees</strong><div>{fmt2(metrics.total_fees)}</div></div>
+        <div><strong>Fee drag</strong><div>{fmt2(metrics.fee_drag_pct)}%</div></div>
+        <div><strong>Best regime</strong><div>{learn.best_regime || '-'}</div></div>
+        <div><strong>Worst regime</strong><div>{learn.worst_regime || '-'}</div></div>
+        <div><strong>Shadow-selected</strong><div>{m?.shadow_routing?.selected_strategy || '-'}</div></div>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12 }}>
+        <strong>Learning summary:</strong> {learn.what_works || '-'} | <strong>Weaknesses:</strong> {learn.what_fails || '-'}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 12 }}>
+        <strong>Failure patterns:</strong> no-edge {patterns.no_edge_repeats ?? 0}, fee-drag {patterns.fee_drag_destroying_edge ?? 0}, TP-missed→SL {patterns.tp_missed_then_reversed_to_sl ?? 0}, mismatch {patterns.regime_mismatch ?? 0}
+      </div>
+    </div>
+  )
+}
+
+function RuntimePanel({ state }) {
+  const info = state?.runtime_info || {}
+  return (
+    <div className='panel' style={{ marginBottom: 12 }}>
+      <h3>Runtime / model split</h3>
+      <div style={{ fontSize: 13 }}>
+        <div><strong>Agent/runtime model:</strong> {info.agent_runtime_model || 'unknown'}</div>
+        <div><strong>GPT-5.4 is used for:</strong> {info.gpt_5_4_used_for || 'unknown'}</div>
+        <div><strong>Backend logic:</strong> {info.backend_logic || 'rule-based'}</div>
+        <div><strong>Concurrency cap:</strong> {info.max_open_positions_per_mode ?? '-' } open BTC paper positions per mode</div>
+      </div>
+    </div>
+  )
+}
+
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
   const openPos = (m?.open_positions || [])[0]
@@ -158,7 +222,7 @@ function ModePanel({ modeKey, m, onAck }) {
         <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Spread / %</strong><div>{Number(spread).toFixed(4)} / {Number(spreadPct).toFixed(6)}%</div></div>
       </div>
 
-      <p>Open: {(m?.open_positions || []).length} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
+      <p>Open: {(m?.open_positions || []).length} / {(m?.execution_limits?.max_open_positions_per_mode || m?.max_open_positions_per_mode || 2)} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
       <div style={{ fontSize: 12 }}>
         WinRate: {m?.mode_stats?.win_rate ?? 0}% | AvgWin: {m?.mode_stats?.average_win ?? 0} | AvgLoss: {m?.mode_stats?.average_loss ?? 0} | MaxDD: {m?.mode_stats?.max_drawdown ?? 0}
       </div>
@@ -279,7 +343,11 @@ export default function App() {
         </div>
       </div>
       {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
+      <RuntimePanel state={state} />
       <SharedChart state={state} theme={theme} />
+      <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+        {MODE_ORDER.map(k => <StrategyScorecard key={`score-${k}`} m={state?.modes?.[k]} />)}
+      </div>
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
         {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
       </div>

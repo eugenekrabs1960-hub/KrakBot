@@ -26,6 +26,7 @@ EXPERIMENT_MAX_SPREAD_PCT = 0.08
 EXPERIMENT_MIN_RISK_PCT = 0.18
 EXPERIMENT_MAX_RISK_PCT = 1.20
 BRK_RETEST_LOOKBACK = 8
+MAX_OPEN_POSITIONS_PER_MODE = 2
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
@@ -657,6 +658,21 @@ def shadow_route_snapshot(current_regime: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def strategy_status_for_display(strategy_entry: dict[str, Any], strategy_metrics: dict[str, Any], shadow_routing: dict[str, Any]) -> str:
+    if strategy_entry.get("status") == "paused":
+        return "paused"
+    if strategy_metrics.get("sample_size", 0) < 3:
+        return "insufficient_data"
+    if strategy_metrics.get("expectancy", 0.0) < 0 or strategy_metrics.get("fee_drag_pct", 0.0) > 100:
+        return "probation"
+    selected = shadow_routing.get("selected_strategy")
+    if selected == strategy_entry.get("strategy_key"):
+        return "preferred"
+    if any(c.get("strategy_key") == strategy_entry.get("strategy_key") and c.get("eligible") for c in shadow_routing.get("ranked_candidates", [])):
+        return "eligible"
+    return "insufficient_data"
+
+
 def summarize_strategy_learning(strategy_key: str, bucket: dict[str, Any]) -> dict[str, Any]:
     perf = bucket.get("performance_by_regime") or regime_metrics_bucket()
     patterns = detect_failure_patterns(bucket)
@@ -830,7 +846,7 @@ async def execute_mode_scan(mode: str):
     if d["status"] == "PROPOSE_TRADE":
         history_events.append(make_history_row(d, ts=payload["timestamp"]))
         bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PROPOSE_TRADE", "decision": d}
-        if d["signal_id"] not in bucket["executed_signal_ids"] and len(bucket["open_positions"]) == 0:
+        if d["signal_id"] not in bucket["executed_signal_ids"] and len(bucket["open_positions"]) < MAX_OPEN_POSITIONS_PER_MODE:
             slip = payload["market_data"][0]["slippage_assumption_pct"]
             fill = round2((ask * (1 + slip / 100)) if d["side"] == "BUY" else (bid * (1 - slip / 100)))
             qty = 1.0
@@ -879,6 +895,7 @@ async def execute_mode_scan(mode: str):
 
     stats = mode_stats(bucket)
     shadow_routing = shadow_route_snapshot(current_regime)
+    strategy_status = strategy_status_for_display(bucket["strategy_registry_entry"] or {}, bucket["strategy_metrics"], shadow_routing)
     latest = {
         **payload,
         "mode": mode,
@@ -890,7 +907,9 @@ async def execute_mode_scan(mode: str):
         "latest_decision": d,
         "triggers": {"upper": TRIGGER_UPPER, "lower": TRIGGER_LOWER},
         "paper_mode": True,
+        "max_open_positions_per_mode": MAX_OPEN_POSITIONS_PER_MODE,
         "strategy_registry_entry": bucket["strategy_registry_entry"],
+        "strategy_status": strategy_status,
         "current_regime": current_regime,
         "notify_user": bucket["notify_user"],
         "pending_orders": bucket["pending_orders"][-25:],
@@ -912,6 +931,25 @@ async def execute_mode_scan(mode: str):
         "performance_by_regime": bucket["performance_by_regime"],
         "learning_summary": stats.get("learning_summary"),
         "shadow_routing": shadow_routing,
+        "runtime_info": {
+            "agent_runtime_model": "openai-codex/gpt-5.4",
+            "gpt_5_4_used_for": "openclaw agent scan proposals via call_clawbot/openclaw agent samy",
+            "rule_based_backend_logic": [
+                "regime classification",
+                "fallback strategy templates",
+                "quality gates",
+                "paper execution",
+                "fee model",
+                "shadow routing scores",
+                "UI/API state assembly"
+            ],
+        },
+        "execution_limits": {
+            "max_open_positions_per_mode": MAX_OPEN_POSITIONS_PER_MODE,
+            "paper_only": True,
+            "live_trading_enabled": False,
+            "kraken_private_order_calls": False,
+        },
     }
     bucket["latest"] = latest
     bucket["last_candle_time"] = candles[-1]["time"]
@@ -934,6 +972,12 @@ async def get_state():
         "available_modes": MODE_CONFIGS,
         "strategy_registry": STRATEGY_REGISTRY,
         "regime_types": REGIME_TYPES,
+        "runtime_info": {
+            "agent_runtime_model": "openai-codex/gpt-5.4",
+            "gpt_5_4_used_for": "LLM scan/proposal generation through openclaw agent samy",
+            "backend_logic": "rule_based",
+            "max_open_positions_per_mode": MAX_OPEN_POSITIONS_PER_MODE,
+        },
     }
 
 
