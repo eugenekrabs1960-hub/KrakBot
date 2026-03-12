@@ -158,9 +158,10 @@ export default function ModelArena() {
       const avgConfidence = confidenceCount > 0 ? confidenceTotal / confidenceCount : 0;
       const latest = rows[0] || {};
 
+      const label = agentId === 'jason' ? 'GPT 5.4' : agentId;
       return {
         id: agentId,
-        label: agentId,
+        label,
         status: decisions > 0 ? 'online' : 'idle',
         pnl,
         trades,
@@ -244,6 +245,7 @@ export default function ModelArena() {
         leverage: `${Number(t.leverage || 0).toFixed(1)}x`,
         entry: Number(t.entry_price || 0).toFixed(2),
         pnl: t.realized_pnl_usd == null ? 'n/a' : Number(t.realized_pnl_usd).toFixed(2),
+        verified: true,
       }));
     }
 
@@ -258,6 +260,7 @@ export default function ModelArena() {
         leverage: p.execution_json?.leverage ? `${p.execution_json.leverage}x` : 'n/a',
         entry: p.execution_json?.entry_price ? Number(p.execution_json.entry_price).toFixed(2) : 'n/a',
         pnl: p.outcome_json?.realized_pnl_usd != null ? Number(p.outcome_json.realized_pnl_usd).toFixed(2) : 'n/a',
+        verified: false,
       }));
   }, [expandedModel, expandedModelPackets, jasonTrades]);
 
@@ -318,26 +321,25 @@ export default function ModelArena() {
 
       <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', marginBottom: 12 }}>
         <div className="card glass-card">
-          <h3 style={{ marginTop: 0 }}>What just happened</h3>
+          <h3 style={{ marginTop: 0 }}>What just happened (trades only)</h3>
           <div className="trace-list">
-            {timelinePackets.slice(0, 10).map((p) => {
-              const action = String(p.action || '').toLowerCase();
-              const isTrade = ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(action);
-              return (
+            {timelinePackets
+              .filter((p) => ['long', 'short', 'buy', 'sell', 'close', 'exit'].includes(String(p.action || '').toLowerCase()))
+              .slice(0, 10)
+              .map((p) => (
                 <div key={`digest-${p.id}`} className="arena-event-row">
                   <div>
-                    <strong>{String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')} {!isTrade ? <span className="muted">(decision only)</span> : null}
+                    <strong>{String(p.agent_id || 'unknown') === 'jason' ? 'GPT 5.4' : String(p.agent_id || 'unknown')}</strong> {String(p.action || 'n/a').toUpperCase()} {String(p.symbol || 'n/a')}
                     <div className="muted">{p.rationale || 'No rationale provided.'}</div>
                   </div>
                   <div className="muted">{p.ts ? new Date(Number(p.ts)).toLocaleTimeString() : 'n/a'}</div>
                 </div>
-              );
-            })}
+              ))}
           </div>
         </div>
 
         <div className="card glass-card">
-          <h3 style={{ marginTop: 0 }}>Jason Snapshot</h3>
+          <h3 style={{ marginTop: 0 }}>GPT 5.4 Snapshot</h3>
           <div className="muted">Running: {digest.jActive ? 'yes' : 'no'}</div>
           <div className="muted">Balance: {digest.jBalance.toFixed(2)} USD</div>
           {digest.jOpen ? (
@@ -427,10 +429,15 @@ export default function ModelArena() {
 
           <div className="card table-wrap compact">
             <strong>Trade history</strong>
+            <div className="muted" style={{ marginTop: 4 }}>
+              {expandedModel.id === 'jason'
+                ? 'Verified ledger rows (PnL reflects closed trades only).'
+                : 'Inferred from decision packets (PnL/leverage may be partial if model has no execution ledger).'}
+            </div>
             <table className="responsive-table" style={{ marginTop: 8 }}>
-              <thead><tr><th>Time</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th></tr></thead>
+              <thead><tr><th>Time</th><th>Action</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>PnL</th><th>Source</th></tr></thead>
               <tbody>
-                {expandedTradeRows.length === 0 ? <tr><td colSpan={6} className="muted">No executed trades logged yet.</td></tr> : expandedTradeRows.map((r) => (
+                {expandedTradeRows.length === 0 ? <tr><td colSpan={7} className="muted">No executed trades logged yet.</td></tr> : expandedTradeRows.map((r) => (
                   <tr key={r.key}>
                     <td data-label="Time">{r.ts ? new Date(Number(r.ts)).toLocaleString() : 'n/a'}</td>
                     <td data-label="Action">{String(r.action || '').toUpperCase()}</td>
@@ -438,6 +445,7 @@ export default function ModelArena() {
                     <td data-label="Lev">{r.leverage}</td>
                     <td data-label="Entry">{r.entry}</td>
                     <td data-label="PnL">{r.pnl}</td>
+                    <td data-label="Source">{r.verified ? 'ledger' : 'inferred'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -488,7 +496,7 @@ export default function ModelArena() {
       </div>
 
       <div className="card table-wrap glass-card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Jason Recent Trades</h3>
+        <h3 style={{ marginTop: 0 }}>GPT 5.4 Recent Trades</h3>
         <table className="responsive-table">
           <thead><tr><th>Opened</th><th>Side</th><th>Symbol</th><th>Lev</th><th>Entry</th><th>Status</th><th>PnL</th></tr></thead>
           <tbody>
