@@ -410,6 +410,14 @@ export default function ModelArena() {
   }, [expandedModel, expandedModelPackets, jasonTrades]);
 
   const expandedLatestPacket = useMemo(() => expandedModelPackets[0] || null, [expandedModelPackets]);
+  const lastGateDeny = useMemo(() => {
+    for (const p of packets) {
+      const g = (p.execution_json || {}).gating || ((p.execution_json || {}).result || {}).gating || null;
+      if (g && g.allowed === false && g.deny_reason) return String(g.deny_reason);
+    }
+    return null;
+  }, [packets]);
+
   const activeTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'open'), [expandedTradeRows]);
   const closedTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'closed'), [expandedTradeRows]);
   const inferredTradeRows = useMemo(() => expandedTradeRows.filter((r: any) => String(r.status || '').toLowerCase() === 'inferred'), [expandedTradeRows]);
@@ -491,6 +499,20 @@ export default function ModelArena() {
             <div><strong>Live Guard</strong><div className="muted">Hard caps and explicit live toggle</div></div>
             <div className="muted">{liveGuard?.enabled ? 'LIVE_ON' : 'LIVE_OFF (safe default)'}</div>
           </div>
+        </div>
+      </div>
+
+      <div className="card glass-card" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Policy Health</h3>
+        <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <span className="chip">Gate: {gateCfg?.enabled === false ? 'OFF' : 'ON'}</span>
+          <span className="chip">Max slots: {gateCfg?.max_open_positions ?? 3}</span>
+          <span className="chip">Pacing: {gateCfg?.min_open_interval_sec ?? 300}s</span>
+          <span className="chip">Current opens: {jasonState?.open_trades?.length ?? jasonState?.state?.open_positions ?? 0}</span>
+          <span className="chip">Risk profile: {riskProfile}</span>
+        </div>
+        <div className="muted" style={{ marginTop: 8 }}>
+          Last deny reason: {lastGateDeny || 'none recently'}
         </div>
       </div>
 
