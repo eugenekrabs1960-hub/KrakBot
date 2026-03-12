@@ -16,6 +16,14 @@ def round2(x: float) -> float:
     return round(float(x), 2)
 
 
+def bucket_price(value: float, bucket_pct: float = 0.20) -> float:
+    """Bucket by percentage to avoid tiny-noise ID churn while allowing material setup changes."""
+    if value <= 0:
+        return 0.0
+    step = max(value * (bucket_pct / 100.0), 0.5)
+    return round2(round(value / step) * step)
+
+
 @dataclass
 class FuturesRiskLimits:
     max_leverage: float = 3.0
@@ -277,7 +285,10 @@ class HyperliquidFuturesPaperTrack:
             stop = entry + risk
             tp = entry - risk * 1.8
         qty = self._compute_qty(entry)
-        signal_id = f"{self.state['track']}|{candles[-1].get('time')}|{side}"
+        e_fp = bucket_price(entry, 0.20)
+        s_fp = bucket_price(stop, 0.20)
+        t_fp = bucket_price(tp, 0.20)
+        signal_id = f"{self.state['track']}|{candles[-1].get('time')}|{side}|e:{e_fp}|s:{s_fp}|t:{t_fp}"
         return {
             'status': 'PROPOSE_TRADE',
             'side': side,
@@ -287,6 +298,12 @@ class HyperliquidFuturesPaperTrack:
             'risk_reward_ratio': 1.8,
             'qty': qty,
             'signal_id': signal_id,
+            'signal_fingerprint': {
+                'entry_bucket': e_fp,
+                'stop_bucket': s_fp,
+                'tp_bucket': t_fp,
+                'bucket_pct': 0.20,
+            },
             'reason': f"Controlled futures proposal from {regime.get('regime')} regime.",
         }
 
