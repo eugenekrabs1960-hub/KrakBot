@@ -330,6 +330,57 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
     return Decision(action=action, symbol=symbol, leverage=leverage, allocation_pct=allocation_pct, confidence=confidence, rationale=rationale)
 
 
+
+def _top_signal(snapshot: dict) -> tuple[str, float]:
+    best_sym = 'BTC'
+    best_score = 0.0
+    for sym, d in (snapshot or {}).items():
+        try:
+            score = float(d.get('ret_1') or 0.0) * 0.65 + float(d.get('ret_5') or 0.0) * 0.25 + float(d.get('ret_15') or 0.0) * 0.10
+        except Exception:
+            score = 0.0
+        if abs(score) > abs(best_score):
+            best_sym, best_score = str(sym).upper(), score
+    return best_sym, best_score
+
+
+def _apply_profit_bias(decision: Decision, state: dict, snapshot: dict, open_trade: dict | None) -> Decision:
+    # Keep hard risk limits, but avoid passive/zero-size behavior when a signal exists.
+    sym, score = _top_signal(snapshot)
+    if decision.action == 'hold' and not open_trade and abs(score) >= 0.00012 and float(state.get('balance_usd', INITIAL_BALANCE)) > 0:
+        decision.action = 'long' if score > 0 else 'short'
+        decision.symbol = sym
+        decision.leverage = max(decision.leverage, 4.0)
+        decision.allocation_pct = max(decision.allocation_pct, 15.0)
+        decision.rationale = (decision.rationale or '').strip() or f'Auto-promoted from hold: strongest near-term momentum on {sym}.'
+
+    if decision.action in ('long', 'short'):
+        decision.leverage = max(decision.leverage, 3.0)
+        decision.allocation_pct = max(decision.allocation_pct, 10.0)
+
+    decision.leverage = max(1.0, min(20.0, float(decision.leverage)))
+    decision.allocation_pct = max(0.0, min(50.0, float(decision.allocation_pct)))
+    return decision
+
+
+def _enrich_quality(decision: Decision, snapshot: dict) -> Decision:
+    if not str(decision.rationale or '').strip() or str(decision.rationale).strip().lower() == 'no rationale provided':
+        m = snapshot.get(decision.symbol) or {}
+        decision.rationale = (
+            f"{decision.action.upper()} {decision.symbol}: ret_1={float(m.get('ret_1') or 0):+.5f}, "
+            f"ret_5={float(m.get('ret_5') or 0):+.5f}, ret_15={float(m.get('ret_15') or 0):+.5f}; "
+            "position sized within risk caps."
+        )
+
+    if float(decision.confidence or 0.0) <= 0:
+        m = snapshot.get(decision.symbol) or {}
+        signal = abs(float(m.get('ret_1') or 0.0) * 0.7 + float(m.get('ret_5') or 0.0) * 0.3)
+        base = 0.50 if decision.action == 'hold' else 0.56
+        decision.confidence = min(0.88, base + min(signal * 400, 0.22))
+
+    decision.confidence = max(0.01, min(1.0, float(decision.confidence)))
+    return decision
+
 def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict, decision_source: str):
     open_trade = _get_open_trade(db)
     results: dict = {'decision': decision.__dict__}
@@ -383,6 +434,8 @@ def run_jason_once(db: Session):
         return {'ok': False, 'error': 'balance_zero', 'state': state}
 
     decision = _ask_openai(snapshot, state, _get_open_trade(db))
+    decision = _apply_profit_bias(decision, state, snapshot, _get_open_trade(db))
+    decision = _enrich_quality(decision, snapshot)
     return _apply_decision(db, decision, state, snapshot, decision_source='oauth_gpt54')
 
 
@@ -416,6 +469,8 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
     d.leverage = max(1.0, min(20.0, d.leverage))
     d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
     d.confidence = max(0.0, min(1.0, d.confidence))
+    d = _apply_profit_bias(d, state, snapshot, _get_open_trade(db))
+    d = _enrich_quality(d, snapshot)
 
     src = str(decision_source or 'oauth_gpt54').lower()
     if src != 'oauth_gpt54':
