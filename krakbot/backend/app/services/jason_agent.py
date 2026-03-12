@@ -86,6 +86,7 @@ def _load_state(db: Session) -> dict:
     value.setdefault('balance_usd', INITIAL_BALANCE)
     value.setdefault('active', True)
     value.setdefault('online', True)
+    value.setdefault('hold_streak', 0)
     return value
 
 
@@ -446,12 +447,22 @@ def _apply_profit_bias(decision: Decision, state: dict, snapshot: dict, open_tra
     min_lev = 2.0 if p == 'conservative' else (3.0 if p == 'balanced' else 5.0)
     min_alloc = 8.0 if p == 'conservative' else (10.0 if p == 'balanced' else 15.0)
 
-    if decision.action == 'hold' and not open_trade and abs(score) >= signal_thresh and float(state.get('balance_usd', INITIAL_BALANCE)) > 0:
-        decision.action = 'long' if score > 0 else 'short'
+    hold_streak = int(state.get('hold_streak') or 0)
+    must_trade = (p == 'aggressive' and not open_trade and hold_streak >= 2 and float(state.get('balance_usd', INITIAL_BALANCE)) > 0)
+
+    if decision.action == 'hold' and not open_trade and (abs(score) >= signal_thresh or must_trade) and float(state.get('balance_usd', INITIAL_BALANCE)) > 0:
+        direction = 'long' if score >= 0 else 'short'
+        decision.action = direction
         decision.symbol = sym
         decision.leverage = max(decision.leverage, min_lev)
         decision.allocation_pct = max(decision.allocation_pct, min_alloc)
-        decision.rationale = (decision.rationale or '').strip() or f'Auto-promoted from hold ({p}): strongest near-term momentum on {sym}.'
+        if must_trade:
+            decision.leverage = max(decision.leverage, 6.0)
+            decision.allocation_pct = max(decision.allocation_pct, 20.0)
+        decision.rationale = (decision.rationale or '').strip() or (
+            f'Auto-promoted from hold ({p}) on {sym}; '
+            + ('forced anti-idle trade after repeated holds.' if must_trade else 'strongest near-term momentum signal.')
+        )
 
     if decision.action in ('long', 'short'):
         decision.leverage = max(decision.leverage, min_lev)
