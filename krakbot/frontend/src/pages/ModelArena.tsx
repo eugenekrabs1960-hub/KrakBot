@@ -52,6 +52,7 @@ export default function ModelArena() {
   const [riskProfile, setRiskProfile] = useState<'conservative'|'balanced'|'aggressive'>('balanced');
   const [hlHealth, setHlHealth] = useState<any>(null);
   const [liveGuard, setLiveGuard] = useState<any>(null);
+  const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
   const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
@@ -66,18 +67,25 @@ export default function ModelArena() {
   const [showInspector, setShowInspector] = useState(false);
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
-  const load = async () => {
-    const [packetRes, execRes, jsTrades, jsState, risk, hl, guard] = await Promise.all([
-      getAgentDecisionPackets(500).catch(() => ({ items: [] })),
+  const loadCore = async () => {
+    setLoadingCore(true);
+    const [packetRes, execRes] = await Promise.all([
+      getAgentDecisionPackets(200).catch(() => ({ items: [] })),
       getActiveExecutionModel().catch(() => ({ item: null })),
-      getJasonTrades(30).catch(() => ({ items: [] })),
+    ]);
+    setPackets(packetRes?.items || []);
+    setActiveExecution(execRes?.item || null);
+    setLoadingCore(false);
+  };
+
+  const loadSecondary = async () => {
+    const [jsTrades, jsState, risk, hl, guard] = await Promise.all([
+      getJasonTrades(20).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
       getHyperliquidExecutionHealth().catch(() => ({ item: null })),
       getLiveTradingGuard().catch(() => ({ item: null })),
     ]);
-    setPackets(packetRes?.items || []);
-    setActiveExecution(execRes?.item || null);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
     setRiskProfile((risk?.profile || 'balanced') as any);
@@ -85,8 +93,15 @@ export default function ModelArena() {
     setLiveGuard(guard?.item || null);
   };
 
+  const refreshAll = async () => {
+    await loadCore();
+    void loadSecondary();
+  };
+
   useEffect(() => {
-    load();
+    void loadCore();
+    const t = setTimeout(() => { void loadSecondary(); }, 50);
+    return () => clearTimeout(t);
   }, []);
 
   const timeCutoff = useMemo(() => {
@@ -322,6 +337,7 @@ export default function ModelArena() {
       />
 
 
+      {loadingCore ? <div className="muted" style={{ marginBottom: 8 }}>Loading Arena core…</div> : null}
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>Execution Readiness</h3>
         <div className="trace-list">
@@ -364,7 +380,7 @@ export default function ModelArena() {
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <div className="toolbar">
-          <button className="btn" onClick={load}>Refresh Arena Data</button>
+          <button className="btn" onClick={refreshAll}>Refresh Arena Data</button>
           <button className="btn" onClick={() => { setSymbolFilter('all'); setAgentFilter('all'); setTimeFilter('6h'); }}>Reset View</button>
           <label>Symbol</label>
           <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
