@@ -172,6 +172,72 @@ function RuntimePanel({ state }) {
   )
 }
 
+function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
+  if (!hstate) return null
+  const latest = hstate.latest || {}
+  const market = latest.market || {}
+  const regime = latest.regime || {}
+  const risk = hstate.risk_limits || {}
+  const fees = hstate.fee_model || {}
+  const positions = hstate.positions || []
+  const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
+  const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
+  const freeCollateral = Math.max(0, 1000 - marginUsed)
+
+  return (
+    <div className='panel' style={{ marginBottom: 12, borderColor: '#7e22ce' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0 }}>Hyperliquid Futures Paper Track</h3>
+        <span className='badge'>PAPER ONLY · NO LIVE EXECUTION</span>
+      </div>
+      <div style={{ fontSize: 12, marginTop: 6 }}>
+        <strong>Track:</strong> {hstate.track} | <strong>Symbol:</strong> {hstate.symbol} | <strong>Latest:</strong> {latest.timestamp || '-'}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
+        <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
+        <div><strong>Margin used</strong><div>{fmt2(marginUsed)}</div></div>
+        <div><strong>Free collateral*</strong><div>{fmt2(freeCollateral)}</div></div>
+        <div><strong>Regime</strong><div>{regime.regime || '-'}</div></div>
+        <div><strong>Regime confidence</strong><div>{regime.confidence ?? '-'}</div></div>
+        <div><strong>Decision</strong><div>{latest?.decision?.status || '-'}</div></div>
+        <div><strong>Maker fee (bps)</strong><div>{fees.maker_bps ?? '-'}</div></div>
+        <div><strong>Taker fee (bps)</strong><div>{fees.taker_bps ?? '-'}</div></div>
+        <div><strong>Funding placeholder (bps/8h)</strong><div>{fees.funding_rate_placeholder_bps_8h ?? '-'}</div></div>
+        <div><strong>Exposure used</strong><div>{fmt2(exposure)}</div></div>
+        <div><strong>Max exposure</strong><div>{fmt2(risk.max_total_exposure_usd ?? 0)}</div></div>
+        <div><strong>Max position notional</strong><div>{fmt2(risk.max_position_notional_usd ?? 0)}</div></div>
+        <div><strong>Max positions</strong><div>{risk.max_positions ?? '-'}</div></div>
+        <div><strong>Max leverage</strong><div>{risk.max_leverage ?? '-'}x</div></div>
+        <div><strong>Per-position risk cap</strong><div>{risk.max_risk_per_position_pct ?? '-'}%</div></div>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <button onClick={onScan}>Run Hyperliquid Mock Scan</button>
+        <button style={{ marginLeft: 8 }} onClick={onMockOpen}>Mock Open Paper Position</button>
+      </div>
+
+      <details style={{ marginTop: 10 }}>
+        <summary>Open futures paper positions ({positions.length})</summary>
+        <table className='rows' style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th>Side</th><th>Qty</th><th>Entry</th><th>Leverage</th><th>Margin</th><th>Liq. est</th><th>Fees est</th><th>Open time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.slice(-10).map((p, i) => (
+              <tr key={i}>
+                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.estimated_total_fees}</td><td>{p.open_time}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+      <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>*Free collateral is a simulator placeholder estimate for paper training view.</div>
+    </div>
+  )
+}
+
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
   const openPos = (m?.open_positions || [])[0]
@@ -294,6 +360,7 @@ function ModePanel({ modeKey, m, onAck }) {
 
 export default function App() {
   const [state, setState] = useState(null)
+  const [hyperState, setHyperState] = useState(null)
   const [err, setErr] = useState('')
   const [theme, setTheme] = useState('dark')
 
@@ -301,12 +368,14 @@ export default function App() {
     try {
       const s = await fetch(`${API}/api/state`).then(r => r.json())
       const h = await fetch(`${API}/api/history`).then(r => r.json())
+      const hs = await fetch(`${API}/api/hyperliquid/state`).then(r => r.json())
       if (h?.history && typeof h.history === 'object') {
         for (const k of Object.keys(h.history)) {
           if (s?.modes?.[k]) s.modes[k].history = h.history[k]
         }
       }
       setState(s)
+      setHyperState(hs)
       setErr('')
     } catch (e) {
       setErr('Failed to load state')
@@ -314,6 +383,8 @@ export default function App() {
   }
 
   const runScanBoth = async () => { await fetch(`${API}/api/run-scan`, { method: 'POST' }); await load() }
+  const runHyperScan = async () => { await fetch(`${API}/api/hyperliquid/run-scan`, { method: 'POST' }); await load() }
+  const mockHyperOpen = async () => { await fetch(`${API}/api/hyperliquid/mock-open?side=BUY&qty=0.01&leverage=2`, { method: 'POST' }); await load() }
   const toggleAuto = async () => { await fetch(`${API}/api/auto-scan`, { method: 'POST' }); await load() }
   const ack = async (mode) => { await fetch(`${API}/api/ack-notify/${mode}`, { method: 'POST' }); await load() }
 
@@ -351,7 +422,15 @@ export default function App() {
       </div>
       {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
       <RuntimePanel state={state} />
-      <SharedChart state={state} theme={theme} />
+      <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
+        <div>
+          <div className='panel' style={{ marginBottom: 8 }}><strong>Kraken Baseline Track</strong> <span className='badge'>PAPER MODE</span></div>
+          <SharedChart state={state} theme={theme} />
+        </div>
+        <div>
+          <HyperliquidPanel hstate={hyperState} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
+        </div>
+      </div>
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
         {MODE_ORDER.map(k => <StrategyScorecard key={`score-${k}`} m={state?.modes?.[k]} />)}
       </div>
