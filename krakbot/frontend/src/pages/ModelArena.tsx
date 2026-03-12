@@ -6,6 +6,8 @@ import {
   getJasonTrades,
   getJasonState,
   getJasonRiskProfile,
+  getHyperliquidExecutionHealth,
+  getLiveTradingGuard,
   setJasonRiskProfile,
   setActiveExecutionModel,
 } from '../services/api';
@@ -47,6 +49,8 @@ export default function ModelArena() {
   const [jasonTrades, setJasonTrades] = useState<any[]>([]);
   const [jasonState, setJasonState] = useState<any>(null);
   const [riskProfile, setRiskProfile] = useState<'conservative'|'balanced'|'aggressive'>('balanced');
+  const [hlHealth, setHlHealth] = useState<any>(null);
+  const [liveGuard, setLiveGuard] = useState<any>(null);
 
   const [selected, setSelected] = useState<string[]>([]);
   const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
@@ -62,18 +66,22 @@ export default function ModelArena() {
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   const load = async () => {
-    const [packetRes, execRes, jsTrades, jsState, risk] = await Promise.all([
+    const [packetRes, execRes, jsTrades, jsState, risk, hl, guard] = await Promise.all([
       getAgentDecisionPackets(500).catch(() => ({ items: [] })),
       getActiveExecutionModel().catch(() => ({ item: null })),
       getJasonTrades(30).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
+      getHyperliquidExecutionHealth().catch(() => ({ item: null })),
+      getLiveTradingGuard().catch(() => ({ item: null })),
     ]);
     setPackets(packetRes?.items || []);
     setActiveExecution(execRes?.item || null);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
     setRiskProfile((risk?.profile || 'balanced') as any);
+    setHlHealth(hl?.item || null);
+    setLiveGuard(guard?.item || null);
   };
 
   useEffect(() => {
@@ -307,6 +315,29 @@ export default function ModelArena() {
         title="Model Arena"
         subtitle="Clean operator view: who is active, what changed recently, and why each trade happened."
       />
+
+
+      <div className="card glass-card" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Execution Readiness</h3>
+        <div className="trace-list">
+          <div className="arena-event-row">
+            <div><strong>Data Feed</strong><div className="muted">Hyperliquid collector/health</div></div>
+            <div className="muted">{hlHealth?.ok ? 'OK' : 'ISSUE'}</div>
+          </div>
+          <div className="arena-event-row">
+            <div><strong>Paper Engine</strong><div className="muted">Jason online + decision packets flowing</div></div>
+            <div className="muted">{jasonState?.state?.online ? 'READY' : 'OFFLINE'}</div>
+          </div>
+          <div className="arena-event-row">
+            <div><strong>Live Adapter</strong><div className="muted">Hyperliquid execution adapter configured</div></div>
+            <div className="muted">{hlHealth?.enabled && hlHealth?.auth_configured && hlHealth?.account_configured ? 'ARMED' : 'NOT_CONFIGURED'}</div>
+          </div>
+          <div className="arena-event-row">
+            <div><strong>Live Guard</strong><div className="muted">Hard caps and explicit live toggle</div></div>
+            <div className="muted">{liveGuard?.enabled ? 'LIVE_ON' : 'LIVE_OFF (safe default)'}</div>
+          </div>
+        </div>
+      </div>
 
       <div className="card glass-card" style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>Recent trade actions</h3>

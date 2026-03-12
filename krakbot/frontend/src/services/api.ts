@@ -260,3 +260,9 @@ export async function getLastBenchmarkReasoningDataset() {
   const res = await fetch(`${API_BASE}/model-lab/benchmark-reasoning/last-export`);
   return parseJsonOrThrow(res);
 }
+
+
+export async function getLiveTradingGuard() {
+  const res = await fetch(`${API_BASE}/control/live-trading`);
+  return parseJsonOrThrow(res);
+}
