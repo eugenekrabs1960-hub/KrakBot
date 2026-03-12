@@ -406,6 +406,22 @@ export default function ModelArena() {
             <p className="muted" style={{ marginBottom: 0 }}>{expandedPositionReasoning}</p>
           </div>
           <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Benchmark Reasoning (BTC / ETH / SOL)</strong>
+            {(() => {
+              const br = (expandedLatestPacket?.context_json || {}).benchmark_reasoning || {};
+              const syms = ['BTC','ETH','SOL'];
+              return (
+                <div className="muted" style={{ marginBottom: 0 }}>
+                  {syms.map((sym) => {
+                    const row = br[sym];
+                    if (!row) return <div key={sym}>{sym}: no benchmark rationale yet.</div>;
+                    return <div key={sym}>{sym}: {row.reasoning || `${row.bias || 'hold'} (${Number(row.score || 0).toFixed(6)})`}</div>;
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+          <div className="card compact" style={{ marginBottom: 10 }}>
             <strong>Risk Profile</strong>
             <div className="toolbar" style={{ marginTop: 8 }}>
               <select

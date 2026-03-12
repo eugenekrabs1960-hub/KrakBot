@@ -15,6 +15,7 @@ def _prep_db(path):
             conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'BTC','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 100 + i})
             conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'ETH','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 200 + i})
             conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'SOL','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 50 + i})
+            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'DOGE','testnet',:px,0.015,0.01,0.005,'x')"), {'ts': 1000 + i, 'px': 1 + i*0.01})
     return eng
 
 
@@ -150,3 +151,28 @@ def test_execute_jason_decision_auto_repairs_quality(tmp_path):
         assert out['ok'] is True
         assert float(out['decision']['confidence']) > 0
         assert str(out['decision']['rationale']).strip().lower() != 'no rationale provided'
+
+
+def test_open_market_symbol_allowed_and_benchmark_logged(tmp_path):
+    eng = _prep_db(tmp_path / 'jason8.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = jason_agent.execute_jason_decision(
+            db,
+            action='long',
+            symbol='DOGE',
+            leverage=4,
+            allocation_pct=20,
+            confidence=0.7,
+            rationale='DOGE momentum breakout',
+            decision_source='oauth_gpt54',
+        )
+        assert out['ok'] is True
+        assert out['decision']['symbol'] == 'DOGE'
+
+        row = db.execute(text("SELECT context_json FROM agent_decision_packets ORDER BY id DESC LIMIT 1")).mappings().first()
+        assert row is not None
+        ctx = str(row.get('context_json') or '')
+        assert 'benchmark_reasoning' in ctx
+        assert 'BTC' in ctx and 'ETH' in ctx and 'SOL' in ctx

@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.services.agent_decisions import record_decision_packet
 
 
-ALLOWED_SYMBOLS = ['BTC', 'ETH', 'SOL']
+BENCHMARK_SYMBOLS = ['BTC', 'ETH', 'SOL']
 JASON_AGENT_ID = 'jason'
 INITIAL_BALANCE = 1000.0
 RISK_PROFILE_KEY = 'agent_jason_risk_profile'
@@ -33,7 +33,7 @@ class Decision:
 SYSTEM_PROMPT = """You are Jason, a hyper-aggressive but rules-constrained paper futures trader.
 You must return ONLY JSON with fields:
 - action: one of [\"long\",\"short\",\"close\",\"hold\"]
-- symbol: one of [\"BTC\",\"ETH\",\"SOL\"]
+- symbol: one of tradable_symbols provided in prompt (open market)
 - leverage: number (1..20)
 - allocation_pct: number (0..50) percent of remaining balance
 - confidence: number (0..1)
@@ -166,16 +166,15 @@ def _latest_market_snapshot(db: Session) -> dict:
             """
             SELECT symbol, ts, mid_price, ret_1, ret_5, ret_15
             FROM hyperliquid_training_features
-            WHERE symbol IN ('BTC','ETH','SOL')
             ORDER BY ts DESC
-            LIMIT 200
+            LIMIT 3000
             """
         )
     ).mappings().all()
     out: dict[str, dict] = {}
     for r in rows:
         sym = str(r.get('symbol') or '').upper()
-        if sym in ALLOWED_SYMBOLS and sym not in out:
+        if sym and sym not in out:
             out[sym] = {
                 'ts': int(r.get('ts') or 0),
                 'mid_price': float(r.get('mid_price') or 0.0),
@@ -185,6 +184,26 @@ def _latest_market_snapshot(db: Session) -> dict:
             }
     return out
 
+
+
+def _benchmark_reasoning(snapshot: dict) -> dict:
+    out = {}
+    for sym in BENCHMARK_SYMBOLS:
+        d = snapshot.get(sym) or {}
+        r1 = float(d.get('ret_1') or 0.0)
+        r5 = float(d.get('ret_5') or 0.0)
+        r15 = float(d.get('ret_15') or 0.0)
+        score = r1 * 0.65 + r5 * 0.25 + r15 * 0.10
+        bias = 'long' if score > 0 else ('short' if score < 0 else 'hold')
+        out[sym] = {
+            'bias': bias,
+            'score': score,
+            'ret_1': r1,
+            'ret_5': r5,
+            'ret_15': r15,
+            'reasoning': f'{sym} benchmark bias={bias} score={score:+.6f} (r1={r1:+.6f}, r5={r5:+.6f}, r15={r15:+.6f})',
+        }
+    return out
 
 def _get_open_trade(db: Session):
     row = db.execute(
@@ -331,6 +350,8 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
         'budget': state.get('balance_usd', INITIAL_BALANCE),
         'open_trade': open_trade,
         'market_snapshot': snapshot,
+        'tradable_symbols': list(snapshot.keys()),
+        'benchmark_symbols': BENCHMARK_SYMBOLS,
         'goal': 'grow balance as much as possible under constraints',
     }
 
@@ -365,8 +386,9 @@ def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decisio
     if action not in ('long', 'short', 'close', 'hold'):
         action = 'hold'
     symbol = str(data.get('symbol') or 'BTC').upper()
-    if symbol not in ALLOWED_SYMBOLS:
-        symbol = 'BTC'
+    tradable = list(snapshot.keys())
+    if symbol not in tradable:
+        symbol = tradable[0] if tradable else 'BTC'
     leverage = float(data.get('leverage') or 1)
     allocation_pct = float(data.get('allocation_pct') or 0)
     confidence = float(data.get('confidence') or 0)
@@ -474,7 +496,7 @@ def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict
         action=decision.action,
         confidence=decision.confidence,
         rationale=decision.rationale,
-        context={'snapshot': snapshot, 'state': state, 'decision_source': decision_source},
+        context={'snapshot': snapshot, 'state': state, 'decision_source': decision_source, 'benchmark_reasoning': _benchmark_reasoning(snapshot)},
         risk={'max_leverage': 20, 'max_allocation_pct': 50, 'paper_money': True},
         execution={'mode': 'virtual_hyperliquid_perps', 'decision_source': decision_source, 'result': results},
         outcome={'balance_usd': state.get('balance_usd')},
@@ -532,8 +554,9 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
     )
     if d.action not in ('long', 'short', 'close', 'hold'):
         d.action = 'hold'
-    if d.symbol not in ALLOWED_SYMBOLS:
-        d.symbol = 'BTC'
+    tradable = list(snapshot.keys())
+    if d.symbol not in tradable:
+        d.symbol = tradable[0] if tradable else 'BTC'
     d.leverage = max(1.0, min(20.0, d.leverage))
     d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
     d.confidence = max(0.0, min(1.0, d.confidence))
