@@ -4,6 +4,7 @@ import {
   getActiveExecutionModel,
   getAgentDecisionPackets,
   getJasonTrades,
+  getJasonState,
   setActiveExecutionModel,
 } from '../services/api';
 
@@ -42,6 +43,7 @@ export default function ModelArena() {
   const [packets, setPackets] = useState<any[]>([]);
   const [activeExecution, setActiveExecution] = useState<any>(null);
   const [jasonTrades, setJasonTrades] = useState<any[]>([]);
+  const [jasonState, setJasonState] = useState<any>(null);
 
   const [selected, setSelected] = useState<string[]>([]);
   const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
@@ -57,14 +59,16 @@ export default function ModelArena() {
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   const load = async () => {
-    const [packetRes, execRes, jsTrades] = await Promise.all([
+    const [packetRes, execRes, jsTrades, jsState] = await Promise.all([
       getAgentDecisionPackets(500).catch(() => ({ items: [] })),
       getActiveExecutionModel().catch(() => ({ item: null })),
       getJasonTrades(30).catch(() => ({ items: [] })),
+      getJasonState().catch(() => ({ ok: false })),
     ]);
     setPackets(packetRes?.items || []);
     setActiveExecution(execRes?.item || null);
     setJasonTrades(jsTrades?.items || []);
+    setJasonState(jsState || null);
   };
 
   useEffect(() => {
@@ -366,7 +370,8 @@ export default function ModelArena() {
           <div className="arena-card-head">
             <div>
               <h3 style={{ marginTop: 0 }}>{expandedModel.label}</h3>
-              <div className="muted">{expandedModel.status} · Win {pct(expandedModel.winRate)} · Confidence {pct(expandedModel.avgConfidence * 100)}</div>
+              <div className="muted">{expandedModel.id === 'jason' ? ((jasonState?.state?.online === false) ? 'offline' : 'online') : expandedModel.status} · Win {pct(expandedModel.winRate)} · Confidence {pct(expandedModel.avgConfidence * 100)}</div>
+              {expandedModel.id === 'jason' && jasonState?.state?.online === false ? (<div className="muted">Offline reason: {String(jasonState?.state?.offline_reason || 'oauth_unavailable')}</div>) : null}
             </div>
             <div className="toolbar">
               <button className={`btn ${selected.includes(expandedModel.id) ? 'active' : ''}`} onClick={() => toggleSelection(expandedModel.id)}>

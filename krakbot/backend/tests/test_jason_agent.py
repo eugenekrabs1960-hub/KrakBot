@@ -70,11 +70,22 @@ def test_execute_jason_decision_path(tmp_path):
         assert 'oauth_gpt54' in str(row.get('execution_json'))
 
 
-def test_rule_based_runner_without_openai(tmp_path):
+def test_rule_based_runner_disabled(tmp_path):
     eng = _prep_db(tmp_path / 'jason3.db')
     Session = sessionmaker(bind=eng, future=True)
 
     with Session() as db:
         out = jason_agent.run_jason_rule_based_once(db)
-        assert out['ok'] is True
-        assert out['decision']['action'] in ('long', 'short', 'hold', 'close')
+        assert out['ok'] is False
+        assert out['error'] == 'fallback_disabled'
+
+
+def test_set_jason_offline_marks_state(tmp_path):
+    eng = _prep_db(tmp_path / 'jason4.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        jason_agent.set_jason_offline(db, reason='oauth_unavailable')
+        st = jason_agent.get_jason_state(db)
+        assert st['state']['online'] is False
+        assert st['state']['offline_reason'] == 'oauth_unavailable'

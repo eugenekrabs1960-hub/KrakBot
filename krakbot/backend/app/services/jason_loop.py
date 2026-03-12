@@ -6,7 +6,7 @@ from contextlib import suppress
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.services.jason_agent import run_jason_once, run_jason_rule_based_once
+from app.services.jason_agent import run_jason_once, set_jason_offline
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +34,10 @@ class JasonLoopService:
         while self._running:
             db = SessionLocal()
             try:
-                try:
-                    out = run_jason_once(db)
-                except Exception as exc:
-                    if 'OPENAI_API_KEY missing' in str(exc):
-                        out = run_jason_rule_based_once(db)
-                    else:
-                        raise
-
-                if not out.get('ok') and 'OPENAI_API_KEY missing' in str(out.get('error', '')):
-                    out = run_jason_rule_based_once(db)
-
+                out = run_jason_once(db)
                 if not out.get('ok'):
-                    logger.info('jason_loop tick skipped: %s', out)
+                    set_jason_offline(db, reason=str(out.get('error') or 'oauth_unavailable'))
+                    logger.info('jason_loop offline: %s', out)
                 else:
                     d = out.get('decision') or {}
                     logger.info('jason_loop tick ok action=%s symbol=%s', d.get('action'), d.get('symbol'))
