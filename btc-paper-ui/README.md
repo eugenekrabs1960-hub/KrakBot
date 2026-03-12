@@ -31,7 +31,8 @@ Local-only paper-trading dashboard.
   - `GET /api/hyperliquid/state`
   - `POST /api/hyperliquid/run-scan`
   - `POST /api/hyperliquid/mock-open` (manual paper helper)
-  - mock/public-style inputs only
+  - read-only Hyperliquid public market data (`allMids` + `candleSnapshot`) for scans
+  - fallback synthetic feed only if public API is temporarily unavailable
   - no private execution and no live trading routes
 
 ## API

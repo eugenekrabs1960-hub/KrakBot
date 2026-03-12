@@ -176,6 +176,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   if (!hstate) return null
   const latest = hstate.latest || {}
   const market = latest.market || {}
+  const candleCount = (latest.candles || []).length
   const regime = latest.regime || {}
   const risk = hstate.risk_limits || {}
   const fees = hstate.fee_model || {}
@@ -192,6 +193,9 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
       </div>
       <div style={{ fontSize: 12, marginTop: 6 }}>
         <strong>Track:</strong> {hstate.track} | <strong>Symbol:</strong> {hstate.symbol} | <strong>Latest:</strong> {latest.timestamp || '-'}
+      </div>
+      <div style={{ fontSize: 12, marginTop: 4 }}>
+        <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>

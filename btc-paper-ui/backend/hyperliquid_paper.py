@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 import random
+
+import httpx
 
 
 def now_iso() -> str:
@@ -49,7 +51,7 @@ class FuturesPosition:
 
 
 class MockPublicFeed:
-    """Public-style mock feed (no private execution paths)."""
+    """Fallback-only synthetic feed if public endpoints are temporarily unavailable."""
 
     def __init__(self, seed: int = 42, start_price: float = 3200.0):
         self.rng = random.Random(seed)
@@ -67,7 +69,66 @@ class MockPublicFeed:
             'ask': round2(ask),
             'spread': round2(ask - bid),
             'spread_pct': round2(((ask - bid) / max((ask + bid) / 2, 1)) * 100),
+            'source': 'mock_fallback',
         }
+
+
+class HyperliquidPublicFeed:
+    """Read-only Hyperliquid public market feed (no signed/private routes)."""
+
+    def __init__(self, symbol: str = 'ETH'):
+        self.symbol = symbol
+        self.url = 'https://api.hyperliquid.xyz/info'
+        self.timeout = 15
+
+    def _post(self, payload: dict[str, Any]) -> Any:
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.post(self.url, json=payload)
+            r.raise_for_status()
+            return r.json()
+
+    def fetch_tick(self) -> dict[str, Any]:
+        mids = self._post({'type': 'allMids'})
+        px = float(mids.get(self.symbol) or mids.get(f'{self.symbol}-PERP') or 0)
+        if px <= 0:
+            raise RuntimeError('No public mid price returned for symbol')
+        # allMids is midpoint only; use a tight synthetic spread around real mid for simulator bookkeeping.
+        spread = max(px * 0.00004, 0.2)
+        bid = px - spread / 2
+        ask = px + spread / 2
+        return {
+            'last': round2(px),
+            'bid': round2(bid),
+            'ask': round2(ask),
+            'spread': round2(ask - bid),
+            'spread_pct': round2(((ask - bid) / max((ask + bid) / 2, 1)) * 100),
+            'source': 'hyperliquid_public_allMids',
+        }
+
+    def fetch_candles(self, interval: str = '15m', bars: int = 24) -> list[dict[str, Any]]:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(minutes=15 * bars)
+        payload = {
+            'type': 'candleSnapshot',
+            'req': {
+                'coin': self.symbol,
+                'interval': interval,
+                'startTime': int(start.timestamp() * 1000),
+                'endTime': int(end.timestamp() * 1000),
+            },
+        }
+        rows = self._post(payload)
+        candles = []
+        for r in rows[-bars:]:
+            candles.append({
+                'time': r.get('t') or r.get('time'),
+                'open': float(r.get('o', 0)),
+                'high': float(r.get('h', 0)),
+                'low': float(r.get('l', 0)),
+                'close': float(r.get('c', 0)),
+                'volume': float(r.get('v', 0)),
+            })
+        return candles
 
 
 class HyperliquidFuturesPaperTrack:
@@ -81,7 +142,8 @@ class HyperliquidFuturesPaperTrack:
     def __init__(self):
         self.risk = FuturesRiskLimits()
         self.fees = FuturesFeeModel()
-        self.feed = MockPublicFeed()
+        self.feed = HyperliquidPublicFeed(symbol='ETH')
+        self.fallback_feed = MockPublicFeed()
         self.state: dict[str, Any] = {
             'track': 'hyperliquid_futures_paper',
             'paper_only': True,
@@ -115,39 +177,82 @@ class HyperliquidFuturesPaperTrack:
         exit_fee = notional * (self.fees.taker_bps / 10000.0)
         return round2(entry_fee), round2(exit_fee), round2(entry_fee + exit_fee)
 
-    def _regime_from_tick(self, tick: dict[str, float]) -> dict[str, Any]:
+    def _regime_from_market(self, tick: dict[str, float], candles: list[dict[str, Any]]) -> dict[str, Any]:
         sp = tick['spread_pct']
         if sp > 0.03:
-            regime = 'low_edge'
-            confidence = 0.82
-            reason = 'Spread too wide for efficient paper futures execution.'
-        elif abs(tick['last'] - self.feed.last_price) > 6:
-            regime = 'breakout'
-            confidence = 0.7
-            reason = 'Large synthetic tick displacement.'
-        else:
-            regime = 'chop'
-            confidence = 0.6
-            reason = 'Synthetic price action in compressed range.'
+            return {
+                'regime': 'low_edge',
+                'confidence': 0.82,
+                'reason': 'Spread too wide for efficient paper futures execution.',
+            }
+
+        closes = [c['close'] for c in candles if c.get('close')]
+        highs = [c['high'] for c in candles if c.get('high')]
+        lows = [c['low'] for c in candles if c.get('low')]
+        if len(closes) < 6 or len(highs) < 6 or len(lows) < 6:
+            return {
+                'regime': 'low_edge',
+                'confidence': 0.55,
+                'reason': 'Insufficient public candle depth for robust regime classification.',
+            }
+
+        recent = closes[-6:]
+        net_move = recent[-1] - recent[0]
+        step = sum(abs(recent[i] - recent[i - 1]) for i in range(1, len(recent)))
+        directionality = abs(net_move) / max(step, 0.1)
+        six_high = max(highs[-6:])
+        six_low = min(lows[-6:])
+        six_range = max(six_high - six_low, 0.1)
+        compression = six_range / max(recent[-1], 1)
+
+        if recent[-1] > max(highs[-6:-1]) or recent[-1] < min(lows[-6:-1]):
+            return {
+                'regime': 'breakout',
+                'confidence': round2(min(0.9, 0.62 + directionality * 0.2)),
+                'reason': 'Public candle structure shows short-term breakout displacement.',
+            }
+        if directionality > 0.62 and compression > 0.004:
+            return {
+                'regime': 'trend',
+                'confidence': round2(min(0.9, 0.56 + directionality * 0.25)),
+                'reason': 'Public candle sequence shows directional follow-through.',
+            }
+        if compression <= 0.0045:
+            return {
+                'regime': 'chop',
+                'confidence': 0.66,
+                'reason': 'Public candle range is compressed/choppy.',
+            }
         return {
-            'regime': regime,
-            'confidence': confidence,
-            'reason': reason,
+            'regime': 'low_edge',
+            'confidence': 0.58,
+            'reason': 'Public market structure does not show clear edge.',
         }
 
     def run_scan(self) -> dict[str, Any]:
-        tick = self.feed.next_tick()
-        regime = self._regime_from_tick(tick)
+        source = 'hyperliquid_public'
+        candles: list[dict[str, Any]] = []
+        try:
+            tick = self.feed.fetch_tick()
+            candles = self.feed.fetch_candles(interval='15m', bars=24)
+        except Exception:
+            source = 'mock_fallback'
+            tick = self.fallback_feed.next_tick()
+            candles = []
+
+        regime = self._regime_from_market(tick, candles)
         latest = {
             'timestamp': now_iso(),
             'track': self.state['track'],
             'paper_only': True,
             'symbol': self.state['symbol'],
+            'market_source': source,
             'market': tick,
+            'candles': candles[-24:],
             'regime': regime,
             'decision': {
                 'status': 'WAIT',
-                'reason': 'Phase 3 simulator active (mock/public-only). No auto execution enabled.',
+                'reason': 'Phase 3 simulator active (paper/public-data training only). No auto execution enabled.',
             },
             'risk_limits': self.state['risk_limits'],
             'fee_model': self.state['fee_model'],
@@ -164,7 +269,10 @@ class HyperliquidFuturesPaperTrack:
         if len(self.state['positions']) >= self.risk.max_positions:
             return {'ok': False, 'reason': 'max positions reached'}
 
-        tick = self.feed.next_tick()
+        try:
+            tick = self.feed.fetch_tick()
+        except Exception:
+            tick = self.fallback_feed.next_tick()
         px = tick['ask'] if side == 'BUY' else tick['bid']
         lev = float(leverage or self.state['leverage_default'])
         lev = min(max(1.0, lev), self.risk.max_leverage)
