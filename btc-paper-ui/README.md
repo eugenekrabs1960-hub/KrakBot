@@ -35,6 +35,7 @@ Local-only paper-trading dashboard.
   - fallback synthetic feed only if public API is temporarily unavailable
   - Hyperliquid perps base fee model in paper simulation (maker 1.5 bps / taker 4.5 bps)
   - funding tracked as placeholder (`funding_mode=placeholder_zero`) until a real funding accrual model is introduced
+  - controlled paper proposal/open/close simulation enabled (TP/SL closes, risk-capped paper entries)
   - no private execution and no live trading routes
 
 ## API

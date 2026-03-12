@@ -44,7 +44,11 @@ class FuturesPosition:
     leverage: float
     margin_used: float
     liquidation_price_estimate: float
+    stop_loss: float
+    take_profit: float
+    signal_id: str
     open_time: str
+    status: str = 'PAPER_OPEN'
     fee_model: str = 'maker_taker_bps'
     entry_liquidity: str = 'taker'
     exit_liquidity: str = 'taker'
@@ -53,6 +57,8 @@ class FuturesPosition:
     estimated_total_fees: float = 0.0
     unrealized_pnl_gross: float = 0.0
     unrealized_pnl_net: float = 0.0
+    max_favorable_excursion: float = 0.0
+    max_adverse_excursion: float = 0.0
 
 
 class MockPublicFeed:
@@ -158,8 +164,10 @@ class HyperliquidFuturesPaperTrack:
             'symbol': 'ETH-PERP',
             'leverage_default': 2.0,
             'positions': [],
+            'closed_trades': [],
             'history': [],
             'latest': None,
+            'executed_signal_ids': [],
             'risk_limits': asdict(self.risk),
             'fee_model': asdict(self.fees),
             'execution_fee_assumption': {
@@ -242,6 +250,133 @@ class HyperliquidFuturesPaperTrack:
             'reason': 'Public market structure does not show clear edge.',
         }
 
+    def _compute_qty(self, entry_price: float) -> float:
+        cap_qty = self.risk.max_position_notional_usd / max(entry_price, 1.0)
+        return round(max(0.001, min(0.03, cap_qty)), 4)
+
+    def _build_proposal(self, tick: dict[str, Any], candles: list[dict[str, Any]], regime: dict[str, Any]) -> dict[str, Any]:
+        if regime.get('regime') not in {'trend', 'breakout'}:
+            return {'status': 'WAIT', 'reason': 'No futures entry: regime not actionable for controlled simulator.'}
+        if len(candles) < 8:
+            return {'status': 'WAIT', 'reason': 'No futures entry: insufficient candle depth.'}
+
+        closes = [c['close'] for c in candles[-8:]]
+        highs = [c['high'] for c in candles[-8:]]
+        lows = [c['low'] for c in candles[-8:]]
+        up = closes[-1] >= closes[0]
+        side = 'BUY' if up else 'SELL'
+        entry = tick['ask'] if side == 'BUY' else tick['bid']
+        if side == 'BUY':
+            stop = min(lows[-5:]) * 0.999
+            risk = max(entry - stop, entry * 0.0025)
+            stop = entry - risk
+            tp = entry + risk * 1.8
+        else:
+            stop = max(highs[-5:]) * 1.001
+            risk = max(stop - entry, entry * 0.0025)
+            stop = entry + risk
+            tp = entry - risk * 1.8
+        qty = self._compute_qty(entry)
+        signal_id = f"{self.state['track']}|{candles[-1].get('time')}|{side}"
+        return {
+            'status': 'PROPOSE_TRADE',
+            'side': side,
+            'entry_price': round2(entry),
+            'stop_loss': round2(stop),
+            'take_profit': round2(tp),
+            'risk_reward_ratio': 1.8,
+            'qty': qty,
+            'signal_id': signal_id,
+            'reason': f"Controlled futures proposal from {regime.get('regime')} regime.",
+        }
+
+    def _open_from_proposal(self, proposal: dict[str, Any], tick: dict[str, Any]) -> dict[str, Any]:
+        side = proposal['side']
+        qty = float(proposal['qty'])
+        lev = min(max(1.0, float(self.state['leverage_default'])), self.risk.max_leverage)
+        entry = float(proposal['entry_price'])
+        notional = entry * qty
+        if len(self.state['positions']) >= self.risk.max_positions:
+            return {'ok': False, 'reason': 'max positions reached'}
+        if notional > self.risk.max_position_notional_usd:
+            return {'ok': False, 'reason': 'position notional exceeds per-position cap'}
+        exposure = sum(p['entry_price'] * p['qty'] for p in self.state['positions'])
+        if exposure + notional > self.risk.max_total_exposure_usd:
+            return {'ok': False, 'reason': 'total exposure cap exceeded'}
+
+        margin_used = notional / lev
+        liq = self._estimate_liq_price(side, entry, lev)
+        entry_liq = self.state.get('execution_fee_assumption', {}).get('entry_liquidity', 'taker')
+        exit_liq = self.state.get('execution_fee_assumption', {}).get('exit_liquidity', 'taker')
+        efee, xfee, tfee = self._estimate_fees(notional, entry_liq, exit_liq)
+        p = FuturesPosition(
+            symbol=self.state['symbol'],
+            side=side,
+            qty=qty,
+            entry_price=entry,
+            leverage=lev,
+            margin_used=round2(margin_used),
+            liquidation_price_estimate=liq,
+            stop_loss=float(proposal['stop_loss']),
+            take_profit=float(proposal['take_profit']),
+            signal_id=proposal['signal_id'],
+            open_time=now_iso(),
+            entry_liquidity=entry_liq,
+            exit_liquidity=exit_liq,
+            estimated_entry_fee=efee,
+            estimated_exit_fee=xfee,
+            estimated_total_fees=tfee,
+        )
+        self.state['positions'].append(asdict(p))
+        self.state['executed_signal_ids'].append(proposal['signal_id'])
+        self.state['executed_signal_ids'] = self.state['executed_signal_ids'][-500:]
+        return {'ok': True, 'position': asdict(p)}
+
+    def _update_positions(self, tick: dict[str, Any]) -> list[dict[str, Any]]:
+        closed = []
+        still = []
+        for p in self.state['positions']:
+            side = p['side']
+            qty = float(p['qty'])
+            entry = float(p['entry_price'])
+            mark = tick['bid'] if side == 'BUY' else tick['ask']
+            gross = (mark - entry) * qty if side == 'BUY' else (entry - mark) * qty
+            net = gross - float(p.get('estimated_total_fees', 0))
+            p['unrealized_pnl_gross'] = round2(gross)
+            p['unrealized_pnl_net'] = round2(net)
+            p['max_favorable_excursion'] = round2(max(float(p.get('max_favorable_excursion', 0)), gross if gross > 0 else 0))
+            p['max_adverse_excursion'] = round2(max(float(p.get('max_adverse_excursion', 0)), -gross if gross < 0 else 0))
+
+            tp_hit = (side == 'BUY' and tick['bid'] >= p['take_profit']) or (side == 'SELL' and tick['ask'] <= p['take_profit'])
+            sl_hit = (side == 'BUY' and tick['bid'] <= p['stop_loss']) or (side == 'SELL' and tick['ask'] >= p['stop_loss'])
+            if tp_hit or sl_hit:
+                exit_price = p['take_profit'] if tp_hit else p['stop_loss']
+                gross_realized = (exit_price - entry) * qty if side == 'BUY' else (entry - exit_price) * qty
+                notional_exit = exit_price * qty
+                exit_fee = round2(notional_exit * (self._fee_bps(p.get('exit_liquidity', 'taker')) / 10000.0))
+                total_fees = round2(float(p.get('estimated_entry_fee', 0)) + exit_fee)
+                net_realized = round2(gross_realized - total_fees)
+                closed_trade = {
+                    **p,
+                    'status': 'PAPER_CLOSED',
+                    'close_time': now_iso(),
+                    'close_reason': 'TAKE_PROFIT' if tp_hit else 'STOP_LOSS',
+                    'close_price': round2(exit_price),
+                    'gross_realized_pnl': round2(gross_realized),
+                    'net_realized_pnl': net_realized,
+                    'realized_pnl': net_realized,
+                    'estimated_exit_fee': exit_fee,
+                    'estimated_total_fees': total_fees,
+                }
+                closed.append(closed_trade)
+            else:
+                still.append(p)
+        self.state['positions'] = still
+        if closed:
+            self.state['closed_trades'].extend(closed)
+            self.state['closed_trades'] = self.state['closed_trades'][-300:]
+        return closed
+
     def run_scan(self) -> dict[str, Any]:
         source = 'hyperliquid_public'
         candles: list[dict[str, Any]] = []
@@ -254,6 +389,31 @@ class HyperliquidFuturesPaperTrack:
             candles = []
 
         regime = self._regime_from_market(tick, candles)
+        closed_now = self._update_positions(tick)
+        proposal = self._build_proposal(tick, candles, regime)
+        decision = proposal
+
+        if proposal.get('status') == 'PROPOSE_TRADE':
+            if proposal['signal_id'] in set(self.state.get('executed_signal_ids', [])):
+                decision = {'status': 'WAIT', 'reason': 'Duplicate signal skipped in paper simulator.'}
+            else:
+                opened = self._open_from_proposal(proposal, tick)
+                if opened.get('ok'):
+                    decision = {
+                        'status': 'PAPER_TRADE_OPEN',
+                        'reason': 'Controlled paper proposal auto-opened inside Hyperliquid paper track.',
+                        'proposal': proposal,
+                    }
+                else:
+                    decision = {'status': 'WAIT', 'reason': f"Paper risk guard blocked open: {opened.get('reason')}"}
+
+        if closed_now:
+            decision = {
+                'status': 'PAPER_TRADE_CLOSED',
+                'reason': f"Closed {len(closed_now)} paper position(s) by TP/SL.",
+                'closed': closed_now[-3:],
+            }
+
         latest = {
             'timestamp': now_iso(),
             'track': self.state['track'],
@@ -263,13 +423,13 @@ class HyperliquidFuturesPaperTrack:
             'market': tick,
             'candles': candles[-24:],
             'regime': regime,
-            'decision': {
-                'status': 'WAIT',
-                'reason': 'Phase 3 simulator active (paper/public-data training only). No auto execution enabled.',
-            },
+            'decision': decision,
             'risk_limits': self.state['risk_limits'],
             'fee_model': self.state['fee_model'],
+            'execution_fee_assumption': self.state.get('execution_fee_assumption', {}),
             'positions_open': len(self.state['positions']),
+            'positions': self.state['positions'][-20:],
+            'closed_trades': self.state['closed_trades'][-20:],
             'max_positions': self.risk.max_positions,
         }
         self.state['latest'] = latest
@@ -302,6 +462,9 @@ class HyperliquidFuturesPaperTrack:
         exit_liq = self.state.get('execution_fee_assumption', {}).get('exit_liquidity', 'taker')
         efee, xfee, tfee = self._estimate_fees(notional, entry_liq, exit_liq)
 
+        risk = max(px * 0.0025, 1.0)
+        stop = round2(px - risk) if side == 'BUY' else round2(px + risk)
+        tp = round2(px + risk * 1.8) if side == 'BUY' else round2(px - risk * 1.8)
         p = FuturesPosition(
             symbol=self.state['symbol'],
             side=side,
@@ -310,6 +473,9 @@ class HyperliquidFuturesPaperTrack:
             leverage=lev,
             margin_used=round2(margin_used),
             liquidation_price_estimate=liq,
+            stop_loss=stop,
+            take_profit=tp,
+            signal_id=f"manual|{now_iso()}|{side}",
             open_time=now_iso(),
             entry_liquidity=entry_liq,
             exit_liquidity=exit_liq,
@@ -324,5 +490,6 @@ class HyperliquidFuturesPaperTrack:
         return {
             **self.state,
             'positions': self.state['positions'][-30:],
+            'closed_trades': self.state['closed_trades'][-100:],
             'history': self.state['history'][-100:],
         }
