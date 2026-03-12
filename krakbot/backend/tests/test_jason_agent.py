@@ -1,3 +1,4 @@
+import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -11,11 +12,12 @@ def _prep_db(path):
         conn.execute(text("CREATE TABLE agent_decision_packets (id INTEGER PRIMARY KEY AUTOINCREMENT, ts BIGINT, agent_id TEXT, symbol TEXT, action TEXT, confidence DOUBLE, rationale TEXT, context_json TEXT, risk_json TEXT, execution_json TEXT, outcome_json TEXT, created_at TEXT)"))
         conn.execute(text("CREATE TABLE hyperliquid_training_features (id INTEGER PRIMARY KEY AUTOINCREMENT, ts BIGINT, symbol TEXT, environment TEXT, mid_price DOUBLE, ret_1 DOUBLE, ret_5 DOUBLE, ret_15 DOUBLE, source TEXT)"))
         conn.execute(text("CREATE TABLE agent_virtual_trades (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, symbol TEXT, side TEXT, leverage DOUBLE, allocation_pct DOUBLE, margin_usd DOUBLE, entry_price DOUBLE, exit_price DOUBLE, qty DOUBLE, status TEXT, rationale TEXT, opened_at_ms BIGINT, closed_at_ms BIGINT, realized_pnl_usd DOUBLE, balance_after_usd DOUBLE, meta_json TEXT, created_at TEXT)"))
+        now_ms = int(time.time() * 1000)
         for i in range(20):
-            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'BTC','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 100 + i})
-            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'ETH','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 200 + i})
-            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'SOL','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': 1000 + i, 'px': 50 + i})
-            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'DOGE','testnet',:px,0.015,0.01,0.005,'x')"), {'ts': 1000 + i, 'px': 1 + i*0.01})
+            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'BTC','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': now_ms - (20-i)*1000, 'px': 100 + i})
+            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'ETH','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': now_ms - (20-i)*1000, 'px': 200 + i})
+            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'SOL','testnet',:px,0.01,0.02,0.03,'x')"), {'ts': now_ms - (20-i)*1000, 'px': 50 + i})
+            conn.execute(text("INSERT INTO hyperliquid_training_features(ts,symbol,environment,mid_price,ret_1,ret_5,ret_15,source) VALUES (:ts,'DOGE','testnet',:px,0.015,0.01,0.005,'x')"), {'ts': now_ms - (20-i)*1000, 'px': 1 + i*0.01})
     return eng
 
 

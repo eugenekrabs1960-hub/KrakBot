@@ -234,3 +234,10 @@ export async function setJasonRiskProfile(profile: 'conservative' | 'balanced' |
   });
   return parseJsonOrThrow(res);
 }
+
+
+export async function getJasonBenchmarkReasoning(limit = 200) {
+  const bounded = Math.max(1, Math.min(limit, 2000));
+  const res = await fetch(`${API_BASE}/agents/jason/benchmark-reasoning?limit=${bounded}`);
+  return parseJsonOrThrow(res);
+}

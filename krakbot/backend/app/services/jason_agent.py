@@ -18,6 +18,7 @@ JASON_AGENT_ID = 'jason'
 INITIAL_BALANCE = 1000.0
 RISK_PROFILE_KEY = 'agent_jason_risk_profile'
 RISK_PROFILES = {'conservative','balanced','aggressive'}
+MAX_SNAPSHOT_AGE_MS = 20 * 60 * 1000
 
 
 @dataclass
@@ -160,6 +161,22 @@ def get_risk_profile(db: Session):
     return {'ok': True, 'profile': _load_risk_profile(db), 'allowed': sorted(RISK_PROFILES)}
 
 
+
+
+def _is_tradable_symbol(sym: str, row: dict, now_ms: int) -> bool:
+    s = str(sym or '').upper().strip()
+    if not s or len(s) > 16:
+        return False
+    if not re.match(r'^[A-Z0-9_\-]+$', s):
+        return False
+    ts = int(row.get('ts') or 0)
+    if ts <= 0 or (now_ms - ts) > MAX_SNAPSHOT_AGE_MS:
+        return False
+    mid = float(row.get('mid_price') or 0.0)
+    if mid <= 0:
+        return False
+    return True
+
 def _latest_market_snapshot(db: Session) -> dict:
     rows = db.execute(
         text(
@@ -167,21 +184,25 @@ def _latest_market_snapshot(db: Session) -> dict:
             SELECT symbol, ts, mid_price, ret_1, ret_5, ret_15
             FROM hyperliquid_training_features
             ORDER BY ts DESC
-            LIMIT 3000
+            LIMIT 5000
             """
         )
     ).mappings().all()
     out: dict[str, dict] = {}
+    now_ms = _now_ms()
     for r in rows:
         sym = str(r.get('symbol') or '').upper()
-        if sym and sym not in out:
-            out[sym] = {
-                'ts': int(r.get('ts') or 0),
-                'mid_price': float(r.get('mid_price') or 0.0),
-                'ret_1': float(r.get('ret_1') or 0.0),
-                'ret_5': float(r.get('ret_5') or 0.0),
-                'ret_15': float(r.get('ret_15') or 0.0),
-            }
+        if sym in out:
+            continue
+        if not _is_tradable_symbol(sym, r, now_ms):
+            continue
+        out[sym] = {
+            'ts': int(r.get('ts') or 0),
+            'mid_price': float(r.get('mid_price') or 0.0),
+            'ret_1': float(r.get('ret_1') or 0.0),
+            'ret_5': float(r.get('ret_5') or 0.0),
+            'ret_15': float(r.get('ret_15') or 0.0),
+        }
     return out
 
 
@@ -590,6 +611,44 @@ def get_jason_state(db: Session):
     open_trade = _get_open_trade(db)
     return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, 'open_trade': open_trade, 'risk_profile': _load_risk_profile(db)}
 
+
+
+def export_benchmark_reasoning_rows(db: Session, *, agent_id: str = JASON_AGENT_ID, limit: int = 500):
+    rows = db.execute(
+        text(
+            """
+            SELECT id, ts, agent_id, symbol, action, confidence, rationale, context_json
+            FROM agent_decision_packets
+            WHERE agent_id=:agent_id
+            ORDER BY id DESC
+            LIMIT :limit
+            """
+        ),
+        {'agent_id': agent_id, 'limit': max(1, min(5000, int(limit)))},
+    ).mappings().all()
+
+    out = []
+    for r in rows:
+        ctx = r.get('context_json') or {}
+        if isinstance(ctx, str):
+            try:
+                ctx = json.loads(ctx)
+            except Exception:
+                ctx = {}
+        br = (ctx or {}).get('benchmark_reasoning') or {}
+        out.append({
+            'packet_id': r.get('id'),
+            'ts': r.get('ts'),
+            'agent_id': r.get('agent_id'),
+            'trade_symbol': r.get('symbol'),
+            'trade_action': r.get('action'),
+            'trade_confidence': r.get('confidence'),
+            'trade_rationale': r.get('rationale'),
+            'btc': br.get('BTC') or {},
+            'eth': br.get('ETH') or {},
+            'sol': br.get('SOL') or {},
+        })
+    return {'ok': True, 'items': out, 'count': len(out)}
 
 def list_jason_trades(db: Session, limit: int = 100):
     rows = db.execute(
