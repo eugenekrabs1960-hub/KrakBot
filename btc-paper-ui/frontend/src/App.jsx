@@ -194,6 +194,9 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   const risk = hstate.risk_limits || {}
   const fees = hstate.fee_model || {}
   const feeAssumption = hstate.execution_fee_assumption || {}
+  const activeStrategyKey = latest.active_strategy_key || hstate.active_strategy_key
+  const activeStrategy = latest.active_strategy_entry || (hstate.strategy_registry || {})[activeStrategyKey] || {}
+  const metrics = (hstate.metrics || {}).strategy_overall?.[activeStrategyKey] || {}
   const positions = hstate.positions || []
   const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
   const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
@@ -210,6 +213,9 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
+      </div>
+      <div style={{ fontSize: 12, marginTop: 4 }}>
+        <strong>Active strategy:</strong> {activeStrategyKey || '-'} | <strong>Family:</strong> {activeStrategy.family || '-'} | <strong>Status:</strong> {activeStrategy.status || '-'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
@@ -230,6 +236,14 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <div><strong>Max positions</strong><div>{risk.max_positions ?? '-'}</div></div>
         <div><strong>Max leverage</strong><div>{risk.max_leverage ?? '-'}x</div></div>
         <div><strong>Per-position risk cap</strong><div>{risk.max_risk_per_position_pct ?? '-'}%</div></div>
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+        <strong>Strategy learning snapshot</strong>
+        <div>Opened: {metrics.total_opened ?? 0} | Closed: {metrics.total_closed ?? 0} | Open: {metrics.open_positions ?? 0}</div>
+        <div>TP / SL / STALE: {metrics.tp_closes ?? 0} / {metrics.sl_closes ?? 0} / {metrics.time_exit_stale_closes ?? 0}</div>
+        <div>Net realized: {fmt2(metrics.net_realized_pnl)} | Net unrealized: {fmt2(metrics.net_unrealized_pnl)} | Fees: {fmt2(metrics.total_fees)} | Fee drag: {fmt2(metrics.fee_drag_pct)}%</div>
+        <div>Expectancy (net): {fmt2(metrics.expectancy_net)} | Median time-to-close: {metrics.median_time_to_close_min ?? 0} min</div>
       </div>
 
       <div style={{ marginTop: 10 }}>

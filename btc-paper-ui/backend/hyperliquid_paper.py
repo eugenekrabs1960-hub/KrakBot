@@ -28,9 +28,53 @@ def bucket_price(value: float, bucket_pct: float = 0.20) -> float:
     return round2(round(value / step) * step)
 
 
+def blank_metrics() -> dict[str, Any]:
+    return {
+        'total_opened': 0,
+        'total_closed': 0,
+        'open_positions': 0,
+        'tp_closes': 0,
+        'sl_closes': 0,
+        'time_exit_stale_closes': 0,
+        'gross_realized_pnl': 0.0,
+        'net_realized_pnl': 0.0,
+        'gross_unrealized_pnl': 0.0,
+        'net_unrealized_pnl': 0.0,
+        'total_fees': 0.0,
+        'fee_drag_pct': 0.0,
+        'expectancy_net': 0.0,
+        'median_time_to_close_min': 0,
+        'avg_tp_progress_at_stale_close': 0.0,
+        'risk_guard_blocks': 0,
+        'duplicate_signal_skips': 0,
+        'sample_closed': 0,
+    }
+
+
 STALE_EXIT_MIN_BARS = 8
 STALE_EXIT_MIN_TP_PROGRESS = 0.35
 BAR_MINUTES = 15
+
+HL_STRATEGY_REGISTRY = {
+    'hl_15m_trend_follow': {
+        'strategy_key': 'hl_15m_trend_follow',
+        'label': 'HL 15m trend-follow (active)',
+        'family': 'trend_follow',
+        'status': 'active',
+        'paper_only': True,
+        'shadow_only': False,
+        'allowed_regimes': ['trend', 'breakout'],
+    },
+    'hl_15m_breakout_retest': {
+        'strategy_key': 'hl_15m_breakout_retest',
+        'label': 'HL 15m breakout-retest (planned shadow)',
+        'family': 'breakout_retest',
+        'status': 'planned_shadow',
+        'paper_only': True,
+        'shadow_only': True,
+        'allowed_regimes': ['breakout', 'trend'],
+    },
+}
 
 
 @dataclass
@@ -55,6 +99,9 @@ class FuturesFeeModel:
 @dataclass
 class FuturesPosition:
     symbol: str
+    strategy_key: str
+    strategy_family: str
+    market_regime: str
     side: str
     qty: float
     entry_price: float
@@ -179,6 +226,8 @@ class HyperliquidFuturesPaperTrack:
             'private_execution_enabled': False,
             'exchange_execution_routes': [],
             'symbol': 'ETH-PERP',
+            'active_strategy_key': 'hl_15m_trend_follow',
+            'strategy_registry': HL_STRATEGY_REGISTRY,
             'leverage_default': 2.0,
             'positions': [],
             'closed_trades': [],
@@ -191,6 +240,11 @@ class HyperliquidFuturesPaperTrack:
                 'entry_liquidity': 'taker',
                 'exit_liquidity': 'taker',
                 'note': 'Paper simulator assumes taker fills for conservative cost modeling.',
+            },
+            'metrics': {
+                'strategy_overall': {'hl_15m_trend_follow': blank_metrics()},
+                'strategy_regime': {},
+                'strategy_symbol': {'hl_15m_trend_follow|ETH-PERP': blank_metrics()},
             },
             'learning': {
                 'notes': 'Mock/public-style futures simulator track initialized.',
@@ -300,6 +354,9 @@ class HyperliquidFuturesPaperTrack:
         signal_id = f"{self.state['track']}|{candles[-1].get('time')}|{side}|e:{e_fp}|s:{s_fp}|t:{t_fp}"
         return {
             'status': 'PROPOSE_TRADE',
+            'strategy_key': self.state.get('active_strategy_key', 'hl_15m_trend_follow'),
+            'strategy_family': (self.state.get('strategy_registry', {}).get(self.state.get('active_strategy_key', 'hl_15m_trend_follow'), {}) or {}).get('family', 'trend_follow'),
+            'market_regime': regime.get('regime'),
             'side': side,
             'entry_price': round2(entry),
             'stop_loss': round2(stop),
@@ -337,6 +394,9 @@ class HyperliquidFuturesPaperTrack:
         efee, xfee, tfee = self._estimate_fees(notional, entry_liq, exit_liq)
         p = FuturesPosition(
             symbol=self.state['symbol'],
+            strategy_key=proposal.get('strategy_key', self.state.get('active_strategy_key', 'hl_15m_trend_follow')),
+            strategy_family=proposal.get('strategy_family', 'trend_follow'),
+            market_regime=proposal.get('market_regime', 'unknown'),
             side=side,
             qty=qty,
             entry_price=entry,
@@ -427,6 +487,67 @@ class HyperliquidFuturesPaperTrack:
             self.state['closed_trades'] = self.state['closed_trades'][-300:]
         return closed
 
+    def _recompute_metrics(self) -> None:
+        strategy_key = self.state.get('active_strategy_key', 'hl_15m_trend_follow')
+        symbol = self.state.get('symbol', 'ETH-PERP')
+        overall = blank_metrics()
+        by_regime: dict[str, Any] = {}
+        by_symbol = {f"{strategy_key}|{symbol}": blank_metrics()}
+
+        closed = self.state.get('closed_trades', [])
+        openp = self.state.get('positions', [])
+        hist = self.state.get('history', [])
+
+        overall['total_closed'] = len(closed)
+        overall['open_positions'] = len(openp)
+        overall['total_opened'] = len(closed) + len(openp)
+        overall['gross_realized_pnl'] = round2(sum(float(t.get('gross_realized_pnl', 0)) for t in closed))
+        overall['net_realized_pnl'] = round2(sum(float(t.get('net_realized_pnl', t.get('realized_pnl', 0))) for t in closed))
+        overall['gross_unrealized_pnl'] = round2(sum(float(p.get('unrealized_pnl_gross', 0)) for p in openp))
+        overall['net_unrealized_pnl'] = round2(sum(float(p.get('unrealized_pnl_net', 0)) for p in openp))
+        overall['total_fees'] = round2(sum(float(t.get('estimated_total_fees', 0)) for t in closed) + sum(float(p.get('estimated_total_fees', 0)) for p in openp))
+        overall['sample_closed'] = len(closed)
+        overall['expectancy_net'] = round2(overall['net_realized_pnl'] / len(closed)) if closed else 0.0
+        gross_total = overall['gross_realized_pnl'] + overall['gross_unrealized_pnl']
+        overall['fee_drag_pct'] = round2((overall['total_fees'] / abs(gross_total)) * 100) if gross_total else 0.0
+        overall['tp_closes'] = sum(1 for t in closed if t.get('close_reason') == 'TAKE_PROFIT')
+        overall['sl_closes'] = sum(1 for t in closed if t.get('close_reason') == 'STOP_LOSS')
+        overall['time_exit_stale_closes'] = sum(1 for t in closed if t.get('close_reason') == 'TIME_EXIT_STALE')
+        overall['risk_guard_blocks'] = sum(1 for h in hist[-300:] if 'risk guard blocked open' in str((h.get('decision', {}) or {}).get('reason', '')).lower())
+        overall['duplicate_signal_skips'] = sum(1 for h in hist[-300:] if 'duplicate signal skipped' in str((h.get('decision', {}) or {}).get('reason', '')).lower())
+        mins = sorted(int(t.get('minutes_open_at_close', 0)) for t in closed if t.get('minutes_open_at_close') is not None)
+        overall['median_time_to_close_min'] = (mins[len(mins)//2] if mins else 0)
+        stale_prog = [float(t.get('tp_progress_at_close', 0)) for t in closed if t.get('close_reason') == 'TIME_EXIT_STALE']
+        overall['avg_tp_progress_at_stale_close'] = round2(sum(stale_prog)/len(stale_prog)) if stale_prog else 0.0
+
+        # strategy x regime buckets (future-proof for additional strategies later)
+        regimes = ['trend', 'breakout', 'chop', 'low_edge']
+        for rg in regimes:
+            k = f"{strategy_key}|{rg}"
+            by_regime[k] = blank_metrics()
+            rg_closed = [t for t in closed if t.get('market_regime') == rg]
+            rg_open = [p for p in openp if p.get('market_regime') == rg]
+            by_regime[k]['total_closed'] = len(rg_closed)
+            by_regime[k]['open_positions'] = len(rg_open)
+            by_regime[k]['total_opened'] = len(rg_closed) + len(rg_open)
+            by_regime[k]['gross_realized_pnl'] = round2(sum(float(t.get('gross_realized_pnl', 0)) for t in rg_closed))
+            by_regime[k]['net_realized_pnl'] = round2(sum(float(t.get('net_realized_pnl', t.get('realized_pnl', 0))) for t in rg_closed))
+            by_regime[k]['total_fees'] = round2(sum(float(t.get('estimated_total_fees', 0)) for t in rg_closed) + sum(float(p.get('estimated_total_fees', 0)) for p in rg_open))
+            by_regime[k]['tp_closes'] = sum(1 for t in rg_closed if t.get('close_reason') == 'TAKE_PROFIT')
+            by_regime[k]['sl_closes'] = sum(1 for t in rg_closed if t.get('close_reason') == 'STOP_LOSS')
+            by_regime[k]['time_exit_stale_closes'] = sum(1 for t in rg_closed if t.get('close_reason') == 'TIME_EXIT_STALE')
+            by_regime[k]['sample_closed'] = len(rg_closed)
+            by_regime[k]['expectancy_net'] = round2(by_regime[k]['net_realized_pnl'] / len(rg_closed)) if rg_closed else 0.0
+
+        by_symbol_key = f"{strategy_key}|{symbol}"
+        by_symbol[by_symbol_key] = {**overall}
+
+        self.state['metrics'] = {
+            'strategy_overall': {strategy_key: overall},
+            'strategy_regime': by_regime,
+            'strategy_symbol': by_symbol,
+        }
+
     def run_scan(self) -> dict[str, Any]:
         source = 'hyperliquid_public'
         candles: list[dict[str, Any]] = []
@@ -460,9 +581,11 @@ class HyperliquidFuturesPaperTrack:
         if closed_now:
             decision = {
                 'status': 'PAPER_TRADE_CLOSED',
-                'reason': f"Closed {len(closed_now)} paper position(s) by TP/SL.",
+                'reason': f"Closed {len(closed_now)} paper position(s) by TP/SL/STALE.",
                 'closed': closed_now[-3:],
             }
+
+        self._recompute_metrics()
 
         latest = {
             'timestamp': now_iso(),
@@ -474,9 +597,12 @@ class HyperliquidFuturesPaperTrack:
             'candles': candles[-24:],
             'regime': regime,
             'decision': decision,
+            'active_strategy_key': self.state.get('active_strategy_key'),
+            'active_strategy_entry': (self.state.get('strategy_registry', {}) or {}).get(self.state.get('active_strategy_key', 'hl_15m_trend_follow')),
             'risk_limits': self.state['risk_limits'],
             'fee_model': self.state['fee_model'],
             'execution_fee_assumption': self.state.get('execution_fee_assumption', {}),
+            'metrics': self.state.get('metrics', {}),
             'positions_open': len(self.state['positions']),
             'positions': self.state['positions'][-20:],
             'closed_trades': self.state['closed_trades'][-20:],
@@ -517,6 +643,9 @@ class HyperliquidFuturesPaperTrack:
         tp = round2(px + risk * 1.8) if side == 'BUY' else round2(px - risk * 1.8)
         p = FuturesPosition(
             symbol=self.state['symbol'],
+            strategy_key=self.state.get('active_strategy_key', 'hl_15m_trend_follow'),
+            strategy_family=(self.state.get('strategy_registry', {}).get(self.state.get('active_strategy_key', 'hl_15m_trend_follow'), {}) or {}).get('family', 'trend_follow'),
+            market_regime=((self.state.get('latest') or {}).get('regime') or {}).get('regime', 'manual'),
             side=side,
             qty=qty,
             entry_price=px,
@@ -534,6 +663,7 @@ class HyperliquidFuturesPaperTrack:
             estimated_total_fees=tfee,
         )
         self.state['positions'].append(asdict(p))
+        self._recompute_metrics()
         return {'ok': True, 'position': asdict(p)}
 
     def get_state(self) -> dict[str, Any]:
