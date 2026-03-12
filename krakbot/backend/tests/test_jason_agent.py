@@ -41,6 +41,7 @@ def test_jason_run_once_opens_and_tracks(tmp_path, monkeypatch):
         trades = jason_agent.list_jason_trades(db, limit=10)
         assert trades['ok'] is True
         assert len(trades['items']) == 1
+        assert 'unrealized_pnl_usd' in trades['items'][0]
 
 
 def test_execute_jason_decision_path(tmp_path):

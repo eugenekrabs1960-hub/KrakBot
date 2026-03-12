@@ -474,4 +474,38 @@ def list_jason_trades(db: Session, limit: int = 100):
         ),
         {'agent_id': JASON_AGENT_ID, 'limit': max(1, min(500, int(limit)))},
     ).mappings().all()
-    return {'ok': True, 'items': [dict(r) for r in rows]}
+
+    symbols = sorted({str(r.get('symbol') or '').upper() for r in rows if r.get('symbol')})
+    latest_px: dict[str, float] = {}
+    for sym in symbols:
+        px_row = db.execute(
+            text(
+                """
+                SELECT mid_price
+                FROM hyperliquid_training_features
+                WHERE symbol=:symbol
+                ORDER BY ts DESC
+                LIMIT 1
+                """
+            ),
+            {'symbol': sym},
+        ).mappings().first()
+        if px_row and px_row.get('mid_price') is not None:
+            latest_px[sym] = float(px_row.get('mid_price') or 0.0)
+
+    items = []
+    for r in rows:
+        d = dict(r)
+        d['unrealized_pnl_usd'] = None
+        if str(d.get('status') or '').lower() == 'open':
+            sym = str(d.get('symbol') or '').upper()
+            px = float(latest_px.get(sym) or 0.0)
+            entry = float(d.get('entry_price') or 0.0)
+            qty = float(d.get('qty') or 0.0)
+            side = str(d.get('side') or '').lower()
+            if px > 0 and entry > 0 and qty > 0:
+                direction = 1.0 if side == 'long' else -1.0
+                d['unrealized_pnl_usd'] = (px - entry) * qty * direction
+        items.append(d)
+
+    return {'ok': True, 'items': items}

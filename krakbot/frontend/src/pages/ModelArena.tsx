@@ -220,7 +220,9 @@ export default function ModelArena() {
         symbol: t.symbol,
         leverage: `${Number(t.leverage || 0).toFixed(1)}x`,
         entry: Number(t.entry_price || 0).toFixed(2),
-        pnl: t.realized_pnl_usd == null ? 'n/a' : Number(t.realized_pnl_usd).toFixed(2),
+        pnl: t.realized_pnl_usd == null
+          ? (t.unrealized_pnl_usd == null ? 'n/a' : `${Number(t.unrealized_pnl_usd).toFixed(2)} (uPnL)`)
+          : Number(t.realized_pnl_usd).toFixed(2),
         verified: true,
       }));
     }
