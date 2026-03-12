@@ -248,3 +248,15 @@ export async function exportJasonBenchmarkReasoningCsv(limit = 5000) {
   const res = await fetch(`${API_BASE}/agents/jason/benchmark-reasoning/export-job?limit=${bounded}`, { method: 'POST' });
   return parseJsonOrThrow(res);
 }
+
+
+export async function exportBenchmarkReasoningDataset(agentId = 'jason', limit = 5000) {
+  const q = new URLSearchParams({ agent_id: agentId, limit: String(Math.max(1, Math.min(limit, 50000))) });
+  const res = await fetch(`${API_BASE}/model-lab/benchmark-reasoning/export-job?${q.toString()}`, { method: 'POST' });
+  return parseJsonOrThrow(res);
+}
+
+export async function getLastBenchmarkReasoningDataset() {
+  const res = await fetch(`${API_BASE}/model-lab/benchmark-reasoning/last-export`);
+  return parseJsonOrThrow(res);
+}

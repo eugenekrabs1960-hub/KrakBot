@@ -11,6 +11,8 @@ from app.services.model_lab import (
     set_active_model_for_paper,
     strategy_benchmarks,
     train_baseline,
+    register_benchmark_dataset_export,
+    get_last_benchmark_dataset_export,
 )
 
 
@@ -19,6 +21,7 @@ def _prep_db(path):
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE hyperliquid_training_features (id INTEGER PRIMARY KEY AUTOINCREMENT, ts BIGINT, symbol TEXT, environment TEXT, mid_price DOUBLE, ret_1 DOUBLE, ret_5 DOUBLE, ret_15 DOUBLE, source TEXT)"))
         conn.execute(text("CREATE TABLE system_state (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"))
+        conn.execute(text("CREATE TABLE agent_decision_packets (id INTEGER PRIMARY KEY AUTOINCREMENT, ts BIGINT, agent_id TEXT, symbol TEXT, action TEXT, confidence DOUBLE, rationale TEXT, context_json TEXT, risk_json TEXT, execution_json TEXT, outcome_json TEXT)"))
         px = 100.0
         for i in range(120):
             px += 0.1
@@ -100,3 +103,26 @@ def test_execution_model_switch_rejects_empty_and_handles_duplicate(tmp_path):
         assert second['ok'] is True
         assert second.get('unchanged') is True
         assert second['item']['agent_id'] == 'agent_beta'
+
+
+def test_register_benchmark_dataset_export(tmp_path, monkeypatch):
+    eng = _prep_db(tmp_path / 'ml5.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    from app.services import model_lab, jason_agent
+    monkeypatch.setattr(model_lab, 'MODEL_DIR', tmp_path / 'data' / 'models')
+    monkeypatch.setattr(model_lab, 'JOB_LOG_PATH', (tmp_path / 'data' / 'models' / 'model_lab_jobs.jsonl'))
+    monkeypatch.setattr(jason_agent, 'BENCHMARK_EXPORT_DIR', tmp_path / 'data' / 'training')
+
+    with Session() as db:
+        ctx = '{"benchmark_reasoning": {"BTC": {"bias":"long"}, "ETH": {"bias":"hold"}, "SOL": {"bias":"short"}}}'
+        db.execute(text("INSERT INTO agent_decision_packets(ts,agent_id,symbol,action,confidence,rationale,context_json,risk_json,execution_json,outcome_json) VALUES (1000,'jason','DOGE','long',0.7,'x',:ctx,'{}','{}','{}')"), {'ctx': ctx})
+        db.commit()
+
+        out = register_benchmark_dataset_export(db, agent_id='jason', limit=100)
+        assert out['ok'] is True
+        assert out['item']['rows'] >= 1
+
+        last = get_last_benchmark_dataset_export(db)
+        assert last['ok'] is True
+        assert last['item']['agent_id'] == 'jason'

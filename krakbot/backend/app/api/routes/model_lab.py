@@ -11,6 +11,8 @@ from app.services.model_lab import (
     set_active_model_for_paper,
     strategy_benchmarks,
     train_baseline,
+    register_benchmark_dataset_export,
+    get_last_benchmark_dataset_export,
 )
 
 router = APIRouter(prefix='/model-lab', tags=['model-lab'])
@@ -54,3 +56,13 @@ def active_execution_model(db: Session = Depends(get_db)):
 @router.post('/set-active-execution-model')
 def switch_active_execution_model(agent_id: str, confirm_phrase: str, db: Session = Depends(get_db)):
     return set_active_execution_model(db, agent_id=agent_id, confirm_phrase=confirm_phrase)
+
+
+@router.post('/benchmark-reasoning/export-job')
+def benchmark_reasoning_export_job(agent_id: str = 'jason', limit: int = 5000, db: Session = Depends(get_db)):
+    return register_benchmark_dataset_export(db, agent_id=agent_id, limit=limit)
+
+
+@router.get('/benchmark-reasoning/last-export')
+def benchmark_reasoning_last_export(db: Session = Depends(get_db)):
+    return get_last_benchmark_dataset_export(db)

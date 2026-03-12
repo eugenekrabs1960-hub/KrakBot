@@ -7,6 +7,8 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services.jason_agent import export_benchmark_reasoning_csv
+
 MODEL_DIR = Path(__file__).resolve().parents[2] / 'data' / 'models'
 JOB_LOG_PATH = MODEL_DIR / 'model_lab_jobs.jsonl'
 
@@ -267,3 +269,83 @@ def strategy_benchmarks(db: Session, symbol: str = 'BTC', limit: int = 50000):
         run('Trend-Blend', lambda r: 1 if (float(r['ret_1']) + float(r['ret_5'])) > 0 else -1),
     ]
     return {'ok': True, 'items': items}
+
+
+def register_benchmark_dataset_export(db: Session, *, agent_id: str = 'jason', limit: int = 5000):
+    started_at = int(time.time() * 1000)
+    out = export_benchmark_reasoning_csv(db, agent_id=agent_id, limit=limit)
+    if not out.get('ok'):
+        _append_job_log({
+            'kind': 'benchmark_dataset_export',
+            'agent_id': agent_id,
+            'started_at_ms': started_at,
+            'finished_at_ms': int(time.time() * 1000),
+            'ok': False,
+            'error': out.get('error', 'export_failed'),
+        })
+        return out
+
+    payload_obj = {
+        'agent_id': agent_id,
+        'created_at_ms': int(time.time() * 1000),
+        'rows': out.get('rows', 0),
+        'path': out.get('path'),
+        'manifest_path': out.get('manifest_path'),
+        'dataset_hash_sha256': out.get('dataset_hash_sha256'),
+    }
+    payload = json.dumps(payload_obj)
+
+    dialect = getattr(getattr(db, 'bind', None), 'dialect', None)
+    dialect_name = getattr(dialect, 'name', '')
+    if dialect_name == 'postgresql':
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_lab_last_benchmark_dataset', CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    else:
+        db.execute(
+            text(
+                """
+                INSERT INTO system_state(key, value, updated_at)
+                VALUES ('model_lab_last_benchmark_dataset', :payload, CURRENT_TIMESTAMP)
+                ON CONFLICT (key)
+                DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {'payload': payload},
+        )
+    db.commit()
+
+    _append_job_log({
+        'kind': 'benchmark_dataset_export',
+        'agent_id': agent_id,
+        'started_at_ms': started_at,
+        'finished_at_ms': int(time.time() * 1000),
+        'ok': True,
+        'rows': payload_obj['rows'],
+        'path': payload_obj['path'],
+        'manifest_path': payload_obj['manifest_path'],
+        'dataset_hash_sha256': payload_obj['dataset_hash_sha256'],
+    })
+
+    return {'ok': True, 'item': payload_obj}
+
+
+def get_last_benchmark_dataset_export(db: Session):
+    row = db.execute(text("SELECT value FROM system_state WHERE key='model_lab_last_benchmark_dataset' LIMIT 1")).mappings().first()
+    if not row:
+        return {'ok': True, 'item': None}
+    value = row.get('value')
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            value = None
+    return {'ok': True, 'item': value}
