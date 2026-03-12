@@ -16,6 +16,11 @@ Local-only paper-trading dashboard.
 - Recent scan history table
 - Run Scan button
 - Pause/Resume auto scan button
+- Phase 1 architecture tracking:
+  - formal strategy registry
+  - regime detection snapshot per scan
+  - per-strategy metrics
+  - per-regime metrics for each strategy
 
 ## API
 - `GET /api/state`

@@ -32,6 +32,33 @@ MODE_CONFIGS = {
     "btc_15m_breakout_retest": {"label": "BTC/USD 15m breakout-retest experiment", "interval": 15, "rr_min": 1.35, "aggressive": True},
 }
 
+STRATEGY_REGISTRY = {
+    "btc_15m_conservative": {
+        "strategy_key": "btc_15m_conservative",
+        "label": "BTC/USD 15m conservative (frozen baseline)",
+        "family": "trend_structure",
+        "timeframe": "15m",
+        "status": "frozen",
+        "paper_only": True,
+        "routing_enabled": False,
+        "allowed_regimes": ["trend", "breakout", "chop"],
+        "notes": "Frozen baseline. Execution behavior must remain unchanged during Phase 1 architecture work.",
+    },
+    "btc_15m_breakout_retest": {
+        "strategy_key": "btc_15m_breakout_retest",
+        "label": "BTC/USD 15m breakout-retest experiment",
+        "family": "breakout_retest",
+        "timeframe": "15m",
+        "status": "experimental",
+        "paper_only": True,
+        "routing_enabled": False,
+        "allowed_regimes": ["breakout", "trend", "low_edge"],
+        "notes": "Approved strategy family in paper mode only. No autonomous routing in Phase 1.",
+    },
+}
+
+REGIME_TYPES = ["trend", "chop", "breakout", "low_edge"]
+
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 STATE_DIR = BASE_DIR / "data"
@@ -47,6 +74,101 @@ def round2(x: float) -> float:
     return round(float(x), 2)
 
 
+def safe_div(a: float, b: float) -> float:
+    return round2(a / b) if b else 0.0
+
+
+def strategy_metrics_bucket() -> dict[str, Any]:
+    return {
+        "total_trades": 0,
+        "open_trades": 0,
+        "closed_trades": 0,
+        "win_rate": 0.0,
+        "average_win": 0.0,
+        "average_loss": 0.0,
+        "expectancy": 0.0,
+        "realized_pnl": 0.0,
+        "unrealized_pnl": 0.0,
+        "total_fees": 0.0,
+        "fee_drag_pct": 0.0,
+        "max_drawdown": 0.0,
+        "gross_realized_pnl": 0.0,
+        "gross_unrealized_pnl": 0.0,
+        "sample_size": 0,
+    }
+
+
+def regime_metrics_bucket() -> dict[str, Any]:
+    return {regime: strategy_metrics_bucket() for regime in REGIME_TYPES}
+
+
+def classify_market_regime(candles, bid, ask, spread_pct) -> dict[str, Any]:
+    closes = [c["close"] for c in candles[-6:]]
+    highs = [c["high"] for c in candles[-6:]]
+    lows = [c["low"] for c in candles[-6:]]
+    last = candles[-1]
+    prev = candles[-2]
+    lookback_ranges = [(c["high"] - c["low"]) for c in candles[-8:]]
+    avg_range = max(sum(lookback_ranges) / len(lookback_ranges), 0.1)
+    net_move = closes[-1] - closes[0]
+    directionality = abs(net_move) / max(sum(abs(closes[i] - closes[i - 1]) for i in range(1, len(closes))), 0.1)
+    six_bar_range = max(highs) - min(lows)
+    breakout_up = last["close"] > max(highs[:-1])
+    breakout_down = last["close"] < min(lows[:-1])
+    breakout = breakout_up or breakout_down
+    compression = safe_div(six_bar_range, max(last["close"], 1))
+    spread_ok = spread_pct <= max(EXPERIMENT_MAX_SPREAD_PCT, 0.10)
+
+    regime = "low_edge"
+    confidence = 0.5
+    subtype = "indecisive"
+    reasons = []
+
+    if not spread_ok:
+        regime = "low_edge"
+        confidence = 0.88
+        subtype = "spread_dislocation"
+        reasons.append("Spread is too wide for clean execution quality.")
+    elif breakout and (last["high"] - last["low"]) >= 1.05 * avg_range:
+        regime = "breakout"
+        confidence = min(0.95, round2(0.62 + directionality * 0.25))
+        subtype = "bullish_breakout" if breakout_up else "bearish_breakout"
+        reasons.append("Recent candle expanded beyond short-term structure.")
+    elif directionality >= 0.62 and compression >= 0.004:
+        regime = "trend"
+        confidence = min(0.9, round2(0.55 + directionality * 0.3))
+        subtype = "uptrend" if net_move > 0 else "downtrend"
+        reasons.append("Directional follow-through is stronger than short-term chop.")
+    elif compression <= 0.0045 and abs(last["close"] - prev["close"]) <= 0.65 * avg_range:
+        regime = "chop"
+        confidence = 0.66
+        subtype = "range_bound"
+        reasons.append("Price is rotating in a relatively compressed range.")
+    else:
+        regime = "low_edge"
+        confidence = 0.58
+        subtype = "mixed_structure"
+        reasons.append("No strong directional or breakout edge detected.")
+
+    return {
+        "regime": regime,
+        "confidence": confidence,
+        "subtype": subtype,
+        "edge_ok": regime != "low_edge",
+        "inputs": {
+            "spread_pct": round2(spread_pct),
+            "avg_range": round2(avg_range),
+            "six_bar_range": round2(six_bar_range),
+            "directionality": round2(directionality),
+            "compression_pct": round2(compression * 100),
+            "net_move": round2(net_move),
+            "bid": round2(bid),
+            "ask": round2(ask),
+        },
+        "reason": " ".join(reasons),
+    }
+
+
 def mode_bucket() -> dict[str, Any]:
     return {
         "latest": None,
@@ -58,6 +180,10 @@ def mode_bucket() -> dict[str, Any]:
         "closed_trades": [],
         "paper_execution_log": [],
         "executed_signal_ids": set(),
+        "strategy_registry_entry": None,
+        "current_regime": None,
+        "strategy_metrics": strategy_metrics_bucket(),
+        "performance_by_regime": regime_metrics_bucket(),
     }
 
 
@@ -80,6 +206,10 @@ def _json_safe_store_snapshot() -> dict[str, Any]:
             "closed_trades": bucket.get("closed_trades", [])[-500:],
             "paper_execution_log": bucket.get("paper_execution_log", [])[-500:],
             "executed_signal_ids": sorted(bucket.get("executed_signal_ids", set())),
+            "strategy_registry_entry": bucket.get("strategy_registry_entry"),
+            "current_regime": bucket.get("current_regime"),
+            "strategy_metrics": bucket.get("strategy_metrics", strategy_metrics_bucket()),
+            "performance_by_regime": bucket.get("performance_by_regime", regime_metrics_bucket()),
         }
     return {"auto_scan": store.get("auto_scan", True), "modes": modes}
 
@@ -112,12 +242,20 @@ def load_store() -> None:
         bucket["closed_trades"] = saved.get("closed_trades", [])[-500:]
         bucket["paper_execution_log"] = saved.get("paper_execution_log", [])[-500:]
         bucket["executed_signal_ids"] = set(saved.get("executed_signal_ids", []))
+        bucket["strategy_registry_entry"] = saved.get("strategy_registry_entry") or STRATEGY_REGISTRY.get(mode)
+        bucket["current_regime"] = saved.get("current_regime")
+        bucket["strategy_metrics"] = saved.get("strategy_metrics", strategy_metrics_bucket())
+        bucket["performance_by_regime"] = saved.get("performance_by_regime", regime_metrics_bucket())
         if bucket["latest"]:
             bucket["latest"]["notify_user"] = bucket["notify_user"]
             bucket["latest"]["pending_orders"] = bucket["pending_orders"][-25:]
             bucket["latest"]["open_positions"] = bucket["open_positions"]
             bucket["latest"]["closed_trades"] = bucket["closed_trades"][-25:]
             bucket["latest"]["paper_execution_log"] = bucket["paper_execution_log"][-10:]
+            bucket["latest"]["strategy_registry_entry"] = bucket["strategy_registry_entry"]
+            bucket["latest"]["current_regime"] = bucket["current_regime"]
+            bucket["latest"]["strategy_metrics"] = bucket["strategy_metrics"]
+            bucket["latest"]["performance_by_regime"] = bucket["performance_by_regime"]
             bucket["latest"]["mode_stats"] = mode_stats(bucket)
         store["modes"][mode] = bucket
 
@@ -436,8 +574,7 @@ def maybe_close(p, candle, slip):
     }
 
 
-def mode_stats(bucket):
-    closed, openp = bucket["closed_trades"], bucket["open_positions"]
+def build_metrics_snapshot(closed, openp):
     wins = [x["realized_pnl"] for x in closed if x["realized_pnl"] > 0]
     losses = [x["realized_pnl"] for x in closed if x["realized_pnl"] < 0]
     realized = round2(sum(x["realized_pnl"] for x in closed))
@@ -446,50 +583,86 @@ def mode_stats(bucket):
     gross_unrealized = round2(sum(x.get("gross_unrealized_pnl", x.get("unrealized_pnl", 0)) for x in openp))
     total_fees = round2(sum(x.get("total_fees", x.get("entry_fee", 0.0)) for x in closed) + sum(x.get("entry_fee", 0.0) for x in openp))
     gross_total_pnl = round2(gross_realized + gross_unrealized)
-    net_total_pnl = round2(realized + unrealized)
-    fee_drag_pct_of_gross = round2((total_fees / abs(gross_total_pnl) * 100) if gross_total_pnl != 0 else 0)
+    expectancy = round2(sum(x["realized_pnl"] for x in closed) / len(closed)) if closed else 0.0
+    fee_drag_pct = round2((total_fees / abs(gross_total_pnl) * 100) if gross_total_pnl else 0.0)
     eq, run = [0], 0
     for t in closed:
-        run += t["realized_pnl"]; eq.append(run)
+        run += t["realized_pnl"]
+        eq.append(run)
     peak, mdd = 0, 0
     for e in eq:
-        peak = max(peak, e); mdd = min(mdd, e - peak)
-    by = {}
-    for t in closed:
-        rg = t.get("regime_label", "unknown")
-        by.setdefault(rg, {"count": 0, "pnl": 0.0}); by[rg]["count"] += 1; by[rg]["pnl"] = round2(by[rg]["pnl"] + t["realized_pnl"])
+        peak = max(peak, e)
+        mdd = min(mdd, e - peak)
     return {
-        "total_opened": len([h for h in bucket["history"] if h.get("status") == "PAPER_TRADE_OPEN"]),
-        "total_closed": len(closed),
+        "total_trades": len(closed) + len(openp),
+        "open_trades": len(openp),
+        "closed_trades": len(closed),
         "win_rate": round2((len(wins) / len(closed) * 100) if closed else 0),
         "average_win": round2(sum(wins) / len(wins)) if wins else 0,
         "average_loss": round2(sum(losses) / len(losses)) if losses else 0,
+        "expectancy": expectancy,
         "realized_pnl": realized,
-        "gross_realized_pnl": gross_realized,
         "unrealized_pnl": unrealized,
-        "gross_unrealized_pnl": gross_unrealized,
-        "net_total_pnl": net_total_pnl,
-        "gross_total_pnl": gross_total_pnl,
         "total_fees": total_fees,
-        "fee_drag_pct_of_gross_pnl": fee_drag_pct_of_gross,
+        "fee_drag_pct": fee_drag_pct,
+        "max_drawdown": round2(mdd),
+        "gross_realized_pnl": gross_realized,
+        "gross_unrealized_pnl": gross_unrealized,
+        "sample_size": len(closed),
+    }
+
+
+def mode_stats(bucket):
+    closed, openp = bucket["closed_trades"], bucket["open_positions"]
+    strategy_metrics = build_metrics_snapshot(closed, openp)
+    performance_by_regime = regime_metrics_bucket()
+    for regime in REGIME_TYPES:
+        regime_closed = [t for t in closed if t.get("market_regime") == regime]
+        regime_open = [p for p in openp if p.get("market_regime") == regime]
+        performance_by_regime[regime] = build_metrics_snapshot(regime_closed, regime_open)
+
+    bucket["strategy_metrics"] = strategy_metrics
+    bucket["performance_by_regime"] = performance_by_regime
+
+    return {
+        "total_opened": len([h for h in bucket["history"] if h.get("status") == "PAPER_TRADE_OPEN"]),
+        "total_closed": len(closed),
+        "win_rate": strategy_metrics["win_rate"],
+        "average_win": strategy_metrics["average_win"],
+        "average_loss": strategy_metrics["average_loss"],
+        "expectancy": strategy_metrics["expectancy"],
+        "realized_pnl": strategy_metrics["realized_pnl"],
+        "gross_realized_pnl": strategy_metrics["gross_realized_pnl"],
+        "unrealized_pnl": strategy_metrics["unrealized_pnl"],
+        "gross_unrealized_pnl": strategy_metrics["gross_unrealized_pnl"],
+        "net_total_pnl": round2(strategy_metrics["realized_pnl"] + strategy_metrics["unrealized_pnl"]),
+        "gross_total_pnl": round2(strategy_metrics["gross_realized_pnl"] + strategy_metrics["gross_unrealized_pnl"]),
+        "total_fees": strategy_metrics["total_fees"],
+        "fee_drag_pct_of_gross_pnl": strategy_metrics["fee_drag_pct"],
         "fee_model": PAPER_FEE_MODEL,
         "fee_pct": PAPER_FEE_PCT,
-        "max_drawdown": round2(mdd),
-        "performance_by_regime": by,
+        "max_drawdown": strategy_metrics["max_drawdown"],
+        "strategy_metrics": strategy_metrics,
+        "performance_by_regime": performance_by_regime,
     }
 
 
 async def execute_mode_scan(mode: str):
     cfg = MODE_CONFIGS[mode]
     bucket = store["modes"][mode]
+    bucket["strategy_registry_entry"] = STRATEGY_REGISTRY.get(mode)
     timeframe = f"{cfg['interval']}m"
     candles, bid, ask, spread, spread_pct = await fetch_market(cfg["interval"])
+    current_regime = classify_market_regime(candles, bid, ask, spread_pct)
+    bucket["current_regime"] = current_regime
     payload = {
         "timestamp": now_iso(),
         "market_data": [{"symbol": "BTC/USD", "timeframe": timeframe, "ohlcv": candles, "bid": bid, "ask": ask, "spread": spread, "spread_pct": spread_pct, "slippage_assumption_pct": 0.01}],
         "account_state": {"account_equity": 10000, "cash_available": 10000, "open_positions": [], "active_orders": []},
         "risk_state": {"max_risk_per_trade_pct": 1.0, "max_total_open_risk_pct": 2.0, "max_capital_allocation_pct": 10.0, "stacking_allowed": False},
         "executor_state": {"confirmation_source": "samy_paper_executor", "fills_are_executor_confirmed_only": True, "paper_mode": True},
+        "regime_context": current_regime,
+        "strategy_registry_entry": bucket["strategy_registry_entry"],
     }
     d = await call_clawbot(payload, timeframe, cfg["rr_min"])
 
@@ -516,6 +689,10 @@ async def execute_mode_scan(mode: str):
             "timestamp": ts or now_iso(),
             "decision_time": decision_time or now_iso(),
             "mode": mode,
+            "strategy_key": mode,
+            "strategy_family": bucket["strategy_registry_entry"].get("family") if bucket.get("strategy_registry_entry") else None,
+            "market_regime": current_regime.get("regime"),
+            "market_regime_confidence": current_regime.get("confidence"),
             "status": decision.get("status"),
             "side": decision.get("side", ""),
             "entry_price": decision.get("entry_price", 0),
@@ -539,7 +716,9 @@ async def execute_mode_scan(mode: str):
             entry_notional = fill * qty
             entry_fee = entry_notional * (PAPER_FEE_PCT / 100)
             pos = {
-                "mode": mode, "signal_id": d["signal_id"], "symbol": "BTC/USD", "timeframe": timeframe, "side": d["side"], "qty": qty,
+                "mode": mode, "strategy_key": mode, "strategy_family": bucket["strategy_registry_entry"].get("family") if bucket.get("strategy_registry_entry") else None,
+                "market_regime": current_regime.get("regime"), "market_regime_confidence": current_regime.get("confidence"),
+                "signal_id": d["signal_id"], "symbol": "BTC/USD", "timeframe": timeframe, "side": d["side"], "qty": qty,
                 "entry_fill_price": fill, "entry_notional": round2(entry_notional), "entry_fee": round2(entry_fee), "fee_model": PAPER_FEE_MODEL, "fee_pct": PAPER_FEE_PCT,
                 "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
                 "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
@@ -587,6 +766,8 @@ async def execute_mode_scan(mode: str):
         "latest_decision": d,
         "triggers": {"upper": TRIGGER_UPPER, "lower": TRIGGER_LOWER},
         "paper_mode": True,
+        "strategy_registry_entry": bucket["strategy_registry_entry"],
+        "current_regime": current_regime,
         "notify_user": bucket["notify_user"],
         "pending_orders": bucket["pending_orders"][-25:],
         "open_positions": bucket["open_positions"],
@@ -603,6 +784,8 @@ async def execute_mode_scan(mode: str):
             "fee_pct": PAPER_FEE_PCT,
         },
         "mode_stats": stats,
+        "strategy_metrics": bucket["strategy_metrics"],
+        "performance_by_regime": bucket["performance_by_regime"],
     }
     bucket["latest"] = latest
     bucket["last_candle_time"] = candles[-1]["time"]
@@ -618,7 +801,14 @@ async def get_state():
     for m in MODE_CONFIGS.keys():
         if store["modes"][m]["latest"] is None:
             await execute_mode_scan(m)
-    return {"auto_scan": store["auto_scan"], "paper_mode": True, "modes": {m: store["modes"][m]["latest"] for m in MODE_CONFIGS.keys()}, "available_modes": MODE_CONFIGS}
+    return {
+        "auto_scan": store["auto_scan"],
+        "paper_mode": True,
+        "modes": {m: store["modes"][m]["latest"] for m in MODE_CONFIGS.keys()},
+        "available_modes": MODE_CONFIGS,
+        "strategy_registry": STRATEGY_REGISTRY,
+        "regime_types": REGIME_TYPES,
+    }
 
 
 @app.get("/api/history")
