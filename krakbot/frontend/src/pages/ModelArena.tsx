@@ -264,6 +264,27 @@ export default function ModelArena() {
       }));
   }, [expandedModel, expandedModelPackets, jasonTrades]);
 
+  const expandedLatestPacket = useMemo(() => expandedModelPackets[0] || null, [expandedModelPackets]);
+
+  const expandedStrategySummary = useMemo(() => {
+    if (!expandedModelPackets.length) return 'No strategy narrative yet.';
+    const recent = expandedModelPackets.slice(0, 12);
+    const holds = recent.filter((p) => String(p.action || '').toLowerCase() === 'hold').length;
+    const longShort = recent.filter((p) => ['long', 'short', 'buy', 'sell'].includes(String(p.action || '').toLowerCase())).length;
+    const closeCount = recent.filter((p) => ['close', 'exit'].includes(String(p.action || '').toLowerCase())).length;
+    const topSymbols = Array.from(new Set(recent.map((p) => String(p.symbol || '').toUpperCase()).filter(Boolean))).slice(0, 3);
+    return `${expandedModel.label} recently logged ${recent.length} decisions (${holds} hold, ${longShort} directional, ${closeCount} close). Focus symbols: ${topSymbols.join(', ') || 'n/a'}.`; 
+  }, [expandedModelPackets, expandedModel]);
+
+  const expandedPositionReasoning = useMemo(() => {
+    if (!expandedLatestPacket) return 'No current position reasoning available.';
+    const action = String(expandedLatestPacket.action || '').toLowerCase();
+    const rationale = expandedLatestPacket.rationale || 'No rationale provided.';
+    if (action === 'hold') return `Holding posture: ${rationale}`;
+    if (['close', 'exit'].includes(action)) return `Flat/exit posture: ${rationale}`;
+    return `Active ${String(expandedLatestPacket.action || '').toUpperCase()} posture: ${rationale}`;
+  }, [expandedLatestPacket]);
+
   const toggleSelection = (id: string) => {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -423,8 +444,13 @@ export default function ModelArena() {
           </div>
 
           <div className="card compact" style={{ marginBottom: 10 }}>
-            <strong>Current strategy reasoning</strong>
-            <p className="muted" style={{ marginBottom: 0 }}>{expandedModel.latestReason}</p>
+            <strong>Strategy</strong>
+            <p className="muted" style={{ marginBottom: 0 }}>{expandedStrategySummary}</p>
+          </div>
+
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Current Position Reasoning</strong>
+            <p className="muted" style={{ marginBottom: 0 }}>{expandedPositionReasoning}</p>
           </div>
 
           <div className="card table-wrap compact">
