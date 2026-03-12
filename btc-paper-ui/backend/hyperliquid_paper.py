@@ -12,6 +12,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
+def parse_iso(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace('Z', '+00:00'))
+
+
 def round2(x: float) -> float:
     return round(float(x), 2)
 
@@ -22,6 +26,11 @@ def bucket_price(value: float, bucket_pct: float = 0.20) -> float:
         return 0.0
     step = max(value * (bucket_pct / 100.0), 0.5)
     return round2(round(value / step) * step)
+
+
+STALE_EXIT_MIN_BARS = 8
+STALE_EXIT_MIN_TP_PROGRESS = 0.35
+BAR_MINUTES = 15
 
 
 @dataclass
@@ -366,24 +375,48 @@ class HyperliquidFuturesPaperTrack:
 
             tp_hit = (side == 'BUY' and tick['bid'] >= p['take_profit']) or (side == 'SELL' and tick['ask'] <= p['take_profit'])
             sl_hit = (side == 'BUY' and tick['bid'] <= p['stop_loss']) or (side == 'SELL' and tick['ask'] >= p['stop_loss'])
+
+            close_reason = None
+            exit_price = None
             if tp_hit or sl_hit:
+                close_reason = 'TAKE_PROFIT' if tp_hit else 'STOP_LOSS'
                 exit_price = p['take_profit'] if tp_hit else p['stop_loss']
+            else:
+                # Controlled stale exit: close only when BOTH conditions are met.
+                # 1) bars_open >= STALE_EXIT_MIN_BARS
+                # 2) tp_progress < STALE_EXIT_MIN_TP_PROGRESS (MFE-based)
+                opened_at = parse_iso(p['open_time'])
+                bars_open = int(((datetime.now(timezone.utc) - opened_at).total_seconds()) // (BAR_MINUTES * 60))
+                tp_distance = abs(float(p['take_profit']) - entry) * qty
+                tp_progress = (float(p.get('max_favorable_excursion', 0)) / tp_distance) if tp_distance > 0 else 0.0
+                if bars_open >= STALE_EXIT_MIN_BARS and tp_progress < STALE_EXIT_MIN_TP_PROGRESS:
+                    close_reason = 'TIME_EXIT_STALE'
+                    exit_price = tick['bid'] if side == 'BUY' else tick['ask']
+
+            if close_reason is not None and exit_price is not None:
                 gross_realized = (exit_price - entry) * qty if side == 'BUY' else (entry - exit_price) * qty
                 notional_exit = exit_price * qty
                 exit_fee = round2(notional_exit * (self._fee_bps(p.get('exit_liquidity', 'taker')) / 10000.0))
                 total_fees = round2(float(p.get('estimated_entry_fee', 0)) + exit_fee)
                 net_realized = round2(gross_realized - total_fees)
+                opened_at = parse_iso(p['open_time'])
+                minutes_open = int((datetime.now(timezone.utc) - opened_at).total_seconds() // 60)
+                tp_distance = abs(float(p['take_profit']) - entry) * qty
+                tp_progress = (float(p.get('max_favorable_excursion', 0)) / tp_distance) if tp_distance > 0 else 0.0
                 closed_trade = {
                     **p,
                     'status': 'PAPER_CLOSED',
                     'close_time': now_iso(),
-                    'close_reason': 'TAKE_PROFIT' if tp_hit else 'STOP_LOSS',
+                    'close_reason': close_reason,
                     'close_price': round2(exit_price),
                     'gross_realized_pnl': round2(gross_realized),
                     'net_realized_pnl': net_realized,
                     'realized_pnl': net_realized,
                     'estimated_exit_fee': exit_fee,
                     'estimated_total_fees': total_fees,
+                    'bars_open_at_close': int(minutes_open // BAR_MINUTES),
+                    'minutes_open_at_close': minutes_open,
+                    'tp_progress_at_close': round2(tp_progress),
                 }
                 closed.append(closed_trade)
             else:
