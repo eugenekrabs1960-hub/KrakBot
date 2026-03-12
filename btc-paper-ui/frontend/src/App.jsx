@@ -295,6 +295,15 @@ function ModePanel({ modeKey, m, onAck }) {
   const cash = 10000 + realized
   const posQty = openPos?.qty ?? 0
   const notional = openPos ? (openPos.qty * openPos.entry_fill_price) : 0
+  const allHistory = m?.history || []
+  const lifecycleRows = allHistory.filter(r => ['PAPER_TRADE_OPEN', 'PAPER_TRADE_CLOSED'].includes(r?.status))
+  const diagRows = allHistory.filter(r => ['WAIT', 'REJECT'].includes(r?.status))
+  const diagCounts = diagRows.reduce((acc, r) => {
+    const key = `${r?.status || 'UNKNOWN'}|${r?.reason || r?.regime_label || 'n/a'}`
+    acc[key] = (acc[key] || 0) + 1
+    return acc
+  }, {})
+  const diagTop = Object.entries(diagCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
@@ -380,15 +389,30 @@ function ModePanel({ modeKey, m, onAck }) {
       </details>
 
       <details style={{ marginTop: 6 }}>
-        <summary>Recent history ({(m?.history || []).length})</summary>
+        <summary>Recent lifecycle history ({lifecycleRows.length})</summary>
         <table className='rows' style={{ width: '100%' }}>
           <thead><tr><th>Time</th><th>Status</th><th>Regime</th><th>R:R</th></tr></thead>
           <tbody>
-            {(m?.history || []).slice(-8).reverse().map((r, i) => (
+            {lifecycleRows.slice(-8).reverse().map((r, i) => (
               <tr key={i}><td>{fmtLA(r.timestamp)}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>
             ))}
           </tbody>
         </table>
+      </details>
+
+      <details style={{ marginTop: 6 }}>
+        <summary>Scan diagnostics (WAIT/REJECT summary)</summary>
+        <div style={{ fontSize: 12, marginTop: 8 }}>
+          <div>Window size: {allHistory.length}</div>
+          <div>WAIT count: {diagRows.filter(r => r.status === 'WAIT').length} | REJECT count: {diagRows.filter(r => r.status === 'REJECT').length}</div>
+          <div style={{ marginTop: 6 }}><strong>Top reasons</strong></div>
+          <ul style={{ margin: '4px 0 0 18px' }}>
+            {diagTop.length ? diagTop.map(([k, v], idx) => {
+              const [status, reason] = k.split('|')
+              return <li key={idx}>{status}: {reason} ({v})</li>
+            }) : <li>No WAIT/REJECT rows in current window.</li>}
+          </ul>
+        </div>
       </details>
     </div>
   )
