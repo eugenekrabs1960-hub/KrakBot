@@ -666,21 +666,46 @@ def shadow_route_snapshot(current_regime: dict[str, Any]) -> dict[str, Any]:
     for strategy_key, entry in STRATEGY_REGISTRY.items():
         bucket = store["modes"].get(strategy_key, {})
         perf = (bucket.get("performance_by_regime") or {}).get(regime) or strategy_metrics_bucket()
-        eligible = regime in entry.get("allowed_regimes", []) and entry.get("status") != "paused"
+        status = entry.get("status")
+        sample_size = perf.get("sample_size", 0)
+        reason_code = "eligible"
+        reason = "eligible for shadow routing"
+        eligible = True
+
+        if status == "paused":
+            eligible = False
+            reason_code = "strategy_paused"
+            reason = "strategy paused"
+        elif regime not in entry.get("allowed_regimes", []):
+            eligible = False
+            reason_code = "regime_not_allowed"
+            reason = "regime not allowed"
+        elif sample_size < 1:
+            eligible = False
+            reason_code = "insufficient_data"
+            reason = "insufficient data"
+
         score = round2(
             perf.get("expectancy", 0.0)
             - abs(perf.get("max_drawdown", 0.0)) * 0.10
             - perf.get("fee_drag_pct", 0.0) * 0.05
             + perf.get("win_rate", 0.0) * 0.02
-            + perf.get("sample_size", 0) * 0.03
+            + sample_size * 0.03
         ) if eligible else -9999.0
-        reason = "eligible for shadow routing" if eligible else "regime not allowed or strategy paused"
+
+        if eligible and (score is None or not isinstance(score, (int, float))):
+            eligible = False
+            score = -9999.0
+            reason_code = "score_unavailable"
+            reason = "score unavailable"
+
         candidates.append({
             "strategy_key": strategy_key,
             "strategy_family": entry.get("family"),
             "eligible": eligible,
             "score": score,
             "reason": reason,
+            "reason_code": reason_code,
             "regime_metrics": perf,
         })
     ranked = sorted(candidates, key=lambda x: x["score"], reverse=True)
