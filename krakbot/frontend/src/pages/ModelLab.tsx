@@ -6,6 +6,8 @@ import {
   getLatestModel,
   getModelLabJobHistory,
   getStrategyBenchmarks,
+  exportBenchmarkReasoningDataset,
+  getLastBenchmarkReasoningDataset,
   getWalletCohortLatest,
   promoteModelToPaper,
   trainBaselineModel,
@@ -19,18 +21,20 @@ export default function ModelLab() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [packets, setPackets] = useState<any[]>([]);
   const [activePaper, setActivePaper] = useState<any>(null);
+  const [lastBenchDataset, setLastBenchDataset] = useState<any>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState('');
 
   const load = async () => {
-    const [b, m, w, j, p, ap] = await Promise.all([
+    const [b, m, w, j, p, ap, bex] = await Promise.all([
       getStrategyBenchmarks(symbol, 50000).catch(() => ({ items: [] })),
       getLatestModel(symbol).catch(() => null),
       getWalletCohortLatest('top_sol_active_wallets').catch(() => ({ members: [] })),
       getModelLabJobHistory(20).catch(() => ({ items: [] })),
       getAgentDecisionPackets(20, undefined, symbol).catch(() => ({ items: [] })),
       getActivePaperModel().catch(() => ({ item: null })),
+      getLastBenchmarkReasoningDataset().catch(() => ({ item: null })),
     ]);
     setBench(b?.items || []);
     setModel(m?.item ? { ...m.item, path: m.path } : null);
@@ -38,6 +42,7 @@ export default function ModelLab() {
     setJobs(j?.items || []);
     setPackets(p?.items || []);
     setActivePaper(ap?.item || null);
+    setLastBenchDataset(bex?.item || null);
   };
 
   useEffect(() => {
@@ -62,6 +67,26 @@ export default function ModelLab() {
     }
   }
 
+
+
+  async function exportBenchmark() {
+    setBusy(true);
+    setMsg('');
+    try {
+      const out = await exportBenchmarkReasoningDataset('jason', 5000);
+      if (out?.ok) {
+        const item = out?.item || out;
+        setMsg(`Benchmark export complete: ${item.rows || 0} rows`);
+      } else {
+        setMsg(out?.error || 'Benchmark export failed');
+      }
+      await load();
+    } catch (err: any) {
+      setMsg(err?.message || 'Benchmark export failed');
+    } finally {
+      setBusy(false);
+    }
+  }
   async function promote() {
     if (!model?.symbol) return;
     setBusy(true);
@@ -96,6 +121,17 @@ export default function ModelLab() {
           <button className="btn" onClick={trainNow} disabled={busy}>{busy ? 'Training…' : 'Train Baseline'}</button>
         </div>
         {msg && <p className="muted">{msg}</p>}
+      </div>
+
+
+      <div className="card glass-card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Benchmark Reasoning Dataset (Model Arena → Model Lab)</h3>
+        <div className="toolbar">
+          <button className="btn" onClick={exportBenchmark} disabled={busy}>{busy ? 'Exporting…' : 'Export Benchmark Dataset'}</button>
+        </div>
+        <div className="muted">Last export path: {lastBenchDataset?.path || 'none'}</div>
+        <div className="muted">Manifest: {lastBenchDataset?.manifest_path || 'none'}</div>
+        <div className="muted">Rows: {lastBenchDataset?.rows ?? 0} · Hash: {lastBenchDataset?.dataset_hash_sha256 || 'n/a'}</div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 12 }}>
