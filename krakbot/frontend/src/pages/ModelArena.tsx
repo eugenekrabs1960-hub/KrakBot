@@ -5,6 +5,8 @@ import {
   getAgentDecisionPackets,
   getJasonTrades,
   getJasonState,
+  getJasonRiskProfile,
+  setJasonRiskProfile,
   setActiveExecutionModel,
 } from '../services/api';
 
@@ -44,6 +46,7 @@ export default function ModelArena() {
   const [activeExecution, setActiveExecution] = useState<any>(null);
   const [jasonTrades, setJasonTrades] = useState<any[]>([]);
   const [jasonState, setJasonState] = useState<any>(null);
+  const [riskProfile, setRiskProfile] = useState<'conservative'|'balanced'|'aggressive'>('balanced');
 
   const [selected, setSelected] = useState<string[]>([]);
   const [switchCandidate, setSwitchCandidate] = useState<string | null>(null);
@@ -59,16 +62,18 @@ export default function ModelArena() {
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
 
   const load = async () => {
-    const [packetRes, execRes, jsTrades, jsState] = await Promise.all([
+    const [packetRes, execRes, jsTrades, jsState, risk] = await Promise.all([
       getAgentDecisionPackets(500).catch(() => ({ items: [] })),
       getActiveExecutionModel().catch(() => ({ item: null })),
       getJasonTrades(30).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
+      getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
     ]);
     setPackets(packetRes?.items || []);
     setActiveExecution(execRes?.item || null);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
+    setRiskProfile((risk?.profile || 'balanced') as any);
   };
 
   useEffect(() => {
@@ -399,6 +404,24 @@ export default function ModelArena() {
           <div className="card compact" style={{ marginBottom: 10 }}>
             <strong>Current Position Reasoning</strong>
             <p className="muted" style={{ marginBottom: 0 }}>{expandedPositionReasoning}</p>
+          </div>
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Risk Profile</strong>
+            <div className="toolbar" style={{ marginTop: 8 }}>
+              <select
+                value={riskProfile}
+                onChange={async (e) => {
+                  const p = e.target.value as 'conservative'|'balanced'|'aggressive';
+                  setRiskProfile(p);
+                  try { await setJasonRiskProfile(p); } catch {}
+                }}
+              >
+                <option value="conservative">conservative</option>
+                <option value="balanced">balanced</option>
+                <option value="aggressive">aggressive</option>
+              </select>
+              <span className="muted">Aggressive increases directional cadence and min sizing (still capped at 20x / 50%).</span>
+            </div>
           </div>
 
           <div className="card table-wrap compact">

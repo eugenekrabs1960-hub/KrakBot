@@ -16,6 +16,8 @@ from app.services.agent_decisions import record_decision_packet
 ALLOWED_SYMBOLS = ['BTC', 'ETH', 'SOL']
 JASON_AGENT_ID = 'jason'
 INITIAL_BALANCE = 1000.0
+RISK_PROFILE_KEY = 'agent_jason_risk_profile'
+RISK_PROFILES = {'conservative','balanced','aggressive'}
 
 
 @dataclass
@@ -114,6 +116,48 @@ def _save_state(db: Session, state: dict):
             ),
             {'payload': payload},
         )
+
+
+
+def _load_risk_profile(db: Session) -> str:
+    row = db.execute(text("SELECT value FROM system_state WHERE key=:k LIMIT 1"), {'k': RISK_PROFILE_KEY}).mappings().first()
+    if not row:
+        return 'balanced'
+    value = row.get('value')
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            value = {'profile': value}
+    profile = str((value or {}).get('profile') or 'balanced').lower()
+    return profile if profile in RISK_PROFILES else 'balanced'
+
+
+def set_risk_profile(db: Session, profile: str):
+    p = str(profile or '').lower().strip()
+    if p not in RISK_PROFILES:
+        return {'ok': False, 'error': 'invalid_profile', 'allowed': sorted(RISK_PROFILES)}
+    payload = json.dumps({'profile': p})
+    if _dialect_name(db) == 'postgresql':
+        db.execute(text("""
+            INSERT INTO system_state(key, value, updated_at)
+            VALUES (:k, CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+        """), {'k': RISK_PROFILE_KEY, 'payload': payload})
+    else:
+        db.execute(text("""
+            INSERT INTO system_state(key, value, updated_at)
+            VALUES (:k, :payload, CURRENT_TIMESTAMP)
+            ON CONFLICT (key)
+            DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        """), {'k': RISK_PROFILE_KEY, 'payload': payload})
+    db.commit()
+    return {'ok': True, 'profile': p}
+
+
+def get_risk_profile(db: Session):
+    return {'ok': True, 'profile': _load_risk_profile(db), 'allowed': sorted(RISK_PROFILES)}
 
 
 def _latest_market_snapshot(db: Session) -> dict:
@@ -344,19 +388,27 @@ def _top_signal(snapshot: dict) -> tuple[str, float]:
     return best_sym, best_score
 
 
-def _apply_profit_bias(decision: Decision, state: dict, snapshot: dict, open_trade: dict | None) -> Decision:
+def _apply_profit_bias(decision: Decision, state: dict, snapshot: dict, open_trade: dict | None, profile: str = 'balanced') -> Decision:
     # Keep hard risk limits, but avoid passive/zero-size behavior when a signal exists.
     sym, score = _top_signal(snapshot)
-    if decision.action == 'hold' and not open_trade and abs(score) >= 0.00012 and float(state.get('balance_usd', INITIAL_BALANCE)) > 0:
+    p = (profile or 'balanced').lower()
+    if p not in RISK_PROFILES:
+        p = 'balanced'
+
+    signal_thresh = 0.00020 if p == 'conservative' else (0.00012 if p == 'balanced' else 0.00006)
+    min_lev = 2.0 if p == 'conservative' else (3.0 if p == 'balanced' else 5.0)
+    min_alloc = 8.0 if p == 'conservative' else (10.0 if p == 'balanced' else 15.0)
+
+    if decision.action == 'hold' and not open_trade and abs(score) >= signal_thresh and float(state.get('balance_usd', INITIAL_BALANCE)) > 0:
         decision.action = 'long' if score > 0 else 'short'
         decision.symbol = sym
-        decision.leverage = max(decision.leverage, 4.0)
-        decision.allocation_pct = max(decision.allocation_pct, 15.0)
-        decision.rationale = (decision.rationale or '').strip() or f'Auto-promoted from hold: strongest near-term momentum on {sym}.'
+        decision.leverage = max(decision.leverage, min_lev)
+        decision.allocation_pct = max(decision.allocation_pct, min_alloc)
+        decision.rationale = (decision.rationale or '').strip() or f'Auto-promoted from hold ({p}): strongest near-term momentum on {sym}.'
 
     if decision.action in ('long', 'short'):
-        decision.leverage = max(decision.leverage, 3.0)
-        decision.allocation_pct = max(decision.allocation_pct, 10.0)
+        decision.leverage = max(decision.leverage, min_lev)
+        decision.allocation_pct = max(decision.allocation_pct, min_alloc)
 
     decision.leverage = max(1.0, min(20.0, float(decision.leverage)))
     decision.allocation_pct = max(0.0, min(50.0, float(decision.allocation_pct)))
@@ -434,7 +486,8 @@ def run_jason_once(db: Session):
         return {'ok': False, 'error': 'balance_zero', 'state': state}
 
     decision = _ask_openai(snapshot, state, _get_open_trade(db))
-    decision = _apply_profit_bias(decision, state, snapshot, _get_open_trade(db))
+    profile = _load_risk_profile(db)
+    decision = _apply_profit_bias(decision, state, snapshot, _get_open_trade(db), profile=profile)
     decision = _enrich_quality(decision, snapshot)
     return _apply_decision(db, decision, state, snapshot, decision_source='oauth_gpt54')
 
@@ -469,7 +522,7 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
     d.leverage = max(1.0, min(20.0, d.leverage))
     d.allocation_pct = max(0.0, min(50.0, d.allocation_pct))
     d.confidence = max(0.0, min(1.0, d.confidence))
-    d = _apply_profit_bias(d, state, snapshot, _get_open_trade(db))
+    d = _apply_profit_bias(d, state, snapshot, _get_open_trade(db), profile=_load_risk_profile(db))
     d = _enrich_quality(d, snapshot)
 
     src = str(decision_source or 'oauth_gpt54').lower()
@@ -492,7 +545,7 @@ def set_jason_offline(db: Session, *, reason: str = 'oauth_unavailable'):
 def get_jason_state(db: Session):
     state = _load_state(db)
     open_trade = _get_open_trade(db)
-    return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, 'open_trade': open_trade}
+    return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, 'open_trade': open_trade, 'risk_profile': _load_risk_profile(db)}
 
 
 def list_jason_trades(db: Session, limit: int = 100):

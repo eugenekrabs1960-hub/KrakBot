@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
 from app.core.config import settings
-from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once
+from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -30,6 +30,10 @@ class JasonDecisionRequest(BaseModel):
     confidence: float = Field(default=0.0)
     rationale: str = Field(default='No rationale provided')
     decision_source: str = Field(default='oauth_gpt54')
+
+
+class JasonRiskProfileRequest(BaseModel):
+    profile: str = Field(default='balanced')
 
 
 @router.post('/decision-packets')
@@ -100,6 +104,16 @@ def jason_execute_oauth_decision(payload: JasonDecisionRequest, db: Session = De
         rationale=payload.rationale,
         decision_source='oauth_gpt54',
     )
+
+
+@router.get('/jason/risk-profile')
+def jason_risk_profile(db: Session = Depends(get_db)):
+    return get_risk_profile(db)
+
+
+@router.post('/jason/risk-profile')
+def jason_set_risk_profile(payload: JasonRiskProfileRequest, db: Session = Depends(get_db)):
+    return set_risk_profile(db, payload.profile)
 
 
 @router.get('/jason/state')

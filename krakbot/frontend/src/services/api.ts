@@ -219,3 +219,18 @@ export async function getEifTradeTrace(params: { market?: string; strategy_insta
   const res = await fetch(`${API_BASE}/eif/trade-trace?${search.toString()}`);
   return parseJsonOrThrow(res);
 }
+
+
+export async function getJasonRiskProfile() {
+  const res = await fetch(`${API_BASE}/agents/jason/risk-profile`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setJasonRiskProfile(profile: 'conservative' | 'balanced' | 'aggressive') {
+  const res = await fetch(`${API_BASE}/agents/jason/risk-profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile }),
+  });
+  return parseJsonOrThrow(res);
+}

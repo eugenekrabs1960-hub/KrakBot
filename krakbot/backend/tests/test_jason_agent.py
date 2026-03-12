@@ -89,3 +89,44 @@ def test_set_jason_offline_marks_state(tmp_path):
         st = jason_agent.get_jason_state(db)
         assert st['state']['online'] is False
         assert st['state']['offline_reason'] == 'oauth_unavailable'
+
+
+def test_risk_profile_set_get(tmp_path):
+    eng = _prep_db(tmp_path / 'jason5.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = jason_agent.get_risk_profile(db)
+        assert out['profile'] == 'balanced'
+
+        bad = jason_agent.set_risk_profile(db, 'yolo')
+        assert bad['ok'] is False
+
+        ok = jason_agent.set_risk_profile(db, 'aggressive')
+        assert ok['ok'] is True
+
+        out2 = jason_agent.get_risk_profile(db)
+        assert out2['profile'] == 'aggressive'
+
+
+def test_aggressive_profile_promotes_hold_when_flat(tmp_path):
+    eng = _prep_db(tmp_path / 'jason6.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        jason_agent.set_risk_profile(db, 'aggressive')
+        out = jason_agent.execute_jason_decision(
+            db,
+            action='hold',
+            symbol='BTC',
+            leverage=1,
+            allocation_pct=0,
+            confidence=0,
+            rationale='hold',
+            decision_source='oauth_gpt54',
+        )
+        assert out['ok'] is True
+        assert out['decision']['action'] in ('hold', 'long', 'short')
+        if out['decision']['action'] in ('long', 'short'):
+            assert float(out['decision']['allocation_pct']) >= 15.0
+            assert float(out['decision']['leverage']) >= 5.0
