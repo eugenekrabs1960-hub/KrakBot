@@ -17,6 +17,7 @@ type ArenaModel = {
   label: string;
   status: 'online' | 'idle';
   pnl: number;
+  equityUsd?: number;
   winRate: number;
   trades: number;
   decisions: number;
@@ -168,11 +169,15 @@ export default function ModelArena() {
       const latest = rows[0] || {};
 
       const label = agentId === 'jason' ? 'GPT 5.4' : agentId;
+      const balanceUsd = agentId === 'jason' ? Number(jasonState?.state?.balance_usd ?? NaN) : NaN;
+      const equityUsd = Number.isFinite(balanceUsd) ? balanceUsd : undefined;
+      const normalizedPnl = Number.isFinite(balanceUsd) ? balanceUsd - 1000 : pnl;
       return {
         id: agentId,
         label,
         status: decisions > 0 ? 'online' : 'idle',
-        pnl,
+        pnl: normalizedPnl,
+        equityUsd,
         trades,
         decisions,
         winRate: (wins / decided) * 100,
@@ -185,7 +190,7 @@ export default function ModelArena() {
     });
 
     return models.sort((a, b) => scoreModel(b) - scoreModel(a));
-  }, [filteredPackets]);
+  }, [filteredPackets, jasonState]);
 
   useEffect(() => {
     if (rankedModels.length === 0) {
@@ -395,7 +400,7 @@ export default function ModelArena() {
                 <strong>#{idx + 1} {model.label}</strong>
                 <div className="muted">{model.symbols.join(', ') || 'n/a'} · {model.trades} trades / {model.decisions} decisions</div>
               </div>
-              <div className="arena-board-pnl">{model.pnl.toFixed(2)} USD</div>
+              <div className="arena-board-pnl">{model.id === 'jason' && model.equityUsd != null ? `${model.equityUsd.toFixed(2)} USD balance` : `${model.pnl.toFixed(2)} USD PnL`}</div>
             </button>
           ))}
         </div>
@@ -525,7 +530,7 @@ export default function ModelArena() {
               <article key={model.id} className="arena-compare-pane">
                 <h4>{model.label}</h4>
                 <div className="muted">Win rate: {pct(model.winRate)}</div>
-                <div className="muted">PnL: {model.pnl.toFixed(2)} USD</div>
+                <div className="muted">PnL: {model.id === 'jason' && model.equityUsd != null ? `${model.equityUsd.toFixed(2)} USD balance` : `${model.pnl.toFixed(2)} USD PnL`}</div>
                 <div className="muted">Trades: {model.trades} (Decisions: {model.decisions})</div>
                 <div className="muted">Long/Short bias: {pct(model.longBias)} / {pct(model.shortBias)}</div>
                 <div className="muted">Avg confidence: {pct(model.avgConfidence * 100)}</div>
