@@ -310,3 +310,10 @@ export async function setJasonCorrelationBuckets(buckets: Record<string,string>)
   });
   return parseJsonOrThrow(res);
 }
+
+
+export async function getJasonPolicyHealth(limit = 200) {
+  const bounded = Math.max(1, Math.min(limit, 5000));
+  const res = await fetch(`${API_BASE}/agents/jason/policy-health?limit=${bounded}`);
+  return parseJsonOrThrow(res);
+}

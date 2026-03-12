@@ -860,6 +860,59 @@ def set_jason_offline(db: Session, *, reason: str = 'oauth_unavailable'):
     db.commit()
     return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state}
 
+
+def get_policy_health_stats(db: Session, *, limit: int = 200):
+    rows = db.execute(
+        text(
+            """
+            SELECT id, ts, execution_json
+            FROM agent_decision_packets
+            WHERE agent_id=:agent_id
+            ORDER BY id DESC
+            LIMIT :limit
+            """
+        ),
+        {'agent_id': JASON_AGENT_ID, 'limit': max(1, min(int(limit), 5000))},
+    ).mappings().all()
+
+    total = len(rows)
+    gated = 0
+    allowed = 0
+    denied = 0
+    deny_reasons: dict[str, int] = {}
+
+    for r in rows:
+        ex = r.get('execution_json') or {}
+        if isinstance(ex, str):
+            try:
+                ex = json.loads(ex)
+            except Exception:
+                ex = {}
+        g = (ex or {}).get('gating') or ((ex or {}).get('result') or {}).get('gating') or None
+        if not isinstance(g, dict) or not g:
+            continue
+        gated += 1
+        if g.get('allowed') is True:
+            allowed += 1
+        elif g.get('allowed') is False:
+            denied += 1
+            reason = str(g.get('deny_reason') or 'unknown')
+            deny_reasons[reason] = deny_reasons.get(reason, 0) + 1
+
+    top_reasons = sorted(deny_reasons.items(), key=lambda kv: kv[1], reverse=True)
+    return {
+        'ok': True,
+        'window': total,
+        'gated': gated,
+        'allowed': allowed,
+        'denied': denied,
+        'allow_rate': (allowed / gated) if gated else 0.0,
+        'deny_rate': (denied / gated) if gated else 0.0,
+        'deny_reason_counts': [{ 'reason': k, 'count': v } for k, v in top_reasons],
+        'top_deny_reason': (top_reasons[0][0] if top_reasons else None),
+    }
+
+
 def get_jason_state(db: Session):
     state = _load_state(db)
     open_trades = _list_open_trades(db)

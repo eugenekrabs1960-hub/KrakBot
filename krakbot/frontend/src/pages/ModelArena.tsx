@@ -12,6 +12,7 @@ import {
   getJasonPortfolioGate,
   getJasonCorrelationBuckets,
   setJasonUniverse,
+  getJasonPolicyHealth,
   setJasonPortfolioGate,
   setJasonCorrelationBuckets,
   setJasonRiskProfile,
@@ -62,6 +63,7 @@ export default function ModelArena() {
   const [gateCfg, setGateCfg] = useState<any>(null);
   const [bucketText, setBucketText] = useState('');
   const [gateUiMsg, setGateUiMsg] = useState('');
+  const [policyHealth, setPolicyHealth] = useState<any>(null);
   const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -104,7 +106,7 @@ export default function ModelArena() {
   };
 
   const loadSecondary = async () => {
-    const [jsTrades, jsState, risk, hl, guard, uni, gate, buckets] = await Promise.all([
+    const [jsTrades, jsState, risk, hl, guard, uni, gate, buckets, health] = await Promise.all([
       getJasonTrades(20).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
@@ -113,6 +115,7 @@ export default function ModelArena() {
       getJasonUniverse().catch(() => ({ symbols: [] })),
       getJasonPortfolioGate().catch(() => ({ config: null })),
       getJasonCorrelationBuckets().catch(() => ({ buckets: {} })),
+      getJasonPolicyHealth(200).catch(() => ({ ok: false })),
     ]);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
@@ -123,6 +126,7 @@ export default function ModelArena() {
     setGateCfg(gate?.config || null);
     const bt = Object.entries((buckets?.buckets || {})).slice(0,80).map(([k,v]) => `${k}:${v}`).join(',');
     setBucketText(bt);
+    setPolicyHealth(health || null);
   };
 
   const refreshAll = async () => {
@@ -512,7 +516,10 @@ export default function ModelArena() {
           <span className="chip">Risk profile: {riskProfile}</span>
         </div>
         <div className="muted" style={{ marginTop: 8 }}>
-          Last deny reason: {lastGateDeny || 'none recently'}
+          Last deny reason: {lastGateDeny || policyHealth?.top_deny_reason || 'none recently'}
+        </div>
+        <div className="muted">
+          Window: {policyHealth?.window ?? 0} · Gated: {policyHealth?.gated ?? 0} · Allow rate: {policyHealth ? `${((policyHealth.allow_rate || 0) * 100).toFixed(1)}%` : 'n/a'} · Deny rate: {policyHealth ? `${((policyHealth.deny_rate || 0) * 100).toFixed(1)}%` : 'n/a'}
         </div>
       </div>
 
@@ -770,6 +777,21 @@ export default function ModelArena() {
               </>
             ) : null}
 
+
+          <div className="card compact" style={{ marginTop: 10 }}>
+            <strong>Top deny reasons</strong>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Reason</th><th>Count</th></tr></thead>
+                <tbody>
+                  {(policyHealth?.deny_reason_counts || []).slice(0,5).map((r: any) => (
+                    <tr key={`dr-${r.reason}`}><td>{r.reason}</td><td>{r.count}</td></tr>
+                  ))}
+                  {!(policyHealth?.deny_reason_counts || []).length ? <tr><td colSpan={2} className="muted">No deny reasons in current window.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           <div className="card compact" style={{ marginTop: 10 }}>
             <strong>Recent Gating Decisions</strong>
