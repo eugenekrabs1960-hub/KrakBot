@@ -34,9 +34,17 @@ class JasonLoopService:
         while self._running:
             db = SessionLocal()
             try:
-                out = run_jason_once(db)
+                try:
+                    out = run_jason_once(db)
+                except Exception as exc:
+                    if 'OPENAI_API_KEY missing' in str(exc):
+                        out = run_jason_rule_based_once(db)
+                    else:
+                        raise
+
                 if not out.get('ok') and 'OPENAI_API_KEY missing' in str(out.get('error', '')):
                     out = run_jason_rule_based_once(db)
+
                 if not out.get('ok'):
                     logger.info('jason_loop tick skipped: %s', out)
                 else:
