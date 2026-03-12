@@ -433,6 +433,17 @@ def _enrich_quality(decision: Decision, snapshot: dict) -> Decision:
     decision.confidence = max(0.01, min(1.0, float(decision.confidence)))
     return decision
 
+
+def _validate_quality_or_fail(decision: Decision) -> tuple[bool, str]:
+    rat = str(decision.rationale or '').strip()
+    if not rat or rat.lower() == 'no rationale provided':
+        return False, 'invalid_rationale'
+    conf = float(decision.confidence or 0.0)
+    if conf <= 0.0:
+        return False, 'invalid_confidence'
+    return True, ''
+
+
 def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict, decision_source: str):
     open_trade = _get_open_trade(db)
     results: dict = {'decision': decision.__dict__}
@@ -489,6 +500,10 @@ def run_jason_once(db: Session):
     profile = _load_risk_profile(db)
     decision = _apply_profit_bias(decision, state, snapshot, _get_open_trade(db), profile=profile)
     decision = _enrich_quality(decision, snapshot)
+    ok, err = _validate_quality_or_fail(decision)
+    if not ok:
+        set_jason_offline(db, reason=err)
+        return {'ok': False, 'error': err, 'state': _load_state(db)}
     return _apply_decision(db, decision, state, snapshot, decision_source='oauth_gpt54')
 
 
@@ -524,6 +539,11 @@ def execute_jason_decision(db: Session, *, action: str, symbol: str, leverage: f
     d.confidence = max(0.0, min(1.0, d.confidence))
     d = _apply_profit_bias(d, state, snapshot, _get_open_trade(db), profile=_load_risk_profile(db))
     d = _enrich_quality(d, snapshot)
+
+    ok, err = _validate_quality_or_fail(d)
+    if not ok:
+        set_jason_offline(db, reason=err)
+        return {'ok': False, 'error': err, 'state': _load_state(db)}
 
     src = str(decision_source or 'oauth_gpt54').lower()
     if src != 'oauth_gpt54':

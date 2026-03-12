@@ -130,3 +130,23 @@ def test_aggressive_profile_promotes_hold_when_flat(tmp_path):
         if out['decision']['action'] in ('long', 'short'):
             assert float(out['decision']['allocation_pct']) >= 15.0
             assert float(out['decision']['leverage']) >= 5.0
+
+
+def test_execute_jason_decision_auto_repairs_quality(tmp_path):
+    eng = _prep_db(tmp_path / 'jason7.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        out = jason_agent.execute_jason_decision(
+            db,
+            action='hold',
+            symbol='BTC',
+            leverage=1,
+            allocation_pct=0,
+            confidence=0.0,
+            rationale='No rationale provided',
+            decision_source='oauth_gpt54',
+        )
+        assert out['ok'] is True
+        assert float(out['decision']['confidence']) > 0
+        assert str(out['decision']['rationale']).strip().lower() != 'no rationale provided'
