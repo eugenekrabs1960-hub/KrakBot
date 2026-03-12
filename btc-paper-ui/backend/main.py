@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from hyperliquid_paper import HyperliquidFuturesPaperTrack
+
 app = FastAPI(title="BTC Paper Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -193,6 +195,9 @@ store: dict[str, Any] = {
     "auto_scan": True,
     "modes": {k: mode_bucket() for k in MODE_CONFIGS.keys()},
 }
+
+# Separate futures-oriented paper training track (Phase 2/3). Non-destructive: Kraken path stays intact.
+hyper_track = HyperliquidFuturesPaperTrack()
 
 
 def _json_safe_store_snapshot() -> dict[str, Any]:
@@ -1079,6 +1084,24 @@ async def ack_notify(mode: str):
     return {"ok": True}
 
 
+@app.get("/api/hyperliquid/state")
+async def hyperliquid_state():
+    if hyper_track.get_state().get("latest") is None:
+        hyper_track.run_scan()
+    return hyper_track.get_state()
+
+
+@app.post("/api/hyperliquid/run-scan")
+async def hyperliquid_run_scan():
+    return {"state": hyper_track.run_scan()}
+
+
+@app.post("/api/hyperliquid/mock-open")
+async def hyperliquid_mock_open(side: str = "BUY", qty: float = 0.01, leverage: float = 2.0):
+    # Explicit manual paper helper only. No exchange route is called.
+    return hyper_track.open_paper_position(side=side, qty=qty, leverage=leverage)
+
+
 if FRONTEND_DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend-assets")
 
@@ -1104,6 +1127,8 @@ async def start_auto_scanner():
                         ct = candles[-1]["time"]
                         if store["modes"][m]["last_candle_time"] != ct:
                             await execute_mode_scan(m)
+                    # Separate Hyperliquid futures paper-training track (mock/public-style only)
+                    hyper_track.run_scan()
             except Exception:
                 persist_store()
             await asyncio.sleep(20)

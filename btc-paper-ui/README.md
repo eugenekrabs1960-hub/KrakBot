@@ -27,6 +27,12 @@ Local-only paper-trading dashboard.
   - repeated failure pattern detection
   - compact rolling learning summary per strategy
   - shadow-mode routing recommendations with zero execution impact
+- Separate Hyperliquid futures paper-training track (non-destructive):
+  - `GET /api/hyperliquid/state`
+  - `POST /api/hyperliquid/run-scan`
+  - `POST /api/hyperliquid/mock-open` (manual paper helper)
+  - mock/public-style inputs only
+  - no private execution and no live trading routes
 
 ## API
 - `GET /api/state`
