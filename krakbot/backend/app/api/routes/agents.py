@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
 from app.core.config import settings
-from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile, export_benchmark_reasoning_rows, export_benchmark_reasoning_csv, get_tradable_universe, set_tradable_universe
+from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile, export_benchmark_reasoning_rows, export_benchmark_reasoning_csv, get_tradable_universe, set_tradable_universe, get_portfolio_gate, set_portfolio_gate, get_correlation_buckets, set_correlation_buckets
 
 router = APIRouter(prefix='/agents', tags=['agents'])
 
@@ -38,6 +38,14 @@ class JasonRiskProfileRequest(BaseModel):
 
 class JasonUniverseRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list)
+
+
+class JasonPortfolioGateRequest(BaseModel):
+    config: dict = Field(default_factory=dict)
+
+
+class JasonBucketsRequest(BaseModel):
+    buckets: dict = Field(default_factory=dict)
 
 
 @router.post('/decision-packets')
@@ -148,3 +156,23 @@ def jason_universe(db: Session = Depends(get_db)):
 @router.post('/jason/universe')
 def jason_set_universe(payload: JasonUniverseRequest, db: Session = Depends(get_db)):
     return set_tradable_universe(db, payload.symbols)
+
+
+@router.get('/jason/portfolio-gate')
+def jason_portfolio_gate(db: Session = Depends(get_db)):
+    return get_portfolio_gate(db)
+
+
+@router.post('/jason/portfolio-gate')
+def jason_set_portfolio_gate(payload: JasonPortfolioGateRequest, db: Session = Depends(get_db)):
+    return set_portfolio_gate(db, payload.config)
+
+
+@router.get('/jason/correlation-buckets')
+def jason_correlation_buckets(db: Session = Depends(get_db)):
+    return get_correlation_buckets(db)
+
+
+@router.post('/jason/correlation-buckets')
+def jason_set_correlation_buckets(payload: JasonBucketsRequest, db: Session = Depends(get_db)):
+    return set_correlation_buckets(db, payload.buckets)

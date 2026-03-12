@@ -35,6 +35,8 @@ TOP100_SYMBOLS = {
 }
 BENCHMARK_EXPORT_DIR = Path('/tmp/krakbot_training')
 UNIVERSE_KEY = 'agent_jason_tradable_universe'
+PORTFOLIO_GATE_KEY = 'agent_jason_portfolio_gate_v1'
+BUCKETS_KEY = 'agent_jason_correlation_buckets_v1'
 
 
 @dataclass
@@ -62,6 +64,80 @@ Rules:
 - If balance <= 0, must hold.
 - Use provided market snapshot and recent returns.
 """
+
+
+
+def _default_portfolio_gate() -> dict:
+    return {
+        'enabled': True,
+        'max_open_positions': 3,
+        'slot_confidence': {'1': 0.60, '2': 0.70, '3': 0.80},
+        'max_per_position_allocation_pct': 15.0,
+        'max_total_allocation_pct': 45.0,
+        'max_same_direction_allocation_pct': 35.0,
+        'max_bucket_positions': 2,
+        'min_open_interval_sec': 300,
+        'slot3_exceptional_confidence': 0.90,
+        'require_diversification_for_slot_2_3': True,
+    }
+
+
+def _default_bucket_map() -> dict:
+    return {
+        'BTC': 'BTC_MAJORS', 'ETH': 'ETH_ECOSYSTEM', 'SOL': 'SOL_ECOSYSTEM',
+        'BNB': 'BTC_MAJORS', 'DOGE': 'SPECULATIVE', 'PEPE': 'SPECULATIVE', 'BONK': 'SPECULATIVE',
+        'AVAX': 'ALT_L1', 'ADA': 'ALT_L1', 'DOT': 'ALT_L1', 'LINK': 'INFRA',
+        'ARB': 'ETH_ECOSYSTEM', 'OP': 'ETH_ECOSYSTEM', 'MATIC': 'ETH_ECOSYSTEM',
+        'AAVE': 'ETH_ECOSYSTEM', 'UNI': 'ETH_ECOSYSTEM', 'JTO': 'SOL_ECOSYSTEM',
+        'JUP': 'SOL_ECOSYSTEM', 'WIF': 'SPECULATIVE', 'RAY': 'SOL_ECOSYSTEM',
+    }
+
+
+def _load_json_state(db: Session, key: str, default_obj: dict) -> dict:
+    row = db.execute(text('SELECT value FROM system_state WHERE key=:k LIMIT 1'), {'k': key}).mappings().first()
+    if not row:
+        return dict(default_obj)
+    v = row.get('value')
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except Exception:
+            return dict(default_obj)
+    return dict(v) if isinstance(v, dict) else dict(default_obj)
+
+
+def _save_json_state(db: Session, key: str, obj: dict):
+    payload = json.dumps(obj)
+    if _dialect_name(db) == 'postgresql':
+        db.execute(text('INSERT INTO system_state(key, value, updated_at) VALUES (:k, CAST(:payload AS jsonb), CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP'), {'k': key, 'payload': payload})
+    else:
+        db.execute(text('INSERT INTO system_state(key, value, updated_at) VALUES (:k, :payload, CURRENT_TIMESTAMP) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP'), {'k': key, 'payload': payload})
+
+
+def get_portfolio_gate(db: Session):
+    return {'ok': True, 'config': _load_json_state(db, PORTFOLIO_GATE_KEY, _default_portfolio_gate())}
+
+
+def set_portfolio_gate(db: Session, config: dict):
+    base = _default_portfolio_gate()
+    merged = {**base, **(config or {})}
+    merged['slot_confidence'] = {**base['slot_confidence'], **dict((config or {}).get('slot_confidence') or {})}
+    _save_json_state(db, PORTFOLIO_GATE_KEY, merged)
+    db.commit()
+    return {'ok': True, 'config': merged}
+
+
+def get_correlation_buckets(db: Session):
+    return {'ok': True, 'buckets': _load_json_state(db, BUCKETS_KEY, _default_bucket_map())}
+
+
+def set_correlation_buckets(db: Session, buckets: dict):
+    clean = {str(k).upper(): str(v).upper() for k, v in dict(buckets or {}).items() if str(k).strip() and str(v).strip()}
+    if not clean:
+        return {'ok': False, 'error': 'empty_buckets'}
+    _save_json_state(db, BUCKETS_KEY, clean)
+    db.commit()
+    return {'ok': True, 'buckets': clean}
 
 
 def _now_ms() -> int:
@@ -306,19 +382,24 @@ def _benchmark_reasoning(snapshot: dict) -> dict:
         }
     return out
 
-def _get_open_trade(db: Session):
-    row = db.execute(
+def _list_open_trades(db: Session):
+    rows = db.execute(
         text(
             """
             SELECT id, symbol, side, leverage, allocation_pct, margin_usd, entry_price, qty, opened_at_ms
             FROM agent_virtual_trades
             WHERE agent_id=:agent_id AND status='open'
-            ORDER BY id DESC LIMIT 1
+            ORDER BY opened_at_ms ASC, id ASC
             """
         ),
         {'agent_id': JASON_AGENT_ID},
-    ).mappings().first()
-    return dict(row) if row else None
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _get_open_trade(db: Session):
+    trades = _list_open_trades(db)
+    return trades[-1] if trades else None
 
 
 def _close_trade(db: Session, trade: dict, exit_price: float, reason: str, state: dict):
@@ -374,7 +455,7 @@ def _close_trade(db: Session, trade: dict, exit_price: float, reason: str, state
     return {'closed_trade_id': trade['id'], 'realized_pnl_usd': pnl, 'balance_after_usd': balance_after}
 
 
-def _open_trade(db: Session, decision: Decision, state: dict, price: float):
+def _open_trade(db: Session, decision: Decision, state: dict, price: float, gate_trace: dict | None = None):
     balance = float(state.get('balance_usd', INITIAL_BALANCE))
     alloc = max(0.0, min(50.0, float(decision.allocation_pct)))
     leverage = max(1.0, min(20.0, float(decision.leverage)))
@@ -408,7 +489,7 @@ def _open_trade(db: Session, decision: Decision, state: dict, price: float):
                 'qty': qty,
                 'rationale': decision.rationale,
                 'opened_at_ms': now,
-                'meta_json': json.dumps({'confidence': decision.confidence}),
+                'meta_json': json.dumps({'confidence': decision.confidence, 'gating': gate_trace or {}}),
             },
         )
     else:
@@ -435,10 +516,76 @@ def _open_trade(db: Session, decision: Decision, state: dict, price: float):
                 'qty': qty,
                 'rationale': decision.rationale,
                 'opened_at_ms': now,
-                'meta_json': json.dumps({'confidence': decision.confidence}),
+                'meta_json': json.dumps({'confidence': decision.confidence, 'gating': gate_trace or {}}),
             },
         )
     return {'opened': True, 'symbol': decision.symbol, 'side': decision.action, 'entry_price': price, 'qty': qty, 'margin_usd': margin, 'leverage': leverage}
+
+
+
+def _bucket_for_symbol(sym: str, bucket_map: dict) -> str:
+    return str((bucket_map or {}).get(str(sym or '').upper()) or 'SPECULATIVE').upper()
+
+
+def _evaluate_slot_gate(db: Session, decision: Decision, state: dict, open_trades: list[dict]) -> dict:
+    cfg = _load_json_state(db, PORTFOLIO_GATE_KEY, _default_portfolio_gate())
+    bucket_map = _load_json_state(db, BUCKETS_KEY, _default_bucket_map())
+    slot = len(open_trades) + 1
+    trace = {
+        'requested_slot': slot,
+        'max_open_positions': int(cfg.get('max_open_positions', 3)),
+        'required_confidence': float((cfg.get('slot_confidence') or {}).get(str(slot), 1.0)),
+        'actual_confidence': float(decision.confidence or 0.0),
+        'allowed': True,
+        'deny_reason': None,
+    }
+    if slot > int(cfg.get('max_open_positions', 3)):
+        trace.update({'allowed': False, 'deny_reason': 'slot_limit_reached'}); return trace
+    if float(decision.confidence or 0.0) < float((cfg.get('slot_confidence') or {}).get(str(slot), 1.0)):
+        trace.update({'allowed': False, 'deny_reason': 'confidence_too_low_for_slot'}); return trace
+    alloc = float(decision.allocation_pct or 0.0)
+    if alloc > float(cfg.get('max_per_position_allocation_pct', 15.0)):
+        trace.update({'allowed': False, 'deny_reason': 'projected_allocation_too_high'}); return trace
+    total_alloc = sum(float(t.get('allocation_pct') or 0.0) for t in open_trades) + alloc
+    trace['projected_total_allocation_pct'] = total_alloc
+    if total_alloc > float(cfg.get('max_total_allocation_pct', 45.0)):
+        trace.update({'allowed': False, 'deny_reason': 'projected_allocation_too_high'}); return trace
+    side = decision.action
+    same_dir = sum(float(t.get('allocation_pct') or 0.0) for t in open_trades if str(t.get('side') or '').lower() == side) + alloc
+    trace['projected_same_direction_allocation_pct'] = same_dir
+    if same_dir > float(cfg.get('max_same_direction_allocation_pct', 35.0)):
+        trace.update({'allowed': False, 'deny_reason': 'projected_directional_exposure_too_high'}); return trace
+    lw = sum(float(t.get('allocation_pct') or 0.0) * float(t.get('leverage') or 1.0) for t in open_trades) + (alloc * float(decision.leverage or 1.0))
+    trace['projected_leverage_weighted_exposure'] = lw
+    target_bucket = _bucket_for_symbol(decision.symbol, bucket_map)
+    bc = {}
+    for t in open_trades:
+        b = _bucket_for_symbol(t.get('symbol'), bucket_map); bc[b] = bc.get(b, 0) + 1
+    bucket_after = bc.get(target_bucket, 0) + 1
+    trace['bucket'] = target_bucket; trace['bucket_open_count_after'] = bucket_after
+    if bucket_after > int(cfg.get('max_bucket_positions', 2)):
+        trace.update({'allowed': False, 'deny_reason': 'correlation_bucket_limit'}); return trace
+    if bool(cfg.get('require_diversification_for_slot_2_3', True)) and slot >= 2:
+        similar = any(_bucket_for_symbol(t.get('symbol'), bucket_map) == target_bucket and str(t.get('side') or '').lower() == side for t in open_trades)
+        trace['diversification_ok'] = (not similar)
+        if similar:
+            trace.update({'allowed': False, 'deny_reason': 'correlation_bucket_limit'}); return trace
+    now = _now_ms(); last_open = max([int(t.get('opened_at_ms') or 0) for t in open_trades], default=0)
+    since_sec = (now - last_open) / 1000.0 if last_open else 999999
+    trace['seconds_since_last_open'] = since_sec
+    min_sec = int(cfg.get('min_open_interval_sec', 300))
+    if since_sec < min_sec:
+        if slot == 3 and float(decision.confidence or 0.0) >= float(cfg.get('slot3_exceptional_confidence', 0.90)):
+            trace['pacing_ok'] = True
+        else:
+            trace.update({'allowed': False, 'deny_reason': 'open_too_soon_after_last_position', 'pacing_ok': False}); return trace
+    else:
+        trace['pacing_ok'] = True
+    if bool(state.get('cooldown_active')):
+        trace.update({'allowed': False, 'deny_reason': 'cooldown_active'}); return trace
+    if bool(state.get('risk_unhealthy')):
+        trace.update({'allowed': False, 'deny_reason': 'portfolio_risk_state_unhealthy'}); return trace
+    return trace
 
 
 def _ask_openai(snapshot: dict, state: dict, open_trade: dict | None) -> Decision:
@@ -578,26 +725,43 @@ def _validate_quality_or_fail(decision: Decision) -> tuple[bool, str]:
 
 
 def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict, decision_source: str):
-    open_trade = _get_open_trade(db)
-    results: dict = {'decision': decision.__dict__}
+    open_trades = _list_open_trades(db)
+    results: dict = {'decision': decision.__dict__, 'open_positions_before': len(open_trades)}
 
-    if open_trade:
-        open_symbol = str(open_trade['symbol']).upper()
-        must_close = decision.action == 'close' or (decision.action in ('long', 'short') and decision.symbol != open_symbol)
-        if must_close:
-            px = float((snapshot.get(open_symbol) or {}).get('mid_price') or 0)
+    if decision.action == 'close':
+        target = next((t for t in reversed(open_trades) if str(t.get('symbol')).upper() == decision.symbol.upper()), None)
+        if target is None and open_trades:
+            target = open_trades[-1]
+        if target:
+            px = float((snapshot.get(str(target.get('symbol')).upper()) or {}).get('mid_price') or 0)
             if px > 0:
-                results['close'] = _close_trade(db, open_trade, px, decision.rationale, state)
-                open_trade = None
+                results['close'] = _close_trade(db, target, px, decision.rationale, state)
+                open_trades = _list_open_trades(db)
 
-    if decision.action in ('long', 'short') and not open_trade:
-        px = float((snapshot.get(decision.symbol) or {}).get('mid_price') or 0)
-        if px > 0:
-            results['open'] = _open_trade(db, decision, state, px)
+    if decision.action in ('long', 'short'):
+        same_symbol = [t for t in open_trades if str(t.get('symbol')).upper() == decision.symbol.upper()]
+        opp = next((t for t in same_symbol if str(t.get('side')).lower() != decision.action), None)
+        if opp:
+            px = float((snapshot.get(decision.symbol) or {}).get('mid_price') or 0)
+            if px > 0:
+                results.setdefault('auto_closes', []).append(_close_trade(db, opp, px, 'flip_symbol_side', state))
+                open_trades = _list_open_trades(db)
+
+        already_same = any(str(t.get('symbol')).upper() == decision.symbol.upper() and str(t.get('side')).lower() == decision.action for t in open_trades)
+        if not already_same:
+            gate = _evaluate_slot_gate(db, decision, state, open_trades)
+            results['gating'] = gate
+            if gate.get('allowed'):
+                px = float((snapshot.get(decision.symbol) or {}).get('mid_price') or 0)
+                if px > 0:
+                    results['open'] = _open_trade(db, decision, state, px, gate_trace=gate)
+            else:
+                results['open_denied'] = True
 
     state['online'] = True
     if 'offline_reason' in state:
         state.pop('offline_reason', None)
+    state['open_positions'] = len(_list_open_trades(db))
     _save_state(db, state)
 
     record_decision_packet(
@@ -609,7 +773,7 @@ def _apply_decision(db: Session, decision: Decision, state: dict, snapshot: dict
         rationale=decision.rationale,
         context={'snapshot': snapshot, 'state': state, 'decision_source': decision_source, 'benchmark_reasoning': _benchmark_reasoning(snapshot)},
         risk={'max_leverage': 20, 'max_allocation_pct': 50, 'paper_money': True},
-        execution={'mode': 'virtual_hyperliquid_perps', 'decision_source': decision_source, 'result': results},
+        execution={'mode': 'virtual_hyperliquid_perps', 'decision_source': decision_source, 'result': results, 'gating': results.get('gating')},
         outcome={'balance_usd': state.get('balance_usd')},
     )
 
@@ -698,8 +862,9 @@ def set_jason_offline(db: Session, *, reason: str = 'oauth_unavailable'):
 
 def get_jason_state(db: Session):
     state = _load_state(db)
-    open_trade = _get_open_trade(db)
-    return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, 'open_trade': open_trade, 'risk_profile': _load_risk_profile(db)}
+    open_trades = _list_open_trades(db)
+    open_trade = open_trades[-1] if open_trades else None
+    return {'ok': True, 'agent_id': JASON_AGENT_ID, 'state': state, 'open_trade': open_trade, 'open_trades': open_trades, 'risk_profile': _load_risk_profile(db), 'portfolio_gate': _load_json_state(db, PORTFOLIO_GATE_KEY, _default_portfolio_gate())}
 
 
 

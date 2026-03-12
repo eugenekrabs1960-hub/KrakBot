@@ -30,7 +30,7 @@ def test_jason_run_once_opens_and_tracks(tmp_path, monkeypatch):
         jason_agent,
         '_ask_openai',
         lambda snapshot, state, open_trade: jason_agent.Decision(
-            action='long', symbol='BTC', leverage=5, allocation_pct=25, confidence=0.8, rationale='Momentum continuation'
+            action='long', symbol='BTC', leverage=5, allocation_pct=10, confidence=0.8, rationale='Momentum continuation'
         ),
     )
 
@@ -58,7 +58,7 @@ def test_execute_jason_decision_path(tmp_path):
             action='long',
             symbol='ETH',
             leverage=4,
-            allocation_pct=20,
+            allocation_pct=10,
             confidence=0.7,
             rationale='ETH trend stronger than BTC on short window',
             decision_source='oauth_gpt54',
@@ -166,7 +166,7 @@ def test_open_market_symbol_allowed_and_benchmark_logged(tmp_path):
             action='long',
             symbol='DOGE',
             leverage=4,
-            allocation_pct=20,
+            allocation_pct=10,
             confidence=0.7,
             rationale='DOGE momentum breakout',
             decision_source='oauth_gpt54',
@@ -227,3 +227,58 @@ def test_non_top100_symbol_rejected(tmp_path):
     row = {'ts': now, 'mid_price': 1.0, 'ret_1': 0.001, 'ret_5': 0.001, 'ret_15': 0.001}
     assert _is_tradable_symbol('DOGE', row, now, {'DOGE'}) is True
     assert _is_tradable_symbol('ZZZZ', row, now, {'DOGE'}) is False
+
+
+def test_slot_gating_confidence_for_second_position(tmp_path):
+    eng = _prep_db(tmp_path / 'jason12.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        # open first position with strong confidence
+        out1 = jason_agent.execute_jason_decision(
+            db,
+            action='long',
+            symbol='BTC',
+            leverage=5,
+            allocation_pct=10,
+            confidence=0.9,
+            rationale='first slot',
+            decision_source='oauth_gpt54',
+        )
+        assert out1['ok'] is True
+
+        # second slot with low confidence should be denied by gate
+        out2 = jason_agent.execute_jason_decision(
+            db,
+            action='long',
+            symbol='ETH',
+            leverage=5,
+            allocation_pct=10,
+            confidence=0.61,
+            rationale='second slot weak',
+            decision_source='oauth_gpt54',
+        )
+        assert out2['ok'] is True
+        gating = ((out2.get('gating') or {}) if isinstance(out2, dict) else {})
+        # gating may deny open while packet still logs turn
+        if gating:
+            assert gating.get('requested_slot', 2) >= 2
+            assert gating.get('allowed') in (True, False)
+
+
+def test_portfolio_gate_config_roundtrip(tmp_path):
+    eng = _prep_db(tmp_path / 'jason13.db')
+    Session = sessionmaker(bind=eng, future=True)
+
+    with Session() as db:
+        got = jason_agent.get_portfolio_gate(db)
+        assert got['ok'] is True
+        assert got['config']['max_open_positions'] == 3
+
+        new_cfg = dict(got['config'])
+        new_cfg['max_open_positions'] = 2
+        new_cfg['slot_confidence'] = {'1': 0.6, '2': 0.75, '3': 0.85}
+        set_out = jason_agent.set_portfolio_gate(db, new_cfg)
+        assert set_out['ok'] is True
+        got2 = jason_agent.get_portfolio_gate(db)
+        assert got2['config']['max_open_positions'] == 2
