@@ -21,6 +21,12 @@ Local-only paper-trading dashboard.
   - regime detection snapshot per scan
   - per-strategy metrics
   - per-regime metrics for each strategy
+- Controlled learning layer:
+  - scan outcome logging with strategy + regime context
+  - trade lifecycle tracking including MFE/MAE
+  - repeated failure pattern detection
+  - compact rolling learning summary per strategy
+  - shadow-mode routing recommendations with zero execution impact
 
 ## API
 - `GET /api/state`

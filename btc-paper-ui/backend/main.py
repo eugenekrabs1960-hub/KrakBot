@@ -530,6 +530,21 @@ def compute_unrealized(p, bid, ask):
     }
 
 
+def update_position_excursions(p, candle):
+    qty = p.get("qty", 1.0)
+    entry = p.get("entry_fill_price", 0.0)
+    if not entry:
+        return
+    if p["side"] == "BUY":
+        mfe = (candle["high"] - entry) * qty
+        mae = (entry - candle["low"]) * qty
+    else:
+        mfe = (entry - candle["low"]) * qty
+        mae = (candle["high"] - entry) * qty
+    p["max_favorable_excursion"] = round2(max(p.get("max_favorable_excursion", 0.0), mfe))
+    p["max_adverse_excursion"] = round2(max(p.get("max_adverse_excursion", 0.0), mae))
+
+
 def maybe_close(p, candle, slip):
     side = p["side"]
     if side == "BUY":
@@ -571,6 +586,110 @@ def maybe_close(p, candle, slip):
         "gross_unrealized_pnl": 0,
         "net_unrealized_pnl": 0,
         "close_time": now_iso(),
+    }
+
+
+def detect_failure_patterns(bucket):
+    history = bucket.get("history", [])
+    closed = bucket.get("closed_trades", [])
+    strategy_entry = bucket.get("strategy_registry_entry") or {}
+    no_edge_repeats = len([h for h in history[-100:] if h.get("status") == "WAIT" and "no_edge" in str(h.get("regime_label", ""))])
+    tp_missed_reversed = len([
+        t for t in closed
+        if t.get("close_reason") == "STOP_LOSS"
+        and t.get("max_favorable_excursion", 0) > 0
+        and t.get("max_favorable_excursion", 0) >= abs(t.get("gross_realized_pnl", 0)) * 0.5
+    ])
+    fee_drag_destroying_edge = len([
+        t for t in closed
+        if t.get("gross_realized_pnl", 0) > 0 and t.get("net_realized_pnl", t.get("realized_pnl", 0)) <= 0
+    ])
+    regime_mismatch = len([
+        h for h in history[-100:]
+        if h.get("market_regime") and strategy_entry.get("allowed_regimes") and h.get("market_regime") not in strategy_entry.get("allowed_regimes", [])
+    ])
+    overtrading = max(0, len([h for h in history[-50:] if h.get("status") == "PAPER_TRADE_OPEN"]) - 6)
+    undertrading = 1 if no_edge_repeats >= 8 and len([h for h in history[-50:] if h.get("status") == "PAPER_TRADE_OPEN"]) == 0 else 0
+    return {
+        "tp_missed_then_reversed_to_sl": tp_missed_reversed,
+        "no_edge_repeats": no_edge_repeats,
+        "fee_drag_destroying_edge": fee_drag_destroying_edge,
+        "regime_mismatch": regime_mismatch,
+        "overtrading": overtrading,
+        "undertrading": undertrading,
+    }
+
+
+def shadow_route_snapshot(current_regime: dict[str, Any]) -> dict[str, Any]:
+    candidates = []
+    regime = current_regime.get("regime")
+    for strategy_key, entry in STRATEGY_REGISTRY.items():
+        bucket = store["modes"].get(strategy_key, {})
+        perf = (bucket.get("performance_by_regime") or {}).get(regime) or strategy_metrics_bucket()
+        eligible = regime in entry.get("allowed_regimes", []) and entry.get("status") != "paused"
+        score = round2(
+            perf.get("expectancy", 0.0)
+            - abs(perf.get("max_drawdown", 0.0)) * 0.10
+            - perf.get("fee_drag_pct", 0.0) * 0.05
+            + perf.get("win_rate", 0.0) * 0.02
+            + perf.get("sample_size", 0) * 0.03
+        ) if eligible else -9999.0
+        reason = "eligible for shadow routing" if eligible else "regime not allowed or strategy paused"
+        candidates.append({
+            "strategy_key": strategy_key,
+            "strategy_family": entry.get("family"),
+            "eligible": eligible,
+            "score": score,
+            "reason": reason,
+            "regime_metrics": perf,
+        })
+    ranked = sorted(candidates, key=lambda x: x["score"], reverse=True)
+    chosen = ranked[0] if ranked and ranked[0]["eligible"] and ranked[0]["score"] > -1000 else None
+    return {
+        "mode": "shadow_only",
+        "regime": regime,
+        "selected_strategy": chosen.get("strategy_key") if chosen else None,
+        "selected_family": chosen.get("strategy_family") if chosen else None,
+        "selected_score": chosen.get("score") if chosen else None,
+        "selection_reason": chosen.get("reason") if chosen else "No approved strategy cleared shadow-mode eligibility.",
+        "ranked_candidates": ranked,
+        "execution_impact": "none",
+    }
+
+
+def summarize_strategy_learning(strategy_key: str, bucket: dict[str, Any]) -> dict[str, Any]:
+    perf = bucket.get("performance_by_regime") or regime_metrics_bucket()
+    patterns = detect_failure_patterns(bucket)
+    ranked = sorted(perf.items(), key=lambda kv: kv[1].get("expectancy", 0.0), reverse=True)
+    best_regime = ranked[0][0] if ranked else None
+    worst_regime = ranked[-1][0] if ranked else None
+    weaknesses = []
+    if patterns["tp_missed_then_reversed_to_sl"]:
+        weaknesses.append("tp_missed_then_reversed_to_sl")
+    if patterns["fee_drag_destroying_edge"]:
+        weaknesses.append("fee_drag_destroying_edge")
+    if patterns["no_edge_repeats"] >= 5:
+        weaknesses.append("no_edge_repeats")
+    if patterns["regime_mismatch"]:
+        weaknesses.append("regime_mismatch")
+    if not weaknesses:
+        weaknesses.append("insufficient_confirmed_edge_history")
+    next_improvement = "Collect more paper samples before changing logic."
+    if patterns["fee_drag_destroying_edge"]:
+        next_improvement = "Review exit efficiency and fee-adjusted trade quality in paper mode."
+    elif patterns["tp_missed_then_reversed_to_sl"]:
+        next_improvement = "Test a controlled exit-only paper experiment after more samples accumulate."
+    elif patterns["no_edge_repeats"] >= 5:
+        next_improvement = "Review whether this strategy is being used in the wrong regime before tuning entries."
+    return {
+        "strategy_key": strategy_key,
+        "what_works": f"Best observed regime so far: {best_regime}" if best_regime else "No strong edge identified yet.",
+        "what_fails": ", ".join(weaknesses),
+        "best_regime": best_regime,
+        "worst_regime": worst_regime,
+        "key_observed_weaknesses": weaknesses,
+        "failure_patterns": patterns,
+        "next_recommended_controlled_improvement": next_improvement,
     }
 
 
@@ -624,6 +743,7 @@ def mode_stats(bucket):
     bucket["strategy_metrics"] = strategy_metrics
     bucket["performance_by_regime"] = performance_by_regime
 
+    learning_summary = summarize_strategy_learning(bucket.get("strategy_registry_entry", {}).get("strategy_key", "unknown"), bucket)
     return {
         "total_opened": len([h for h in bucket["history"] if h.get("status") == "PAPER_TRADE_OPEN"]),
         "total_closed": len(closed),
@@ -644,6 +764,7 @@ def mode_stats(bucket):
         "max_drawdown": strategy_metrics["max_drawdown"],
         "strategy_metrics": strategy_metrics,
         "performance_by_regime": performance_by_regime,
+        "learning_summary": learning_summary,
     }
 
 
@@ -723,6 +844,7 @@ async def execute_mode_scan(mode: str):
                 "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
                 "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
                 "status": "PAPER_TRADE_OPEN", "unrealized_pnl": round2(-entry_fee), "gross_unrealized_pnl": 0, "net_unrealized_pnl": round2(-entry_fee), "realized_pnl": 0,
+                "max_favorable_excursion": 0.0, "max_adverse_excursion": 0.0,
             }
             bucket["pending_orders"].append({"timestamp": now_iso(), "mode": mode, "signal_id": d["signal_id"], "status": "QUEUED_TO_PAPER_EXECUTOR", "decision": d})
             bucket["open_positions"].append(pos)
@@ -737,6 +859,7 @@ async def execute_mode_scan(mode: str):
     candle = candles[-1]
     still = []
     for p in bucket["open_positions"]:
+        update_position_excursions(p, candle)
         c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"])
         if c:
             bucket["closed_trades"].append(c)
@@ -755,6 +878,7 @@ async def execute_mode_scan(mode: str):
     bucket["open_positions"] = still
 
     stats = mode_stats(bucket)
+    shadow_routing = shadow_route_snapshot(current_regime)
     latest = {
         **payload,
         "mode": mode,
@@ -786,6 +910,8 @@ async def execute_mode_scan(mode: str):
         "mode_stats": stats,
         "strategy_metrics": bucket["strategy_metrics"],
         "performance_by_regime": bucket["performance_by_regime"],
+        "learning_summary": stats.get("learning_summary"),
+        "shadow_routing": shadow_routing,
     }
     bucket["latest"] = latest
     bucket["last_candle_time"] = candles[-1]["time"]
