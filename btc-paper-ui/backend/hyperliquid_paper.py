@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 from typing import Any
+from pathlib import Path
+import json
 import random
 
 import httpx
@@ -54,6 +56,10 @@ def blank_metrics() -> dict[str, Any]:
 STALE_EXIT_MIN_BARS = 8
 STALE_EXIT_MIN_TP_PROGRESS = 0.35
 BAR_MINUTES = 15
+
+BASE_DIR = Path(__file__).resolve().parent
+STATE_DIR = BASE_DIR / "data"
+HL_STATE_FILE = STATE_DIR / "hyperliquid_paper_state.json"
 
 HL_STRATEGY_REGISTRY = {
     'hl_15m_trend_follow': {
@@ -214,11 +220,12 @@ class HyperliquidFuturesPaperTrack:
     - No live deployment path
     """
 
-    def __init__(self):
+    def __init__(self, state_file: Path | None = None):
         self.risk = FuturesRiskLimits()
         self.fees = FuturesFeeModel()
         self.feed = HyperliquidPublicFeed(symbol='ETH')
         self.fallback_feed = MockPublicFeed()
+        self.state_file = state_file or HL_STATE_FILE
         self.state: dict[str, Any] = {
             'track': 'hyperliquid_futures_paper',
             'paper_only': True,
@@ -251,6 +258,49 @@ class HyperliquidFuturesPaperTrack:
                 'status': 'training_bootstrap',
             },
         }
+        self._load_state()
+
+    def _persist_state(self) -> None:
+        try:
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            snapshot = {
+                'track': self.state.get('track'),
+                'symbol': self.state.get('symbol'),
+                'active_strategy_key': self.state.get('active_strategy_key'),
+                'strategy_registry': self.state.get('strategy_registry'),
+                'leverage_default': self.state.get('leverage_default'),
+                'positions': self.state.get('positions', [])[-300:],
+                'closed_trades': self.state.get('closed_trades', [])[-1000:],
+                'history': self.state.get('history', [])[-1000:],
+                'latest': self.state.get('latest'),
+                'executed_signal_ids': self.state.get('executed_signal_ids', [])[-1000:],
+                'risk_limits': self.state.get('risk_limits'),
+                'fee_model': self.state.get('fee_model'),
+                'execution_fee_assumption': self.state.get('execution_fee_assumption'),
+                'metrics': self.state.get('metrics'),
+                'learning': self.state.get('learning'),
+            }
+            tmp = self.state_file.with_suffix('.tmp')
+            tmp.write_text(json.dumps(snapshot, separators=(',', ':')), encoding='utf-8')
+            tmp.replace(self.state_file)
+        except Exception:
+            pass
+
+    def _load_state(self) -> None:
+        if not self.state_file.exists():
+            return
+        try:
+            data = json.loads(self.state_file.read_text(encoding='utf-8'))
+        except Exception:
+            return
+
+        for key in (
+            'track', 'symbol', 'active_strategy_key', 'strategy_registry', 'leverage_default',
+            'positions', 'closed_trades', 'history', 'latest', 'executed_signal_ids',
+            'risk_limits', 'fee_model', 'execution_fee_assumption', 'metrics', 'learning'
+        ):
+            if key in data:
+                self.state[key] = data[key]
 
     def _estimate_liq_price(self, side: str, entry: float, leverage: float) -> float:
         # Conservative rough estimate for paper training only.
@@ -611,6 +661,7 @@ class HyperliquidFuturesPaperTrack:
         self.state['latest'] = latest
         self.state['history'].append(latest)
         self.state['history'] = self.state['history'][-300:]
+        self._persist_state()
         return latest
 
     def open_paper_position(self, side: str, qty: float, leverage: float | None = None) -> dict[str, Any]:
@@ -664,6 +715,7 @@ class HyperliquidFuturesPaperTrack:
         )
         self.state['positions'].append(asdict(p))
         self._recompute_metrics()
+        self._persist_state()
         return {'ok': True, 'position': asdict(p)}
 
     def get_state(self) -> dict[str, Any]:
