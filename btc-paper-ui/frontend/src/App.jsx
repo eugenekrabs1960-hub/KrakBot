@@ -351,12 +351,15 @@ function ModePanel({ modeKey, m, onAck }) {
   const allHistory = m?.history || []
   const lifecycleRows = allHistory.filter(r => ['PAPER_TRADE_OPEN', 'PAPER_TRADE_CLOSED'].includes(r?.status))
   const diagRows = allHistory.filter(r => ['WAIT', 'REJECT'].includes(r?.status))
+  const closedTrades = m?.closed_trades || []
+  const expectancy = m?.mode_stats?.expectancy ?? m?.strategy_metrics?.expectancy ?? 0
   const diagCounts = diagRows.reduce((acc, r) => {
     const key = `${r?.status || 'UNKNOWN'}|${r?.reason || r?.regime_label || 'n/a'}`
     acc[key] = (acc[key] || 0) + 1
     return acc
   }, {})
   const diagTop = Object.entries(diagCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+  const pnlColor = (v) => (Number(v) > 0 ? '#16a34a' : Number(v) < 0 ? '#dc2626' : 'inherit')
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
@@ -395,6 +398,17 @@ function ModePanel({ modeKey, m, onAck }) {
       <p>Open: {(m?.open_positions || []).length} / {(m?.execution_limits?.max_open_positions_per_mode || m?.max_open_positions_per_mode || 2)} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
       <div style={{ fontSize: 12 }}>
         WinRate: {m?.mode_stats?.win_rate ?? 0}% | AvgWin: {m?.mode_stats?.average_win ?? 0} | AvgLoss: {m?.mode_stats?.average_loss ?? 0} | MaxDD: {m?.mode_stats?.max_drawdown ?? 0}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+        <strong>Mode summary</strong>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:6 }}>
+          <div><strong>Total closed</strong><div>{closedTrades.length}</div></div>
+          <div><strong>Gross realized</strong><div>{fmt2(grossRealized)}</div></div>
+          <div><strong>Total fees</strong><div>{fmt2(totalFees)}</div></div>
+          <div><strong>Net realized</strong><div style={{ color: pnlColor(realized) }}>{fmt2(realized)}</div></div>
+          <div><strong>Unrealized</strong><div style={{ color: pnlColor(unrealized) }}>{fmt2(unrealized)}</div></div>
+          <div><strong>Expectancy</strong><div style={{ color: pnlColor(expectancy) }}>{fmt2(expectancy)}</div></div>
+        </div>
       </div>
 
       <details style={{ marginTop: 8 }}>
@@ -466,6 +480,32 @@ function ModePanel({ modeKey, m, onAck }) {
             }) : <li>No WAIT/REJECT rows in current window.</li>}
           </ul>
         </div>
+      </details>
+
+      <details style={{ marginTop: 6 }}>
+        <summary>Closed trades PnL ({closedTrades.length})</summary>
+        <table className='rows' style={{ width: '100%' }}>
+          <thead><tr><th>Close time</th><th>Reason</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th></tr></thead>
+          <tbody>
+            {closedTrades.slice(-12).reverse().map((t, i) => {
+              const gross = Number(t.gross_realized_pnl ?? 0)
+              const feesPaid = Number(t.total_fees ?? t.estimated_total_fees ?? ((t.entry_fee ?? 0) + (t.close_fee ?? 0)))
+              const net = Number(t.net_realized_pnl ?? t.realized_pnl ?? 0)
+              const entryNotional = Number(t.entry_notional ?? (Number(t.entry_fill_price ?? 0) * Number(t.qty ?? 0)))
+              const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
+              return (
+                <tr key={i}>
+                  <td>{fmtLA(t.close_time)}</td>
+                  <td>{t.close_reason || '-'}</td>
+                  <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
+                  <td>{fmt2(feesPaid)}</td>
+                  <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
+                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </details>
     </div>
   )
