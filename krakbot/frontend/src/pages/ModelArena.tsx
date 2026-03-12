@@ -204,6 +204,27 @@ export default function ModelArena() {
       };
     });
 
+
+
+    if (models.length === 0 && jasonState?.agent_id === 'jason') {
+      const bal = Number(jasonState?.state?.balance_usd ?? 1000);
+      models.push({
+        id: 'jason',
+        label: 'GPT 5.4',
+        status: jasonState?.state?.online ? 'online' : 'idle',
+        pnl: Number.isFinite(bal) ? bal - 1000 : 0,
+        equityUsd: Number.isFinite(bal) ? bal : undefined,
+        trades: 0,
+        decisions: 0,
+        winRate: 0,
+        avgConfidence: 0,
+        longBias: 0,
+        shortBias: 0,
+        latestReason: 'No recent decision packets yet. Waiting for next turn.',
+        symbols: [],
+      });
+    }
+
     return models.sort((a, b) => scoreModel(b) - scoreModel(a));
   }, [filteredPackets, jasonState]);
 
