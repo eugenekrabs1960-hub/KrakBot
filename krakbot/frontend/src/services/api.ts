@@ -281,3 +281,32 @@ export async function setJasonUniverse(symbols: string[]) {
   });
   return parseJsonOrThrow(res);
 }
+
+
+export async function getJasonPortfolioGate() {
+  const res = await fetch(`${API_BASE}/agents/jason/portfolio-gate`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setJasonPortfolioGate(config: any) {
+  const res = await fetch(`${API_BASE}/agents/jason/portfolio-gate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function getJasonCorrelationBuckets() {
+  const res = await fetch(`${API_BASE}/agents/jason/correlation-buckets`);
+  return parseJsonOrThrow(res);
+}
+
+export async function setJasonCorrelationBuckets(buckets: Record<string,string>) {
+  const res = await fetch(`${API_BASE}/agents/jason/correlation-buckets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ buckets }),
+  });
+  return parseJsonOrThrow(res);
+}

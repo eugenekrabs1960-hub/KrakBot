@@ -9,7 +9,11 @@ import {
   getHyperliquidExecutionHealth,
   getLiveTradingGuard,
   getJasonUniverse,
+  getJasonPortfolioGate,
+  getJasonCorrelationBuckets,
   setJasonUniverse,
+  setJasonPortfolioGate,
+  setJasonCorrelationBuckets,
   setJasonRiskProfile,
   setActiveExecutionModel,
 } from '../services/api';
@@ -55,6 +59,8 @@ export default function ModelArena() {
   const [hlHealth, setHlHealth] = useState<any>(null);
   const [liveGuard, setLiveGuard] = useState<any>(null);
   const [universeText, setUniverseText] = useState('');
+  const [gateCfg, setGateCfg] = useState<any>(null);
+  const [bucketText, setBucketText] = useState('');
   const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -82,13 +88,15 @@ export default function ModelArena() {
   };
 
   const loadSecondary = async () => {
-    const [jsTrades, jsState, risk, hl, guard, uni] = await Promise.all([
+    const [jsTrades, jsState, risk, hl, guard, uni, gate, buckets] = await Promise.all([
       getJasonTrades(20).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
       getHyperliquidExecutionHealth().catch(() => ({ item: null })),
       getLiveTradingGuard().catch(() => ({ item: null })),
       getJasonUniverse().catch(() => ({ symbols: [] })),
+      getJasonPortfolioGate().catch(() => ({ config: null })),
+      getJasonCorrelationBuckets().catch(() => ({ buckets: {} })),
     ]);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
@@ -96,6 +104,9 @@ export default function ModelArena() {
     setHlHealth(hl?.item || null);
     setLiveGuard(guard?.item || null);
     setUniverseText((uni?.symbols || []).join(','));
+    setGateCfg(gate?.config || null);
+    const bt = Object.entries((buckets?.buckets || {})).slice(0,80).map(([k,v]) => `${k}:${v}`).join(',');
+    setBucketText(bt);
   };
 
   const refreshAll = async () => {
@@ -112,6 +123,28 @@ export default function ModelArena() {
       .filter(Boolean);
     try {
       await setJasonUniverse(symbols);
+      await loadSecondary();
+    } catch {}
+  }
+
+
+  async function saveGateConfig() {
+    if (!gateCfg) return;
+    try {
+      await setJasonPortfolioGate(gateCfg);
+      await loadSecondary();
+    } catch {}
+  }
+
+  async function saveBuckets() {
+    const pairs = bucketText.split(',').map(x => x.trim()).filter(Boolean);
+    const map: Record<string,string> = {};
+    for (const p of pairs) {
+      const [k,v] = p.split(':');
+      if (k && v) map[k.trim().toUpperCase()] = v.trim().toUpperCase();
+    }
+    try {
+      await setJasonCorrelationBuckets(map);
       await loadSecondary();
     } catch {}
   }
@@ -527,6 +560,43 @@ export default function ModelArena() {
             </div>
           </div>
           ) : null}
+          {expandedModel.id === 'jason' ? (
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Portfolio Slot Gating</strong>
+            {gateCfg ? (
+              <>
+                <div className="toolbar" style={{ marginTop: 8 }}>
+                  <label className="muted">Max open positions</label>
+                  <input type="number" value={gateCfg.max_open_positions ?? 3} onChange={(e)=>setGateCfg({...gateCfg, max_open_positions: Number(e.target.value||3)})} />
+                  <label className="muted">Min open interval sec</label>
+                  <input type="number" value={gateCfg.min_open_interval_sec ?? 300} onChange={(e)=>setGateCfg({...gateCfg, min_open_interval_sec: Number(e.target.value||300)})} />
+                </div>
+                <div className="toolbar" style={{ marginTop: 8 }}>
+                  <label className="muted">Slot1 conf</label>
+                  <input type="number" step="0.01" value={gateCfg?.slot_confidence?.['1'] ?? 0.6} onChange={(e)=>setGateCfg({...gateCfg, slot_confidence: {...(gateCfg.slot_confidence||{}), '1': Number(e.target.value||0.6)}})} />
+                  <label className="muted">Slot2 conf</label>
+                  <input type="number" step="0.01" value={gateCfg?.slot_confidence?.['2'] ?? 0.7} onChange={(e)=>setGateCfg({...gateCfg, slot_confidence: {...(gateCfg.slot_confidence||{}), '2': Number(e.target.value||0.7)}})} />
+                  <label className="muted">Slot3 conf</label>
+                  <input type="number" step="0.01" value={gateCfg?.slot_confidence?.['3'] ?? 0.8} onChange={(e)=>setGateCfg({...gateCfg, slot_confidence: {...(gateCfg.slot_confidence||{}), '3': Number(e.target.value||0.8)}})} />
+                </div>
+                <div className="toolbar" style={{ marginTop: 8 }}>
+                  <button className="btn" onClick={saveGateConfig}>Save Gate Config</button>
+                </div>
+              </>
+            ) : <div className="muted">Loading gate config...</div>}
+          </div>
+          ) : null}
+
+          {expandedModel.id === 'jason' ? (
+          <div className="card compact" style={{ marginBottom: 10 }}>
+            <strong>Correlation Buckets</strong>
+            <div className="muted" style={{ marginBottom: 6 }}>Format: SYMBOL:BUCKET comma-separated</div>
+            <textarea value={bucketText} onChange={(e)=>setBucketText(e.target.value)} rows={3} style={{ width: '100%' }} />
+            <div className="toolbar" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={saveBuckets}>Save Buckets</button>
+            </div>
+          </div>
+          ) : null}
           <div className="card compact" style={{ marginBottom: 10 }}>
             <strong>Risk Profile</strong>
             <div className="toolbar" style={{ marginTop: 8 }}>
@@ -614,6 +684,31 @@ export default function ModelArena() {
                 </table>
               </>
             ) : null}
+
+
+          <div className="card compact" style={{ marginTop: 10 }}>
+            <strong>Recent Gating Decisions</strong>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Time</th><th>Slot</th><th>Allowed</th><th>Deny reason</th><th>Conf req/actual</th></tr></thead>
+                <tbody>
+                  {expandedModelPackets.slice(0, 12).map((p) => {
+                    const g = (p.execution_json || {}).gating || ((p.execution_json || {}).result || {}).gating || {};
+                    if (!g || Object.keys(g).length === 0) return null;
+                    return (
+                      <tr key={`g-${p.id}`}>
+                        <td>{new Date(Number(p.ts || 0)).toLocaleString()}</td>
+                        <td>{g.requested_slot ?? 'n/a'}</td>
+                        <td>{String(g.allowed ?? '')}</td>
+                        <td>{g.deny_reason || '-'}</td>
+                        <td>{(g.required_confidence ?? '-')} / {(g.actual_confidence ?? '-')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
           </div>
         </div>
       )}
