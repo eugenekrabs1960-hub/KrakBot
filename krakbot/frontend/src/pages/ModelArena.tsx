@@ -13,6 +13,8 @@ import {
   getJasonCorrelationBuckets,
   setJasonUniverse,
   getJasonPolicyHealth,
+  getModelRegistry,
+  getModelReadiness,
   setJasonPortfolioGate,
   setJasonCorrelationBuckets,
   setJasonRiskProfile,
@@ -25,6 +27,7 @@ type ArenaModel = {
   status: 'online' | 'idle';
   pnl: number;
   equityUsd?: number;
+  meta?: any;
   winRate: number;
   trades: number;
   decisions: number;
@@ -64,6 +67,8 @@ export default function ModelArena() {
   const [bucketText, setBucketText] = useState('');
   const [gateUiMsg, setGateUiMsg] = useState('');
   const [policyHealth, setPolicyHealth] = useState<any>(null);
+  const [modelRegistry, setModelRegistry] = useState<any[]>([]);
+  const [modelReadiness, setModelReadiness] = useState<Record<string, any>>({});
   const [loadingCore, setLoadingCore] = useState(true);
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -106,7 +111,7 @@ export default function ModelArena() {
   };
 
   const loadSecondary = async () => {
-    const [jsTrades, jsState, risk, hl, guard, uni, gate, buckets, health] = await Promise.all([
+    const [jsTrades, jsState, risk, hl, guard, uni, gate, buckets, health, reg] = await Promise.all([
       getJasonTrades(20).catch(() => ({ items: [] })),
       getJasonState().catch(() => ({ ok: false })),
       getJasonRiskProfile().catch(() => ({ profile: 'balanced' })),
@@ -116,6 +121,7 @@ export default function ModelArena() {
       getJasonPortfolioGate().catch(() => ({ config: null })),
       getJasonCorrelationBuckets().catch(() => ({ buckets: {} })),
       getJasonPolicyHealth(200).catch(() => ({ ok: false })),
+      getModelRegistry().catch(() => ({ models: [] })),
     ]);
     setJasonTrades(jsTrades?.items || []);
     setJasonState(jsState || null);
@@ -127,6 +133,8 @@ export default function ModelArena() {
     const bt = Object.entries((buckets?.buckets || {})).slice(0,80).map(([k,v]) => `${k}:${v}`).join(',');
     setBucketText(bt);
     setPolicyHealth(health || null);
+    const models = reg?.models || [];
+    setModelRegistry(models);
   };
 
   const refreshAll = async () => {
@@ -298,6 +306,7 @@ export default function ModelArena() {
       const balanceUsd = agentId === 'jason' ? Number(jasonState?.state?.balance_usd ?? NaN) : NaN;
       const equityUsd = Number.isFinite(balanceUsd) ? balanceUsd : undefined;
       const normalizedPnl = Number.isFinite(balanceUsd) ? balanceUsd - 1000 : pnl;
+      const meta = metaByLabel[String(label).toLowerCase()] || null;
       return {
         id: agentId,
         label,
@@ -312,10 +321,37 @@ export default function ModelArena() {
         shortBias: trades > 0 ? (shortCount / trades) * 100 : 0,
         latestReason: latest.rationale || 'No rationale captured yet.',
         symbols: Array.from(symbols),
+        meta,
       };
     });
 
 
+
+    const metaByLabel: Record<string, any> = {};
+    for (const m of (modelRegistry || [])) {
+      metaByLabel[String(m.display_name || m.id || '').toLowerCase()] = m;
+      metaByLabel[String(m.id || '').toLowerCase()] = m;
+    }
+
+    const hasQwen = models.some((m: any) => String(m.id) === 'qwen_local_challenger');
+    const qwenMeta = (modelRegistry || []).find((m: any) => String(m.id) === 'qwen3.5-9b-local');
+    if (!hasQwen && qwenMeta) {
+      models.push({
+        id: 'qwen_local_challenger',
+        label: qwenMeta.display_name || 'Qwen Local',
+        status: 'challenger',
+        pnl: 0,
+        trades: 0,
+        decisions: 0,
+        winRate: 0,
+        avgConfidence: 0,
+        longBias: 0,
+        shortBias: 0,
+        latestReason: 'Local challenger ready (paper-only). Awaiting decision loop wiring.',
+        symbols: [],
+        meta: qwenMeta,
+      } as any);
+    }
 
     if (models.length === 0 && jasonState?.agent_id === 'jason') {
       const bal = Number(jasonState?.state?.balance_usd ?? 1000);
@@ -337,7 +373,7 @@ export default function ModelArena() {
     }
 
     return models.sort((a, b) => scoreModel(b) - scoreModel(a));
-  }, [filteredPackets, jasonState]);
+  }, [filteredPackets, jasonState, modelRegistry]);
 
   useEffect(() => {
     if (rankedModels.length === 0) {
@@ -606,6 +642,8 @@ export default function ModelArena() {
             <div>
               <h3 style={{ marginTop: 0 }}>{expandedModel.label}</h3>
               <div className="muted">{expandedModel.id === 'jason' ? ((jasonState?.state?.online === false) ? 'offline' : 'online') : expandedModel.status} · Win {pct(expandedModel.winRate)} · Confidence {pct(expandedModel.avgConfidence * 100)}</div>
+              {expandedModel.meta?.id ? (<div className="muted">Source: {expandedModel.meta.provider_type || 'n/a'} {expandedModel.meta.local ? '· LOCAL' : ''} {expandedModel.meta.paper_only ? '· PAPER ONLY' : ''} {expandedModel.meta.context_window ? `· ctx ${expandedModel.meta.context_window}` : ''}</div>) : null}
+              {expandedModel.meta?.id === 'qwen3.5-9b-local' ? (<div className="muted">Readiness: {modelReadiness['qwen3.5-9b-local']?.ok ? 'READY' : 'UNAVAILABLE'} {modelReadiness['qwen3.5-9b-local']?.latency_ms != null ? `· ${modelReadiness['qwen3.5-9b-local']?.latency_ms}ms` : ''}</div>) : null}
               {expandedModel.id === 'jason' && jasonState?.state?.online === false ? (<div className="muted">Offline reason: {String(jasonState?.state?.offline_reason || 'oauth_unavailable')}</div>) : null}
             </div>
             <div className="toolbar">
@@ -947,3 +985,4 @@ export default function ModelArena() {
     </section>
   );
 }
+

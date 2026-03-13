@@ -317,3 +317,14 @@ export async function getJasonPolicyHealth(limit = 200) {
   const res = await fetch(`${API_BASE}/agents/jason/policy-health?limit=${bounded}`);
   return parseJsonOrThrow(res);
 }
+
+
+export async function getModelRegistry() {
+  const res = await fetch(`${API_BASE}/agents/models/registry`);
+  return parseJsonOrThrow(res);
+}
+
+export async function getModelReadiness(modelId: string) {
+  const res = await fetch(`${API_BASE}/agents/models/${encodeURIComponent(modelId)}/readiness`);
+  return parseJsonOrThrow(res);
+}
