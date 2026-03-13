@@ -6,7 +6,7 @@ from app.db.session import get_db
 from app.services.agent_decisions import list_decision_packets, record_decision_packet
 from app.core.config import settings
 from app.services.jason_agent import execute_jason_decision, get_jason_state, list_jason_trades, run_jason_once, run_jason_rule_based_once, get_risk_profile, set_risk_profile, export_benchmark_reasoning_rows, export_benchmark_reasoning_csv, get_tradable_universe, set_tradable_universe, get_portfolio_gate, set_portfolio_gate, get_correlation_buckets, set_correlation_buckets, get_policy_health_stats
-from app.services.model_connectors import get_model_registry, set_model_registry, check_model_readiness
+from app.services.model_connectors import get_model_registry, set_model_registry, check_model_readiness, upsert_model_registration
 from app.services.qwen_challenger import run_qwen_once
 
 router = APIRouter(prefix='/agents', tags=['agents'])
@@ -53,6 +53,26 @@ class JasonBucketsRequest(BaseModel):
 class ModelRegistryRequest(BaseModel):
     version: int = 1
     models: list[dict] = Field(default_factory=list)
+
+
+class ModelRegistrationUpsertRequest(BaseModel):
+    id: str
+    display_name: str | None = None
+    provider_type: str | None = None
+    base_url: str | None = None
+    api_mode: str | None = None
+    remote_model_id: str | None = None
+    local: bool | None = None
+    paper_only: bool | None = None
+    supports: list[str] | None = None
+    reasoning: bool | None = None
+    context_window: int | None = None
+    max_tokens: int | None = None
+    status: str | None = None
+    role: str | None = None
+    cost: str | None = None
+    auth_mode: str | None = None
+    api_key_env: str | None = None
 
 
 @router.post('/decision-packets')
@@ -208,3 +228,8 @@ def models_readiness(model_id: str, db: Session = Depends(get_db)):
 @router.post('/qwen/run-once')
 def qwen_run_once(db: Session = Depends(get_db)):
     return run_qwen_once(db)
+
+
+@router.post('/models/registration')
+def models_upsert_registration(payload: ModelRegistrationUpsertRequest, db: Session = Depends(get_db)):
+    return upsert_model_registration(db, payload.model_dump(exclude_none=True))

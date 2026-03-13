@@ -49,6 +49,8 @@ def _default_registry() -> dict[str, Any]:
                 'status': 'ready',
                 'role': 'challenger',
                 'cost': 'local_zero',
+                'auth_mode': 'none',
+                'api_key_env': '',
                 'context_tiers': {
                     'fast_decision': 8000,
                     'enhanced_decision': 12000,
@@ -104,6 +106,21 @@ def _save_registry(db: Session, registry: dict[str, Any]):
         )
 
 
+
+
+def _auth_headers(item: dict[str, Any]) -> dict[str, str]:
+    mode = str(item.get('auth_mode') or 'none').lower()
+    if mode == 'bearer':
+        env_key = str(item.get('api_key_env') or '').strip()
+        if not env_key:
+            return {}
+        import os
+        token = str(os.getenv(env_key) or '').strip()
+        if not token:
+            return {}
+        return {'Authorization': f'Bearer {token}'}
+    return {}
+
 def get_model_registry(db: Session):
     reg = _load_registry(db)
     return {'ok': True, **reg}
@@ -148,7 +165,9 @@ def check_model_readiness(db: Session, model_id: str):
 
     try:
         # OpenAI-compatible health probe
-        r = requests.get(f'{base}/models', timeout=4)
+        headers = _auth_headers(item)
+        auth_mode = str(item.get('auth_mode') or 'none')
+        r = requests.get(f'{base}/models', headers=headers or None, timeout=4)
         latency = int(time.time() * 1000) - started
         if r.status_code >= 400:
             return {'ok': False, 'model_id': model_id, 'error': f'http_{r.status_code}', 'latency_ms': latency}
@@ -171,7 +190,26 @@ def check_model_readiness(db: Session, model_id: str):
             'models_count': len(names),
             'paper_only': bool(item.get('paper_only')),
             'local': bool(item.get('local')),
+            'auth_mode': auth_mode,
+            'auth_configured': bool(headers) if auth_mode == 'bearer' else True,
         }
     except Exception as exc:
         latency = int(time.time() * 1000) - started
         return {'ok': False, 'model_id': model_id, 'error': str(exc)[:240], 'latency_ms': latency}
+
+
+def upsert_model_registration(db: Session, item: dict[str, Any]):
+    reg = _load_registry(db)
+    models = list(reg.get('models') or [])
+    mid = str(item.get('id') or '').strip()
+    if not mid:
+        return {'ok': False, 'error': 'missing_model_id'}
+    idx = next((i for i,m in enumerate(models) if str(m.get('id')) == mid), None)
+    if idx is None:
+        models.append(item)
+    else:
+        models[idx] = {**models[idx], **item}
+    reg['models'] = models
+    _save_registry(db, reg)
+    db.commit()
+    return {'ok': True, 'item': item}

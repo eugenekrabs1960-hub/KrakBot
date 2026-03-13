@@ -8,7 +8,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.services.agent_decisions import record_decision_packet
-from app.services.model_connectors import get_model_registration
+from app.services.model_connectors import get_model_registration, _auth_headers
 from app.services.jason_agent import (
     _latest_market_snapshot,
     _benchmark_reasoning,
@@ -69,7 +69,7 @@ def _estimate_size(obj: dict) -> int:
         return 0
 
 
-def _query_local_openai_compatible(base_url: str, remote_model_id: str, payload: dict) -> tuple[str, float, dict]:
+def _query_local_openai_compatible(base_url: str, remote_model_id: str, payload: dict, headers: dict | None = None) -> tuple[str, float, dict]:
     started = time.time()
     url = base_url.rstrip('/') + '/chat/completions'
     body = {
@@ -81,7 +81,7 @@ def _query_local_openai_compatible(base_url: str, remote_model_id: str, payload:
         'temperature': 0.15,
         'max_tokens': 320,
     }
-    r = requests.post(url, json=body, timeout=12)
+    r = requests.post(url, json=body, headers=headers or None, timeout=12)
     r.raise_for_status()
     data = r.json() if r.content else {}
     text = (((data.get('choices') or [{}])[0].get('message') or {}).get('content') or '')
@@ -127,6 +127,7 @@ def run_qwen_once(db: Session):
             str(model.get('base_url') or ''),
             str(model.get('remote_model_id') or ''),
             request_payload,
+            headers=_auth_headers(model),
         )
         out_size = len(raw_text or '')
     except Exception as exc:
@@ -137,7 +138,7 @@ def run_qwen_once(db: Session):
             action='hold',
             confidence=0.01,
             rationale=f'Qwen endpoint failure: {str(exc)[:180]}',
-            context={'decision_source': 'local_qwen', 'context_tier': tier, 'telemetry': {'input_size': in_size}},
+            context={'decision_source': 'local_qwen', 'context_tier': tier, 'telemetry': {'input_size': in_size, 'auth_mode': str(model.get('auth_mode') or 'none')}},
             risk={'paper_only': True},
             execution={'mode': 'virtual_hyperliquid_perps', 'result': {'error': 'provider_unavailable'}, 'decision_source': 'local_qwen'},
             outcome={'quality_state': 'failed_provider'},
@@ -177,6 +178,7 @@ def run_qwen_once(db: Session):
         'latency_ms': latency_ms,
         'parse_success': parse_ok,
         'repair_used': repair_used,
+        'auth_mode': str(model.get('auth_mode') or 'none'),
     }}
 
     if d.action in ('long', 'short'):
