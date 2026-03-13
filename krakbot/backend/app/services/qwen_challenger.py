@@ -15,6 +15,9 @@ from app.services.jason_agent import (
     _open_trade,
     _close_trade,
     _list_open_trades,
+    _load_json_state,
+    _default_portfolio_gate,
+    PORTFOLIO_GATE_KEY,
 )
 QWEN_AGENT_ID = 'qwen_local_challenger'
 @dataclass
@@ -167,6 +170,7 @@ def run_qwen_once(db: Session):
         'parse_success': parse_ok,
         'repair_used': repair_used,
         'auth_mode': str(model.get('auth_mode') or 'none'),
+        'size_clip_applied': bool('[size_clipped_to_gate]' in (d.rationale or '')),
     }}
     if d.action in ('long', 'short'):
         gate = _evaluate_slot_gate(db, d, state, open_trades)
