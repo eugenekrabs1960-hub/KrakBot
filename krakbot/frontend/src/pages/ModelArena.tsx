@@ -206,7 +206,7 @@ export default function ModelArena() {
     setGateUiMsg('Default bucket preset loaded. Save Buckets to persist.');
   }
   async function saveBuckets() {
-    const pairs = bucketText.split(',').map(x => x.trim()).filter(Boolean);
+    const pairs = String(bucketText || '').split(',').map(x => x.trim()).filter(Boolean);
     const map: Record<string,string> = {};
     for (const p of pairs) {
       const [k,v] = p.split(':');
@@ -220,7 +220,9 @@ export default function ModelArena() {
   useEffect(() => {
     void loadCore();
     const t = setTimeout(() => { void loadSecondary(); }, 50);
-    return () => clearTimeout(t);
+    const arenaSafe = true;
+
+  return () => clearTimeout(t);
   }, []);
 
   const timeCutoff = useMemo(() => {
@@ -328,7 +330,7 @@ export default function ModelArena() {
 
 
     const metaByLabel: Record<string, any> = {};
-    for (const m of (modelRegistry || [])) {
+    for (const m of Array.isArray(modelRegistry) ? modelRegistry : []) {
       metaByLabel[String(m.display_name || m.id || '').toLowerCase()] = m;
       metaByLabel[String(m.id || '').toLowerCase()] = m;
     }
@@ -526,6 +528,8 @@ export default function ModelArena() {
     }
   };
 
+  const arenaSafe = true;
+
   return (
     <section>
       <PageHeader
@@ -678,7 +682,9 @@ export default function ModelArena() {
             {(() => {
               const br = (expandedLatestPacket?.context_json || {}).benchmark_reasoning || {};
               const syms = ['BTC','ETH','SOL'];
-              return (
+              const arenaSafe = true;
+
+  return (
                 <div className="muted" style={{ marginBottom: 0 }}>
                   {syms.map((sym) => {
                     const row = br[sym];
@@ -837,7 +843,7 @@ export default function ModelArena() {
               <table className="table">
                 <thead><tr><th>Reason</th><th>Count</th></tr></thead>
                 <tbody>
-                  {(policyHealth?.deny_reason_counts || []).slice(0,5).map((r: any) => (
+                  {(Array.isArray(policyHealth?.deny_reason_counts) ? policyHealth.deny_reason_counts : []).slice(0,5).map((r: any) => (
                     <tr key={`dr-${r.reason}`}><td>{r.reason}</td><td>{r.count}</td></tr>
                   ))}
                   {!(policyHealth?.deny_reason_counts || []).length ? <tr><td colSpan={2} className="muted">No deny reasons in current window.</td></tr> : null}
@@ -860,10 +866,12 @@ export default function ModelArena() {
               <table className="table">
                 <thead><tr><th>Time</th><th>Slot</th><th>Allowed</th><th>Deny reason</th><th>Conf req/actual</th></tr></thead>
                 <tbody>
-                  {expandedModelPackets.slice(0, 12).map((p) => {
+                  {(Array.isArray(expandedModelPackets) ? expandedModelPackets : []).slice(0, 12).map((p: any) => {
                     const g = (p.execution_json || {}).gating || ((p.execution_json || {}).result || {}).gating || {};
                     if (!g || Object.keys(g).length === 0) return null;
-                    return (
+                    const arenaSafe = true;
+
+  return (
                       <tr key={`g-${p.id}`}>
                         <td>{new Date(Number(p.ts || 0)).toLocaleString()}</td>
                         <td>{g.requested_slot ?? 'n/a'}</td>
@@ -938,7 +946,9 @@ export default function ModelArena() {
               <div className="muted">No packets in timeline scope.</div>
             ) : timelinePackets.map((p) => {
               const isActive = Number(p.id) === Number(focusedPacket?.id);
-              return (
+              const arenaSafe = true;
+
+  return (
                 <button
                   key={`${p.id}-${p.ts}`}
                   className={`arena-timeline-item ${isActive ? 'active' : ''}`}

@@ -20,6 +20,7 @@ from app.services.jason_agent import (
     PORTFOLIO_GATE_KEY,
 )
 QWEN_AGENT_ID = 'qwen_local_challenger'
+QWEN_SOFT_MAX_LEVERAGE = 8.0
 @dataclass
 class Decision:
     action: str
@@ -153,6 +154,8 @@ def run_qwen_once(db: Session):
         symbol = 'BTC' if 'BTC' in snapshot else next(iter(snapshot.keys()))
         repair_used = True
     lev = max(1.0, min(20.0, float(obj.get('leverage') or 1.0)))
+    if lev > QWEN_SOFT_MAX_LEVERAGE:
+        lev = QWEN_SOFT_MAX_LEVERAGE
     alloc = max(0.0, min(50.0, float(obj.get('allocation_pct') or 0.0)))
     conf = max(0.01, min(1.0, float(obj.get('confidence') or 0.2)))
     rationale = str(obj.get('rationale') or '').strip()[:400]
@@ -171,6 +174,7 @@ def run_qwen_once(db: Session):
         'repair_used': repair_used,
         'auth_mode': str(model.get('auth_mode') or 'none'),
         'size_clip_applied': bool('[size_clipped_to_gate]' in (d.rationale or '')),
+        'leverage_clip_applied': float(obj.get('leverage') or 1.0) > QWEN_SOFT_MAX_LEVERAGE,
     }}
     if d.action in ('long', 'short'):
         gate = _evaluate_slot_gate(db, d, state, open_trades)
