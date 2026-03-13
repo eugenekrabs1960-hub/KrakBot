@@ -259,6 +259,12 @@ export default function ModelArena() {
       byAgent.get(key)!.push(p);
     }
 
+    const metaByLabel: Record<string, any> = {};
+    for (const m of Array.isArray(modelRegistry) ? modelRegistry : []) {
+      metaByLabel[String(m.display_name || m.id || '').toLowerCase()] = m;
+      metaByLabel[String(m.id || '').toLowerCase()] = m;
+    }
+
     const models: ArenaModel[] = Array.from(byAgent.entries()).map(([agentId, rows]) => {
       let wins = 0;
       let losses = 0;
@@ -327,13 +333,6 @@ export default function ModelArena() {
       };
     });
 
-
-
-    const metaByLabel: Record<string, any> = {};
-    for (const m of Array.isArray(modelRegistry) ? modelRegistry : []) {
-      metaByLabel[String(m.display_name || m.id || '').toLowerCase()] = m;
-      metaByLabel[String(m.id || '').toLowerCase()] = m;
-    }
 
     const hasQwen = models.some((m: any) => String(m.id) === 'qwen_local_challenger');
     const qwenMeta = (modelRegistry || []).find((m: any) => String(m.id) === 'qwen3.5-9b-local');
