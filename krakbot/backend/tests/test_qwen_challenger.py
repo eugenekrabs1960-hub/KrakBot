@@ -20,7 +20,7 @@ def test_qwen_run_once_with_mocked_provider(tmp_path, monkeypatch):
     eng = _prep_db(tmp_path / 'qwen1.db')
     Session = sessionmaker(bind=eng, future=True)
 
-    def fake_query(base, model, payload, headers=None):
+    def fake_query(base, model, payload, headers=None, api_mode=None):
         return ('{"action":"long","symbol":"BTC","leverage":4,"allocation_pct":10,"confidence":0.71,"rationale":"local edge"}', 11.0, {})
 
     monkeypatch.setattr(qwen_challenger, '_query_local_openai_compatible', fake_query)
