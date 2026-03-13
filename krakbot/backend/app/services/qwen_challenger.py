@@ -9,12 +9,7 @@ from app.services.model_connectors import get_model_registration, _auth_headers
 from app.services.jason_agent import (
     _latest_market_snapshot,
     _benchmark_reasoning,
-    _load_state,
-    _save_state,
     _evaluate_slot_gate,
-    _open_trade,
-    _close_trade,
-    _list_open_trades,
     _load_json_state,
     _default_portfolio_gate,
     PORTFOLIO_GATE_KEY,
