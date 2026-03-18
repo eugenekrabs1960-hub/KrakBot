@@ -279,29 +279,48 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
       </div>
 
       <details style={{ marginTop: 10 }}>
-        <summary>Open futures paper positions ({positions.length})</summary>
+        <summary>Open futures paper trades ({positions.length})</summary>
         <table className='rows' style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Side</th><th>Qty</th><th>Entry</th><th>Leverage</th><th>Margin</th><th>Liq. est</th><th>Fee mode</th><th>Fees est</th><th>Open time</th>
+              <th>Symbol</th><th>Side</th><th>Entry time</th><th>Entry price</th><th>Qty</th><th>Entry notional</th><th>Leverage</th><th>Current price</th><th>Unrealized PnL (net)</th><th>Current return %</th><th>TP</th><th>SL</th>
             </tr>
           </thead>
           <tbody>
-            {positions.slice(-10).map((p, i) => (
-              <tr key={i}>
-                <td>{p.side}</td><td>{p.qty}</td><td>{p.entry_price}</td><td>{p.leverage}x</td><td>{p.margin_used}</td><td>{p.liquidation_price_estimate}</td><td>{p.entry_liquidity || '-'} / {p.exit_liquidity || '-'}</td><td>{p.estimated_total_fees}</td><td>{fmtLA(p.open_time)}</td>
-              </tr>
-            ))}
+            {positions.slice(-10).map((p, i) => {
+              const entryPrice = Number(p.entry_price ?? 0)
+              const qty = Number(p.qty ?? 0)
+              const entryNotional = Number(p.entry_notional ?? (entryPrice * qty))
+              const currentPrice = Number(market.mark_price ?? market.price ?? latest.price ?? 0)
+              const unrl = Number(p.unrealized_pnl_net ?? p.unrealized_pnl ?? 0)
+              const retPct = entryNotional > 0 ? (unrl / entryNotional) * 100 : null
+              return (
+                <tr key={i}>
+                  <td>{hstate.symbol || '-'}</td>
+                  <td>{p.side}</td>
+                  <td>{fmtLA(p.open_time)}</td>
+                  <td>{fmt2(entryPrice)}</td>
+                  <td>{p.qty}</td>
+                  <td>{fmt2(entryNotional)}</td>
+                  <td>{p.leverage}x</td>
+                  <td>{fmt2(currentPrice)}</td>
+                  <td style={{ color: pnlColor(unrl), fontWeight: 700 }}>{fmt2(unrl)}</td>
+                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                  <td>{p.take_profit ?? latest?.decision?.take_profit ?? '-'}</td>
+                  <td>{p.stop_loss ?? latest?.decision?.stop_loss ?? '-'}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </details>
 
       <details style={{ marginTop: 10 }}>
-        <summary>Closed futures trades PnL ({closedTrades.length})</summary>
+        <summary>Closed futures trades ({closedTrades.length})</summary>
         <table className='rows' style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Close time</th><th>Reason</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th>
+              <th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Entry notional</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th>
             </tr>
           </thead>
           <tbody>
@@ -309,16 +328,27 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
               const gross = Number(t.gross_realized_pnl ?? 0)
               const feesPaid = Number(t.estimated_total_fees ?? t.total_fees ?? 0)
               const net = Number(t.net_realized_pnl ?? t.realized_pnl ?? 0)
-              const entryNotional = Number(t.entry_price ?? 0) * Number(t.qty ?? 0)
+              const entryPrice = Number(t.entry_price ?? t.entry_fill_price ?? 0)
+              const qty = Number(t.qty ?? 0)
+              const entryNotional = Number(t.entry_notional ?? (entryPrice * qty))
               const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
               return (
                 <tr key={i}>
+                  <td>{hstate.symbol || '-'}</td>
+                  <td>{t.side || '-'}</td>
+                  <td>{fmtLA(t.open_time || t.entry_time)}</td>
                   <td>{fmtLA(t.close_time)}</td>
-                  <td>{t.close_reason || '-'}</td>
+                  <td>{fmt2(entryPrice)}</td>
+                  <td>{fmt2(Number(t.close_price ?? t.close_fill_price ?? 0))}</td>
+                  <td>{t.qty ?? '-'}</td>
+                  <td>{fmt2(entryNotional)}</td>
                   <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
                   <td>{fmt2(feesPaid)}</td>
                   <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
                   <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                  <td>{t.close_reason || '-'}</td>
+                  <td>{t.strategy_key || hstate.active_strategy_key || '-'}</td>
+                  <td>{t.regime_label || t.market_regime || latest?.regime?.regime || '-'}</td>
                 </tr>
               )
             })}
@@ -488,9 +518,41 @@ function ModePanel({ modeKey, m, onAck }) {
       </details>
 
       <details style={{ marginTop: 6 }}>
-        <summary>Closed trades PnL ({closedTrades.length})</summary>
+        <summary>Open Kraken paper trades ({(m?.open_positions || []).length})</summary>
         <table className='rows' style={{ width: '100%' }}>
-          <thead><tr><th>Close time</th><th>Reason</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th></tr></thead>
+          <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Entry price</th><th>Qty</th><th>Entry notional</th><th>Current price</th><th>Unrealized PnL (net)</th><th>Current return %</th><th>TP</th><th>SL</th></tr></thead>
+          <tbody>
+            {(m?.open_positions || []).slice(-10).map((p, i) => {
+              const entryPrice = Number(p.entry_fill_price ?? p.entry_price ?? 0)
+              const qty = Number(p.qty ?? 0)
+              const entryNotional = Number(p.entry_notional ?? (entryPrice * qty))
+              const currentPrice = Number(m?.market_data?.[0]?.ohlcv?.slice(-1)[0]?.close ?? m?.market_data?.[0]?.bid ?? 0)
+              const unrl = Number(p.net_unrealized_pnl ?? p.unrealized_pnl ?? 0)
+              const retPct = entryNotional > 0 ? (unrl / entryNotional) * 100 : null
+              return (
+                <tr key={i}>
+                  <td>BTC/USD</td>
+                  <td>{p.side}</td>
+                  <td>{fmtLA(p.open_time)}</td>
+                  <td>{fmt2(entryPrice)}</td>
+                  <td>{p.qty}</td>
+                  <td>{fmt2(entryNotional)}</td>
+                  <td>{fmt2(currentPrice)}</td>
+                  <td style={{ color: pnlColor(unrl), fontWeight: 700 }}>{fmt2(unrl)}</td>
+                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                  <td>{p.take_profit ?? '-'}</td>
+                  <td>{p.stop_loss ?? '-'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </details>
+
+      <details style={{ marginTop: 6 }}>
+        <summary>Closed Kraken paper trades ({closedTrades.length})</summary>
+        <table className='rows' style={{ width: '100%' }}>
+          <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Entry notional</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th></tr></thead>
           <tbody>
             {closedTrades.slice(-12).reverse().map((t, i) => {
               const gross = Number(t.gross_realized_pnl ?? 0)
@@ -500,12 +562,21 @@ function ModePanel({ modeKey, m, onAck }) {
               const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
               return (
                 <tr key={i}>
+                  <td>BTC/USD</td>
+                  <td>{t.side || '-'}</td>
+                  <td>{fmtLA(t.open_time || t.entry_time)}</td>
                   <td>{fmtLA(t.close_time)}</td>
-                  <td>{t.close_reason || '-'}</td>
+                  <td>{fmt2(Number(t.entry_fill_price ?? t.entry_price ?? 0))}</td>
+                  <td>{fmt2(Number(t.close_fill_price ?? t.close_price ?? 0))}</td>
+                  <td>{t.qty ?? '-'}</td>
+                  <td>{fmt2(entryNotional)}</td>
                   <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
                   <td>{fmt2(feesPaid)}</td>
                   <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
                   <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                  <td>{t.close_reason || '-'}</td>
+                  <td>{t.strategy_key || m?.mode || modeKey}</td>
+                  <td>{t.regime_label || t.market_regime || m?.current_regime?.regime || '-'}</td>
                 </tr>
               )
             })}
