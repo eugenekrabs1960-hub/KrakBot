@@ -42,6 +42,8 @@ EXPERIMENT_MAX_RISK_PCT = 1.20
 BRK_RETEST_LOOKBACK = 8
 MAX_OPEN_POSITIONS_PER_MODE = 2
 CONSERVATIVE_MIN_REWARD_TO_FEE = 1.50
+# Safety/conservation mode: Kraken scan path can run without LLM calls.
+KRAKEN_USE_LLM_SCAN = False
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
@@ -914,7 +916,10 @@ async def execute_mode_scan(mode: str):
         "regime_context": current_regime,
         "strategy_registry_entry": bucket["strategy_registry_entry"],
     }
-    d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+    if KRAKEN_USE_LLM_SCAN:
+        d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+    else:
+        d = normalize_decision({"status": "WAIT", "regime_label": "llm_scan_disabled", "reason": "Kraken no-LLM mode active."}, cfg["rr_min"])
 
     # Experiment slot must remain a different family from the frozen baseline.
     if mode == "btc_15m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
