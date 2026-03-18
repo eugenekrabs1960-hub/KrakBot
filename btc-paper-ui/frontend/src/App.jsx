@@ -133,39 +133,44 @@ function scoreMetaForMode(m) {
   return { label: fmt2(score), reason, numeric: score }
 }
 
-function StrategyScorecard({ m }) {
-  const reg = m?.current_regime || {}
-  const sr = m?.strategy_registry_entry || {}
-  const metrics = m?.strategy_metrics || {}
-  const learn = m?.learning_summary || {}
-  const patterns = learn?.failure_patterns || {}
-  const scoreMeta = scoreMetaForMode(m)
+function strategyConfidence({ closed = 0, bestRegimeSample = 0, expectancy = 0, feeDrag = 0 }) {
+  const sampleScore = Math.min(1, closed / 30)
+  const regimeScore = Math.min(1, bestRegimeSample / 10)
+  const stability = Math.max(0, Math.min(1, (expectancy > 0 ? 1 : 0.5) * (feeDrag <= 100 ? 1 : 0.6)))
+  return Math.round((sampleScore * 0.4 + regimeScore * 0.3 + stability * 0.3) * 100)
+}
+
+function confidenceLabel(c) {
+  if (c >= 70) return 'high'
+  if (c >= 40) return 'medium'
+  return 'low'
+}
+
+function ScoreboardTable({ rows }) {
   return (
-    <div className='panel' style={{ marginBottom: 12, background: 'var(--cardSoft)' }}>
-      <h4 style={{ marginTop: 0, marginBottom: 8 }}>{sr.label || m?.mode}</h4>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, fontSize:12 }}>
-        <div><strong>Strategy</strong><div>{m?.mode}</div></div>
-        <div><strong>Family</strong><div>{sr.family || '-'}</div></div>
-        <div><strong>Status</strong><div>{prettyStatus(m?.strategy_status)}</div></div>
-        <div><strong>Current regime</strong><div>{reg.regime || '-'}</div></div>
-        <div><strong>Regime confidence</strong><div>{reg.confidence ?? '-'}</div></div>
-        <div><strong>Strategy score</strong><div>{scoreMeta.label}</div><div style={{ opacity: 0.75 }}>{scoreMeta.reason}</div></div>
-        <div><strong>Win rate</strong><div>{fmt2(metrics.win_rate)}%</div></div>
-        <div><strong>Expectancy</strong><div>{fmt2(metrics.expectancy)}</div></div>
-        <div><strong>Net realized PnL</strong><div>{fmt2(metrics.realized_pnl)}</div></div>
-        <div><strong>Net unrealized PnL</strong><div>{fmt2(metrics.unrealized_pnl)}</div></div>
-        <div><strong>Total fees</strong><div>{fmt2(metrics.total_fees)}</div></div>
-        <div><strong>Fee drag</strong><div>{fmt2(metrics.fee_drag_pct)}%</div></div>
-        <div><strong>Best regime</strong><div>{learn.best_regime || '-'}</div></div>
-        <div><strong>Worst regime</strong><div>{learn.worst_regime || '-'}</div></div>
-        <div><strong>Shadow-selected</strong><div>{m?.shadow_routing?.selected_strategy || '-'}</div></div>
-      </div>
-      <div style={{ marginTop: 10, fontSize: 12 }}>
-        <strong>Learning summary:</strong> {learn.what_works || '-'} | <strong>Weaknesses:</strong> {learn.what_fails || '-'}
-      </div>
-      <div style={{ marginTop: 6, fontSize: 12 }}>
-        <strong>Failure patterns:</strong> no-edge {patterns.no_edge_repeats ?? 0}, fee-drag {patterns.fee_drag_destroying_edge ?? 0}, TP-missed→SL {patterns.tp_missed_then_reversed_to_sl ?? 0}, mismatch {patterns.regime_mismatch ?? 0}
-      </div>
+    <div className='panel' style={{ marginBottom: 12 }}>
+      <h3 style={{ marginTop: 0 }}>Strategy Scoreboard (Phase 1 · read-only)</h3>
+      <table className='rows' style={{ width: '100%' }}>
+        <thead>
+          <tr>
+            <th>Strategy</th><th>Status</th><th>Best regime</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th><th>Score</th><th>Confidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td>{r.key}<div style={{ fontSize: 11, opacity: 0.75 }}>{r.family} · {r.symbol}</div></td>
+              <td>{r.status}{r.closed < 10 ? <div style={{ color: 'var(--danger)', fontSize: 11 }}>small sample ({r.closed})</div> : null}</td>
+              <td>{r.bestRegime || '-'}</td>
+              <td>{fmt2(r.expectancy)}</td>
+              <td>{fmt2(r.feeDrag)}</td>
+              <td>{fmt2(r.netRealized)}</td>
+              <td>{r.score == null ? '-' : fmt2(r.score)}</td>
+              <td>{r.confidence}% ({confidenceLabel(r.confidence)})</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -562,6 +567,61 @@ export default function App() {
 
   if (!state) return <div className='wrap'>Loading...</div>
 
+  const rows = []
+  for (const k of MODE_ORDER) {
+    const m = state?.modes?.[k]
+    if (!m) continue
+    const perf = m?.performance_by_regime || {}
+    const sortedRegimes = Object.entries(perf).sort((a, b) => (b?.[1]?.expectancy ?? -9999) - (a?.[1]?.expectancy ?? -9999))
+    const best = sortedRegimes[0]?.[0]
+    const bestSample = sortedRegimes[0]?.[1]?.sample_size || 0
+    const expectancy = Number(m?.strategy_metrics?.expectancy ?? 0)
+    const feeDrag = Number(m?.strategy_metrics?.fee_drag_pct ?? 0)
+    const scoreMeta = scoreMetaForMode(m)
+    rows.push({
+      key: k,
+      family: m?.strategy_registry_entry?.family || '-',
+      symbol: 'BTC/USD',
+      status: prettyStatus(m?.strategy_status),
+      bestRegime: best,
+      expectancy,
+      feeDrag,
+      netRealized: Number(m?.strategy_metrics?.realized_pnl ?? 0),
+      score: scoreMeta.numeric,
+      closed: Number(m?.strategy_metrics?.closed_trades ?? 0),
+      confidence: strategyConfidence({ closed: Number(m?.strategy_metrics?.closed_trades ?? 0), bestRegimeSample: bestSample, expectancy, feeDrag }),
+    })
+  }
+
+  const hKey = hyperState?.active_strategy_key
+  const hMetrics = (hyperState?.metrics || {}).strategy_overall?.[hKey]
+  if (hKey && hMetrics) {
+    const byReg = (hyperState?.metrics || {}).strategy_regime || {}
+    const regimeRows = Object.entries(byReg)
+      .filter(([rk]) => rk.startsWith(`${hKey}|`))
+      .map(([rk, v]) => ({ regime: rk.split('|')[1], ex: Number(v?.expectancy_net ?? 0), sample: Number(v?.sample_closed ?? 0) }))
+      .sort((a, b) => b.ex - a.ex)
+    const best = regimeRows[0]
+    const expectancy = Number(hMetrics.expectancy_net ?? 0)
+    const feeDrag = Number(hMetrics.fee_drag_pct ?? 0)
+    const score = 50 + (expectancy * 120) - (feeDrag * 0.2) + (best?.ex > 0 ? 8 : -8)
+    rows.push({
+      key: hKey,
+      family: hyperState?.strategy_registry?.[hKey]?.family || 'trend_follow',
+      symbol: hyperState?.symbol || 'ETH-PERP',
+      status: 'active',
+      bestRegime: best?.regime || '-',
+      expectancy,
+      feeDrag,
+      netRealized: Number(hMetrics.net_realized_pnl ?? 0),
+      score,
+      closed: Number(hMetrics.sample_closed ?? 0),
+      confidence: strategyConfidence({ closed: Number(hMetrics.sample_closed ?? 0), bestRegimeSample: Number(best?.sample ?? 0), expectancy, feeDrag }),
+    })
+  }
+
+  rows.sort((a, b) => (b.expectancy - a.expectancy) || (a.feeDrag - b.feeDrag))
+
   return (
     <div className={`wrap theme-${theme}`}>
       <div className='top'>
@@ -584,9 +644,7 @@ export default function App() {
           <HyperliquidPanel hstate={hyperState} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
         </div>
       </div>
-      <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
-        {MODE_ORDER.map(k => <StrategyScorecard key={`score-${k}`} m={state?.modes?.[k]} />)}
-      </div>
+      <ScoreboardTable rows={rows} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
         {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
       </div>
