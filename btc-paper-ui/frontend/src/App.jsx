@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createChart } from 'lightweight-charts'
 
 const API = window.location.origin.includes('5173') ? 'http://127.0.0.1:8000' : window.location.origin
-const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_breakout_retest']
+const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_conservative_netedge_v1', 'btc_15m_breakout_retest']
 const POLL_MS = 30000
 
 function SharedChart({ state, theme }) {
@@ -27,6 +27,7 @@ function SharedChart({ state, theme }) {
     try {
       const modeColors = {
         btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
+        btc_15m_conservative_netedge_v1: { entry: '#0ea5e9', open: '#0ea5e9', close: '#0284c7', sl: '#dc2626', tp: '#16a34a' },
         btc_15m_breakout_retest: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
       }
 

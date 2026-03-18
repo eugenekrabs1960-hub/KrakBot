@@ -42,11 +42,13 @@ EXPERIMENT_MAX_RISK_PCT = 1.20
 BRK_RETEST_LOOKBACK = 8
 MAX_OPEN_POSITIONS_PER_MODE = 2
 CONSERVATIVE_MIN_REWARD_TO_FEE = 1.50
+CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE = 2.20
 # Safety/conservation mode: Kraken scan path can run without LLM calls.
 KRAKEN_USE_LLM_SCAN = False
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
+    "btc_15m_conservative_netedge_v1": {"label": "BTC/USD 15m conservative netedge v1 (experimental)", "interval": 15, "rr_min": 1.5, "aggressive": False},
     "btc_15m_breakout_retest": {"label": "BTC/USD 15m breakout-retest experiment", "interval": 15, "rr_min": 1.35, "aggressive": True},
 }
 
@@ -61,6 +63,17 @@ STRATEGY_REGISTRY = {
         "routing_enabled": False,
         "allowed_regimes": ["trend", "breakout", "chop"],
         "notes": "Frozen baseline. Execution behavior must remain unchanged during Phase 1 architecture work.",
+    },
+    "btc_15m_conservative_netedge_v1": {
+        "strategy_key": "btc_15m_conservative_netedge_v1",
+        "label": "BTC/USD 15m conservative netedge v1 (experimental)",
+        "family": "trend_structure",
+        "timeframe": "15m",
+        "status": "experimental",
+        "paper_only": True,
+        "routing_enabled": False,
+        "allowed_regimes": ["trend", "breakout", "chop"],
+        "notes": "Controlled conservative experiment: only the after-fee net-edge gate is tightened versus frozen baseline.",
     },
     "btc_15m_breakout_retest": {
         "strategy_key": "btc_15m_breakout_retest",
@@ -348,10 +361,17 @@ def normalize_decision(d: dict[str, Any], rr_min: float):
     return n
 
 
-def conservative_fee_efficiency_gate(d):
-    """Paper-only fee-adjusted efficiency gate for frozen 15m conservative baseline."""
+def conservative_fee_efficiency_gate(d, mode: str):
+    """Paper-only fee-adjusted efficiency gate for conservative family modes."""
     if d.get("status") != "PROPOSE_TRADE":
         return d
+
+    threshold_by_mode = {
+        "btc_15m_conservative": CONSERVATIVE_MIN_REWARD_TO_FEE,
+        "btc_15m_conservative_netedge_v1": CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE,
+    }
+    min_reward_to_fee = float(threshold_by_mode.get(mode, CONSERVATIVE_MIN_REWARD_TO_FEE))
+    rr_min = MODE_CONFIGS.get(mode, MODE_CONFIGS["btc_15m_conservative"])["rr_min"]
 
     side = d.get("side")
     entry = float(d.get("entry_price") or 0)
@@ -362,7 +382,7 @@ def conservative_fee_efficiency_gate(d):
             "status": "WAIT",
             "regime_label": "cons15_fee_efficiency_block",
             "reason": "Projected gross reward is too small relative to estimated round-trip fees.",
-        }, MODE_CONFIGS["btc_15m_conservative"]["rr_min"])
+        }, rr_min)
 
     projected_entry_fee = kraken_fill_fee(entry * qty, KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION)["fee"]
     projected_exit_fee = kraken_fill_fee(tp * qty, KRAKEN_EXIT_LIQUIDITY_ASSUMPTION)["fee"]
@@ -370,18 +390,19 @@ def conservative_fee_efficiency_gate(d):
     projected_gross_reward = ((tp - entry) if side == "BUY" else (entry - tp)) * qty
     reward_to_fee_ratio = projected_gross_reward / projected_round_trip_fees if projected_round_trip_fees > 0 else 0.0
 
-    if projected_gross_reward <= 0 or reward_to_fee_ratio < CONSERVATIVE_MIN_REWARD_TO_FEE:
+    if projected_gross_reward <= 0 or reward_to_fee_ratio < min_reward_to_fee:
         return normalize_decision({
             "status": "WAIT",
             "regime_label": "cons15_fee_efficiency_block",
-            "reason": "Projected gross reward is too small relative to estimated round-trip fees.",
-        }, MODE_CONFIGS["btc_15m_conservative"]["rr_min"])
+            "reason": f"Projected gross reward is too small relative to estimated round-trip fees (min ratio {min_reward_to_fee:.2f}).",
+        }, rr_min)
 
     d["projected_entry_fee"] = round2(projected_entry_fee)
     d["projected_exit_fee"] = round2(projected_exit_fee)
     d["projected_round_trip_fees"] = round2(projected_round_trip_fees)
     d["projected_gross_reward"] = round2(projected_gross_reward)
     d["reward_to_fee_ratio"] = round2(reward_to_fee_ratio)
+    d["min_reward_to_fee_ratio_required"] = round2(min_reward_to_fee)
     return d
 
 
@@ -931,8 +952,8 @@ async def execute_mode_scan(mode: str):
         if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
             d = fb
 
-    if mode == "btc_15m_conservative" and d.get("status") == "PROPOSE_TRADE":
-        d = conservative_fee_efficiency_gate(d)
+    if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1"} and d.get("status") == "PROPOSE_TRADE":
+        d = conservative_fee_efficiency_gate(d, mode)
 
     # Tightening applies ONLY to the 15m experiment mode; 15m baseline remains frozen.
     if mode == "btc_15m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
