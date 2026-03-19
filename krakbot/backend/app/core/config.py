@@ -52,9 +52,15 @@ class Settings(BaseSettings):
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12
-    llm_disable_repair: bool = False
+    llm_disable_repair: bool = True
     llm_safe_mode: bool = True
     llm_safe_mode_max_candidates: int = 1
+
+
+    # Jason supervisor loop (disabled by default)
+    jason_loop_enabled: bool = False
+    jason_loop_interval_sec: int = 60
+    jason_agent_model: str = "gpt-5.4"
 
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
