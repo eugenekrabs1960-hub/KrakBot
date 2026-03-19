@@ -48,7 +48,7 @@ class ExecutionRecordDB(Base):
 
 
 class PositionDB(Base):
-    __tablename__ = "positions"
+    __tablename__ = "lab_positions"
     symbol: Mapped[str] = mapped_column(String, primary_key=True)
     qty: Mapped[float] = mapped_column(Float, default=0)
     avg_entry: Mapped[float] = mapped_column(Float, default=0)

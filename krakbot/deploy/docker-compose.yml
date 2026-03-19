@@ -17,6 +17,7 @@ services:
     image: python:3.11-slim
     working_dir: /app
     environment:
+      DATABASE_URL: postgresql+psycopg://krakbot:krakbot@postgres:5432/krakbot
       LIVE_PAPER_TEST_MODE_ENABLED: ${LIVE_PAPER_TEST_MODE_ENABLED:-false}
       LIVE_PAPER_TEST_MARKET: ${LIVE_PAPER_TEST_MARKET:-SOL/USD}
       LIVE_PAPER_TEST_LOOP_INTERVAL_SEC: ${LIVE_PAPER_TEST_LOOP_INTERVAL_SEC:-5}

@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -18,9 +16,13 @@ def get_settings():
 
 @router.post('/settings')
 def update_settings(bundle: SettingsBundle, db: Session = Depends(get_db)):
-    api_models.runtime_settings = bundle
+    # mutate in-place so existing module references remain consistent
+    api_models.runtime_settings.mode = bundle.mode
+    api_models.runtime_settings.universe = bundle.universe
+    api_models.runtime_settings.loop = bundle.loop
+    api_models.runtime_settings.model = bundle.model
+    api_models.runtime_settings.risk = bundle.risk
 
-    # persist active settings profile versions
     profile_rows = [
         ("mode", "mode.v1", bundle.mode.model_dump()),
         ("universe", "universe.v1", bundle.universe.model_dump()),
@@ -39,7 +41,6 @@ def update_settings(bundle: SettingsBundle, db: Session = Depends(get_db)):
             row.active = True
         db.query(ConfigProfileDB).filter(ConfigProfileDB.profile_type == ptype, ConfigProfileDB.profile_id != pid).update({"active": False})
 
-    # persist tracked universe state
     incoming = {c: True for c in bundle.universe.tracked_coins}
     existing = {r.coin: r for r in db.query(TrackedUniverseDB).all()}
     for coin, enabled in incoming.items():

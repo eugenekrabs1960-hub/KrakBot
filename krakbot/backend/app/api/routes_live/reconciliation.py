@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.core.database import get_db
-from app.services.reconciliation.live_reconcile import reconcile_positions
+from app.services.reconcile.live_reconcile import reconcile_positions
 from app.models.db_models import ReconciliationRunDB
 
 router = APIRouter(tags=["reconciliation"])
