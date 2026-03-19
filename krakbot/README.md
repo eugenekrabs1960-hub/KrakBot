@@ -56,3 +56,7 @@ npm run dev
 - Loop run metrics persisted (`loop_runs`) with `/api/loops/history`
 - Idempotent live relay write tracking (`live_relay_requests`) with `/api/execution/relay/history`
 - Reconciliation history + drift alerts (`reconciliation_runs`) with `/api/reconciliation/history`
+
+
+## Ops
+- Operator runbook: `docs/operator-runbook.md`
