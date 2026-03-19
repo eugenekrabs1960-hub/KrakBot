@@ -81,7 +81,7 @@ HL_STRATEGY_REGISTRY = {
         'paper_only': True,
         'shadow_only': True,
         'allowed_regimes': ['trend', 'breakout'],
-        'momentum_gate_min_atr_body': 0.25,
+        'momentum_gate_min_atr_body': 0.18,
     },
     'hl_15m_breakout_retest': {
         'strategy_key': 'hl_15m_breakout_retest',
@@ -700,7 +700,7 @@ class HyperliquidFuturesPaperTrack:
             active_key = self.state.get('active_strategy_key', 'hl_15m_trend_follow')
             if active_key == 'hl_15m_trend_follow_momo_gate_v1':
                 cfg = (self.state.get('strategy_registry', {}) or {}).get(active_key, {})
-                min_body_atr = float(cfg.get('momentum_gate_min_atr_body', 0.25))
+                min_body_atr = float(cfg.get('momentum_gate_min_atr_body', 0.18))
                 atr = self._atr(candles, period=14)
                 entry_candle = candles[-1] if candles else None
                 body_ratio = 0.0
