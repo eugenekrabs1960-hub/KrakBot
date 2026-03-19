@@ -83,6 +83,15 @@ HL_STRATEGY_REGISTRY = {
         'allowed_regimes': ['trend', 'breakout'],
         'momentum_gate_min_atr_body': 0.18,
     },
+    'hl_15m_trend_follow_conflev_v1': {
+        'strategy_key': 'hl_15m_trend_follow_conflev_v1',
+        'label': 'HL 15m trend-follow conf-lev v1 (experimental shadow)',
+        'family': 'trend_follow',
+        'status': 'experimental_shadow',
+        'paper_only': True,
+        'shadow_only': True,
+        'allowed_regimes': ['trend', 'breakout'],
+    },
     'hl_15m_breakout_retest': {
         'strategy_key': 'hl_15m_breakout_retest',
         'label': 'HL 15m breakout-retest (planned shadow)',
@@ -141,6 +150,11 @@ class FuturesPosition:
     unrealized_pnl_net: float = 0.0
     max_favorable_excursion: float = 0.0
     max_adverse_excursion: float = 0.0
+    high_conf_5x_used: bool = False
+    leverage_stepup_reason: str = ''
+    leverage_regime_confidence: float = 0.0
+    leverage_entry_body_atr_ratio: float = 0.0
+    leverage_spread_pct: float = 0.0
 
 
 class MockPublicFeed:
@@ -469,6 +483,14 @@ class HyperliquidFuturesPaperTrack:
             stop = entry + risk
             tp = entry - risk * 1.8
         qty = self._compute_qty(entry)
+        atr = self._atr(candles, period=14)
+        entry_candle = candles[-1]
+        entry_body_atr_ratio = 0.0
+        if atr > 0:
+            if side == 'BUY':
+                entry_body_atr_ratio = (float(entry_candle['close']) - float(entry_candle['open'])) / atr
+            else:
+                entry_body_atr_ratio = (float(entry_candle['open']) - float(entry_candle['close'])) / atr
         e_fp = bucket_price(entry, 0.20)
         s_fp = bucket_price(stop, 0.20)
         t_fp = bucket_price(tp, 0.20)
@@ -491,13 +513,39 @@ class HyperliquidFuturesPaperTrack:
                 'tp_bucket': t_fp,
                 'bucket_pct': 0.20,
             },
+            'entry_body_atr_ratio': round2(entry_body_atr_ratio),
+            'atr': round2(atr),
+            'spread_pct': round2(float(tick.get('spread_pct', 0))),
+            'regime_confidence': round2(float(regime.get('confidence', 0))),
             'reason': f"Controlled futures proposal from {regime.get('regime')} regime.",
         }
 
     def _open_from_proposal(self, proposal: dict[str, Any], tick: dict[str, Any]) -> dict[str, Any]:
         side = proposal['side']
         qty = float(proposal['qty'])
-        lev = min(max(1.0, float(self.state['leverage_default'])), self.risk.max_leverage)
+        strategy_key = proposal.get('strategy_key', self.state.get('active_strategy_key', 'hl_15m_trend_follow'))
+        base_lev = min(max(1.0, float(self.state['leverage_default'])), self.risk.max_leverage)
+        high_conf_5x = False
+        stepup_block_reason = 'not_conflev_variant'
+        if strategy_key == 'hl_15m_trend_follow_conflev_v1':
+            rg = str(proposal.get('market_regime') or '')
+            rg_conf = float(proposal.get('regime_confidence') or 0.0)
+            body_atr = float(proposal.get('entry_body_atr_ratio') or 0.0)
+            spread_pct = float(proposal.get('spread_pct') or 0.0)
+            if rg not in {'trend', 'breakout'}:
+                stepup_block_reason = 'regime_not_trend_or_breakout'
+            elif rg_conf < 0.85:
+                stepup_block_reason = 'regime_confidence_below_0.85'
+            elif body_atr < 0.30:
+                stepup_block_reason = 'entry_body_atr_ratio_below_0.30'
+            elif spread_pct > 0.02:
+                stepup_block_reason = 'spread_pct_above_0.02'
+            else:
+                high_conf_5x = True
+                stepup_block_reason = 'passed_all_gates'
+        lev_target = 5.0 if high_conf_5x else base_lev
+        lev_cap = 5.0 if strategy_key == 'hl_15m_trend_follow_conflev_v1' else self.risk.max_leverage
+        lev = min(max(1.0, float(lev_target)), lev_cap)
         entry = float(proposal['entry_price'])
         notional = entry * qty
         if len(self.state['positions']) >= self.risk.max_positions:
@@ -515,7 +563,7 @@ class HyperliquidFuturesPaperTrack:
         efee, xfee, tfee = self._estimate_fees(notional, entry_liq, exit_liq)
         p = FuturesPosition(
             symbol=self.state['symbol'],
-            strategy_key=proposal.get('strategy_key', self.state.get('active_strategy_key', 'hl_15m_trend_follow')),
+            strategy_key=strategy_key,
             strategy_family=proposal.get('strategy_family', 'trend_follow'),
             market_regime=proposal.get('market_regime', 'unknown'),
             side=side,
@@ -533,6 +581,11 @@ class HyperliquidFuturesPaperTrack:
             estimated_entry_fee=efee,
             estimated_exit_fee=xfee,
             estimated_total_fees=tfee,
+            high_conf_5x_used=high_conf_5x,
+            leverage_stepup_reason=stepup_block_reason,
+            leverage_regime_confidence=round2(float(proposal.get('regime_confidence', 0.0))),
+            leverage_entry_body_atr_ratio=round2(float(proposal.get('entry_body_atr_ratio', 0.0))),
+            leverage_spread_pct=round2(float(proposal.get('spread_pct', 0.0))),
         )
         self.state['positions'].append(asdict(p))
         self.state['executed_signal_ids'].append(proposal['signal_id'])

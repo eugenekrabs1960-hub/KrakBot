@@ -715,7 +715,7 @@ export default function App() {
   }
 
   rows.sort((a, b) => (b.expectancy - a.expectancy) || (a.feeDrag - b.feeDrag))
-  const hlPanelKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1'].filter(k => (hyperState?.strategy_registry || {})[k])
+  const hlPanelKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1', 'hl_15m_trend_follow_conflev_v1'].filter(k => (hyperState?.strategy_registry || {})[k])
 
   return (
     <div className={`wrap theme-${theme}`}>
