@@ -1,0 +1,88 @@
+from sqlalchemy import String, Float, DateTime, Text, Boolean, Integer, JSON
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
+
+from app.core.database import Base
+
+
+class FeaturePacketDB(Base):
+    __tablename__ = "feature_packets"
+    packet_id: Mapped[str] = mapped_column(String, primary_key=True)
+    coin: Mapped[str] = mapped_column(String, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class DecisionOutputDB(Base):
+    __tablename__ = "decision_outputs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    packet_id: Mapped[str] = mapped_column(String, index=True)
+    action: Mapped[str] = mapped_column(String)
+    confidence: Mapped[float] = mapped_column(Float)
+    generated_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class PolicyDecisionDB(Base):
+    __tablename__ = "policy_decisions"
+    policy_decision_id: Mapped[str] = mapped_column(String, primary_key=True)
+    packet_id: Mapped[str] = mapped_column(String, index=True)
+    final_action: Mapped[str] = mapped_column(String)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class ExecutionRecordDB(Base):
+    __tablename__ = "execution_records"
+    execution_id: Mapped[str] = mapped_column(String, primary_key=True)
+    packet_id: Mapped[str] = mapped_column(String, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    action: Mapped[str] = mapped_column(String)
+    mode: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    filled_notional_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class PositionDB(Base):
+    __tablename__ = "positions"
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    qty: Mapped[float] = mapped_column(Float, default=0)
+    avg_entry: Mapped[float] = mapped_column(Float, default=0)
+    mode: Mapped[str] = mapped_column(String, default="paper")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class OutcomeLabelDB(Base):
+    __tablename__ = "outcome_labels"
+    outcome_id: Mapped[str] = mapped_column(String, primary_key=True)
+    packet_id: Mapped[str] = mapped_column(String, index=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    generated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ConfigProfileDB(Base):
+    __tablename__ = "config_profiles"
+    profile_id: Mapped[str] = mapped_column(String, primary_key=True)
+    profile_type: Mapped[str] = mapped_column(String, index=True)
+    version: Mapped[str] = mapped_column(String)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class TrackedUniverseDB(Base):
+    __tablename__ = "tracked_universe"
+    coin: Mapped[str] = mapped_column(String, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class ReviewReportDB(Base):
+    __tablename__ = "review_reports"
+    review_id: Mapped[str] = mapped_column(String, primary_key=True)
+    packet_id: Mapped[str] = mapped_column(String, index=True)
+    recommendation: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+    generated_at: Mapped[datetime] = mapped_column(DateTime)

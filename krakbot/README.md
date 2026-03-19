@@ -1,71 +1,51 @@
-# KrakBot — AI Trading Lab (Hyperliquid-focused)
+# KrakBot AI Trading Lab (Hyperliquid-Focused)
 
-This repo is now redirected into a **focused AI-assisted crypto futures trading lab**.
+Clean v1 implementation skeleton for an AI-assisted crypto futures lab.
 
-## Product Direction
+## Defaults
+- Tracked universe: BTC, ETH, SOL (3 coins; configurable to 3-5)
+- Feature refresh cadence: 60s
+- Decision cycle cadence: 300s
+- Candidates sent to local model per cycle: top 2-3
+- Execution mode default: paper
+- No pyramiding
+- Fixed small notional sizing
+- Max open positions: small (paper_v1: 3)
+- Live mode disabled/disarmed by default
 
-KrakBot is not a broad dashboard anymore. v1 is intentionally narrow:
+## Backend Modules
+- Canonical schemas: FeaturePacket, DecisionOutput, PolicyDecision, OutcomeLabel, ReviewReport
+- Broker abstraction + PaperBroker + HyperliquidLiveBroker skeleton
+- Feature + score computation skeleton
+- Packet builder
+- Local model adapter interface + Qwen local adapter skeleton
+- Deterministic policy gate
+- Journal persistence
+- Outcome labeler (deterministic baseline)
+- Review stub service
 
-1. Ingest market/account snapshots
-2. Compute deterministic features
-3. Compute deterministic meta-scores
-4. Build model-neutral `FeaturePacket`
-5. Send packet to local analyst model adapter (Qwen3.5-9B baseline)
-6. Receive strict `DecisionOutput`
-7. Apply deterministic policy gate
-8. Route execution to paper or live Hyperliquid broker backend
-9. Log full cycle for later labeling/review
-
-## Architecture Principles Enforced in v1
-
-- **Model-neutral contracts** (`FeaturePacket`, `DecisionOutput`, `GateResult`)
-- **Single system for paper + live** (two broker backends, same orchestrator)
-- **Deterministic safety gate** between model and execution
-- **Local model as analyst** (proposal only, no direct execution control)
-- **Versioned profiles** for risk/model/score settings
-
-## Current v1 Scope
-
-The current first working version is a vertical slice with:
-
-- FastAPI backend decision loop
-- In-memory runtime store (for quick iteration)
-- Paper broker execution path
-- Live Hyperliquid broker contract stub
-- Minimal web UI to run cycles, switch modes, and inspect logs
+## API Routes
+- `/api/health`
+- `/api/overview`
+- `/api/candidates`
+- `/api/decisions/run-cycle`
+- `/api/decisions/recent`
+- `/api/positions`
+- `/api/trades`
+- `/api/settings` (GET/POST)
+- `/api/execution/flatten-all`
 
 ## Run
-
-### Backend
-
+Backend:
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8010
 ```
 
-### Frontend
-
+Frontend:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-## API (v1)
-
-- `GET /api/lab/health`
-- `GET /api/lab/profiles`
-- `GET /api/lab/state`
-- `POST /api/lab/mode`
-- `POST /api/lab/cycle/run-once`
-- `GET /api/lab/logs?limit=20`
-- `POST /api/lab/paper/reset`
-
-## Next Steps
-
-- Replace market/account stubs with real Hyperliquid data adapters
-- Wire live Hyperliquid signed execution into live broker adapter
-- Persist packets/decisions/execution logs in DB
-- Add labeling pipeline and review queue
-- Add supervisor loop and model portability adapters
