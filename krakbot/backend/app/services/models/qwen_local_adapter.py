@@ -35,22 +35,10 @@ class QwenLocalAdapter(LocalModelAdapter):
     def _build_messages(self, packet: FeaturePacket) -> list[dict]:
         system = (
             "You are a disciplined local trading analyst. Use only packet fields. "
-            "Return strict JSON only matching DecisionOutput v1 fields. "
-            "Be conservative; prefer no_trade for weak/conflicting setups."
+            "Return strict JSON only with keys compatible with DecisionOutput."
         )
         user = {
-            "task": "Evaluate one FeaturePacket and return DecisionOutput JSON only.",
-            "constraints": {
-                "action": ["long", "short", "no_trade"],
-                "setup_type": ["trend_continuation", "breakout_confirmation", "mean_reversion", "range_rejection", "unclear"],
-                "horizon": ["15m", "1h", "4h"],
-                "rules": [
-                    "at least 2 reasons",
-                    "at least 1 risk",
-                    "confidence and uncertainty in [0,1]",
-                    "if action is long/short, invalidation required",
-                ],
-            },
+            "task": "Evaluate one FeaturePacket and return JSON.",
             "packet": packet.model_dump(mode="json"),
         }
         return [
@@ -73,6 +61,84 @@ class QwenLocalAdapter(LocalModelAdapter):
         if l >= 0 and r > l:
             return json.loads(text[l : r + 1])
         raise ValueError("no_json_object_found")
+
+    def _normalize(self, packet: FeaturePacket, raw: dict) -> DecisionOutput:
+        action = raw.get("action")
+        if action not in ("long", "short", "no_trade"):
+            action = "no_trade"
+
+        conf = float(raw.get("confidence", 0.45))
+        conf = max(0.0, min(1.0, conf))
+        uncertainty = float(raw.get("uncertainty", 1.0 - conf))
+        uncertainty = max(0.0, min(1.0, uncertainty))
+
+        setup = raw.get("setup_type", "unclear")
+        if setup not in ("trend_continuation", "breakout_confirmation", "mean_reversion", "range_rejection", "unclear"):
+            setup = "unclear"
+
+        horizon = raw.get("horizon", packet.decision_context.primary_horizon)
+        if horizon not in ("15m", "1h", "4h"):
+            horizon = "1h"
+
+        thesis = raw.get("thesis_summary") or raw.get("reasoning") or "model_output_normalized"
+
+        reasons = raw.get("reasons")
+        if not isinstance(reasons, list) or len(reasons) < 2:
+            reasons = [
+                {"label": "momentum_alignment", "strength": min(1.0, abs(packet.features.returns.momentum_score)), "explanation": f"momentum_score={packet.features.returns.momentum_score:.2f}"},
+                {"label": "execution_quality", "strength": packet.ml_scores.tradability_score, "explanation": f"tradability_score={packet.ml_scores.tradability_score:.2f}"},
+            ]
+
+        risks = raw.get("risks")
+        if not isinstance(risks, list) or len(risks) < 1:
+            risks = [
+                {
+                    "label": "regime_contradiction",
+                    "severity": min(1.0, packet.ml_scores.contradiction_score),
+                    "explanation": f"contradiction_score={packet.ml_scores.contradiction_score:.2f}",
+                }
+            ]
+
+        invalidation = raw.get("invalidation")
+        if action in ("long", "short") and not invalidation:
+            invalidation = {"type": "thesis_failure", "value": None, "reason": "model_thesis_invalidated"}
+
+        targets = raw.get("targets") or {"take_profit_hint": None, "expected_move_magnitude": "small" if action != "no_trade" else "null"}
+
+        evidence_used = raw.get("evidence_used")
+        if not isinstance(evidence_used, list) or not evidence_used:
+            evidence_used = ["features.returns.momentum_score", "ml_scores.tradability_score"]
+
+        alternatives = raw.get("alternatives_considered")
+        if not isinstance(alternatives, list) or not alternatives:
+            alternatives = [{"action": "no_trade", "reason": "normalization_default"}]
+
+        exec_pref = raw.get("execution_preference") or {"urgency": "normal" if action != "no_trade" else "low", "entry_style_hint": "market_or_aggressive_limit" if action != "no_trade" else "none"}
+
+        out = {
+            "decision_version": "1.0",
+            "packet_id": packet.packet_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "model_name": settings.local_model_name,
+            "model_role": "local_analyst",
+            "coin": packet.coin,
+            "symbol": packet.symbol,
+            "action": action,
+            "setup_type": setup,
+            "horizon": horizon,
+            "confidence": conf,
+            "uncertainty": uncertainty,
+            "thesis_summary": thesis,
+            "reasons": reasons,
+            "risks": risks,
+            "invalidation": invalidation,
+            "targets": targets,
+            "evidence_used": evidence_used,
+            "evidence_ignored": raw.get("evidence_ignored", []),
+            "alternatives_considered": alternatives,
+            "execution_preference": exec_pref,
+        }
+        return DecisionOutput.model_validate(out)
 
     def _deterministic_fallback(self, packet: FeaturePacket) -> DecisionOutput:
         m = packet.features.returns.momentum_score
@@ -131,12 +197,6 @@ class QwenLocalAdapter(LocalModelAdapter):
             body = r.json()
             text = body["choices"][0]["message"]["content"]
             parsed = self._extract_json(text)
-            parsed.setdefault("packet_id", packet.packet_id)
-            parsed.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
-            parsed.setdefault("model_name", settings.local_model_name)
-            parsed.setdefault("coin", packet.coin)
-            parsed.setdefault("symbol", packet.symbol)
-            parsed.setdefault("model_role", "local_analyst")
-            return DecisionOutput.model_validate(parsed)
+            return self._normalize(packet, parsed)
         except Exception:
             return self._deterministic_fallback(packet)

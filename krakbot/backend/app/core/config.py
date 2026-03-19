@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     max_fragility: float = 0.85
     freshness_threshold_sec: int = 90
 
-    local_model_name: str = "Qwen3.5-9B"
+    local_model_name: str = "Qwen3.5-9B-Q4_K_M.gguf"
     local_model_context_limit: int = 32000
     local_model_max_tokens: int = 1200
     local_model_temperature: float = 0.2
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     local_model_base_url: str = "http://10.50.0.30:8000"
     # alias supports existing env naming in compose
     local_model_api_key: str = Field(default="", validation_alias="QWEN_LOCAL_API_KEY")
-    local_model_timeout_sec: int = 2
+    local_model_timeout_sec: int = 15
 
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
