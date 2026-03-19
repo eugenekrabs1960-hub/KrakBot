@@ -1290,6 +1290,8 @@ async def get_state():
         "available_modes": MODE_CONFIGS,
         "strategy_registry": STRATEGY_REGISTRY,
         "regime_types": REGIME_TYPES,
+        "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
+        "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {
             "agent_runtime_model": "openai-codex/gpt-5.4",
             "gpt_5_4_used_for": "LLM scan/proposal generation through openclaw agent samy",

@@ -269,6 +269,7 @@ class HyperliquidFuturesPaperTrack:
             },
         }
         self._load_state()
+        self._reconcile_registry_and_metrics()
 
     def _persist_state(self) -> None:
         try:
@@ -305,12 +306,55 @@ class HyperliquidFuturesPaperTrack:
             return
 
         for key in (
-            'track', 'symbol', 'active_strategy_key', 'strategy_registry', 'leverage_default',
+            'track', 'symbol', 'active_strategy_key', 'leverage_default',
             'positions', 'closed_trades', 'history', 'latest', 'executed_signal_ids',
             'risk_limits', 'fee_model', 'execution_fee_assumption', 'metrics', 'learning'
         ):
             if key in data:
                 self.state[key] = data[key]
+
+        # Merge saved registry into code registry instead of replacing it,
+        # so newly added strategies remain visible after restart.
+        saved_registry = data.get('strategy_registry') if isinstance(data, dict) else None
+        merged_registry = dict(HL_STRATEGY_REGISTRY)
+        if isinstance(saved_registry, dict):
+            for k, v in saved_registry.items():
+                if isinstance(v, dict):
+                    merged_registry[k] = {**merged_registry.get(k, {}), **v}
+        self.state['strategy_registry'] = merged_registry
+
+    def _reconcile_registry_and_metrics(self) -> None:
+        registry = self.state.get('strategy_registry') or {}
+        if not isinstance(registry, dict):
+            registry = {}
+        # Ensure code-defined strategies always exist.
+        for sk, sv in HL_STRATEGY_REGISTRY.items():
+            if sk not in registry or not isinstance(registry.get(sk), dict):
+                registry[sk] = dict(sv)
+            else:
+                merged = dict(sv)
+                merged.update(registry[sk])
+                registry[sk] = merged
+        self.state['strategy_registry'] = registry
+
+        # Ensure active key is valid.
+        active = self.state.get('active_strategy_key')
+        if active not in registry:
+            self.state['active_strategy_key'] = 'hl_15m_trend_follow'
+
+        # Ensure per-strategy metric buckets exist for visibility/comparison.
+        metrics = self.state.get('metrics') if isinstance(self.state.get('metrics'), dict) else {}
+        overall = metrics.get('strategy_overall') if isinstance(metrics.get('strategy_overall'), dict) else {}
+        symbol = self.state.get('symbol', 'ETH-PERP')
+        by_symbol = metrics.get('strategy_symbol') if isinstance(metrics.get('strategy_symbol'), dict) else {}
+        for sk in registry.keys():
+            overall.setdefault(sk, blank_metrics())
+            by_symbol.setdefault(f"{sk}|{symbol}", blank_metrics())
+        metrics['strategy_overall'] = overall
+        metrics['strategy_symbol'] = by_symbol
+        if not isinstance(metrics.get('strategy_regime'), dict):
+            metrics['strategy_regime'] = {}
+        self.state['metrics'] = metrics
 
     def _estimate_liq_price(self, side: str, entry: float, leverage: float) -> float:
         # Conservative rough estimate for paper training only.
@@ -615,13 +659,24 @@ class HyperliquidFuturesPaperTrack:
         by_symbol_key = f"{strategy_key}|{symbol}"
         by_symbol[by_symbol_key] = {**overall}
 
+        prior_metrics = self.state.get('metrics') if isinstance(self.state.get('metrics'), dict) else {}
+        strategy_overall = prior_metrics.get('strategy_overall') if isinstance(prior_metrics.get('strategy_overall'), dict) else {}
+        strategy_symbol = prior_metrics.get('strategy_symbol') if isinstance(prior_metrics.get('strategy_symbol'), dict) else {}
+        strategy_overall[strategy_key] = overall
+        strategy_symbol.update(by_symbol)
+        # Ensure visibility buckets exist for registered strategies, even if inactive.
+        for sk in (self.state.get('strategy_registry') or {}).keys():
+            strategy_overall.setdefault(sk, blank_metrics())
+            strategy_symbol.setdefault(f"{sk}|{symbol}", blank_metrics())
+
         self.state['metrics'] = {
-            'strategy_overall': {strategy_key: overall},
+            'strategy_overall': strategy_overall,
             'strategy_regime': by_regime,
-            'strategy_symbol': by_symbol,
+            'strategy_symbol': strategy_symbol,
         }
 
     def run_scan(self) -> dict[str, Any]:
+        self._reconcile_registry_and_metrics()
         source = 'hyperliquid_public'
         candles: list[dict[str, Any]] = []
         try:
