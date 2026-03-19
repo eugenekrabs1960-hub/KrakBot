@@ -71,6 +71,16 @@ HL_STRATEGY_REGISTRY = {
         'shadow_only': False,
         'allowed_regimes': ['trend', 'breakout'],
     },
+    'hl_15m_trend_follow_momo_gate_v1': {
+        'strategy_key': 'hl_15m_trend_follow_momo_gate_v1',
+        'label': 'HL 15m trend-follow momo-gate v1 (experimental shadow)',
+        'family': 'trend_follow',
+        'status': 'experimental_shadow',
+        'paper_only': True,
+        'shadow_only': True,
+        'allowed_regimes': ['trend', 'breakout'],
+        'momentum_gate_min_atr_body': 0.25,
+    },
     'hl_15m_breakout_retest': {
         'strategy_key': 'hl_15m_breakout_retest',
         'label': 'HL 15m breakout-retest (planned shadow)',
@@ -375,6 +385,19 @@ class HyperliquidFuturesPaperTrack:
         cap_qty = self.risk.max_position_notional_usd / max(entry_price, 1.0)
         return round(max(0.001, min(0.03, cap_qty)), 4)
 
+    def _atr(self, candles: list[dict[str, Any]], period: int = 14) -> float:
+        if len(candles) < period + 1:
+            return 0.0
+        trs = []
+        for i in range(-period, 0):
+            c = candles[i]
+            prev_close = candles[i - 1]['close']
+            h = float(c['high'])
+            l = float(c['low'])
+            tr = max(h - l, abs(h - prev_close), abs(l - prev_close))
+            trs.append(tr)
+        return round2(sum(trs) / len(trs)) if trs else 0.0
+
     def _build_proposal(self, tick: dict[str, Any], candles: list[dict[str, Any]], regime: dict[str, Any]) -> dict[str, Any]:
         if regime.get('regime') not in {'trend', 'breakout'}:
             return {'status': 'WAIT', 'reason': 'No futures entry: regime not actionable for controlled simulator.'}
@@ -615,18 +638,49 @@ class HyperliquidFuturesPaperTrack:
         decision = proposal
 
         if proposal.get('status') == 'PROPOSE_TRADE':
-            if proposal['signal_id'] in set(self.state.get('executed_signal_ids', [])):
-                decision = {'status': 'WAIT', 'reason': 'Duplicate signal skipped in paper simulator.'}
-            else:
-                opened = self._open_from_proposal(proposal, tick)
-                if opened.get('ok'):
+            active_key = self.state.get('active_strategy_key', 'hl_15m_trend_follow')
+            if active_key == 'hl_15m_trend_follow_momo_gate_v1':
+                cfg = (self.state.get('strategy_registry', {}) or {}).get(active_key, {})
+                min_body_atr = float(cfg.get('momentum_gate_min_atr_body', 0.25))
+                atr = self._atr(candles, period=14)
+                entry_candle = candles[-1] if candles else None
+                body_ratio = 0.0
+                if entry_candle and atr > 0:
+                    o = float(entry_candle.get('open', 0))
+                    c = float(entry_candle.get('close', 0))
+                    if proposal.get('side') == 'BUY':
+                        body_ratio = (c - o) / atr
+                    else:
+                        body_ratio = (o - c) / atr
+                if not entry_candle or atr <= 0 or body_ratio < min_body_atr:
                     decision = {
-                        'status': 'PAPER_TRADE_OPEN',
-                        'reason': 'Controlled paper proposal auto-opened inside Hyperliquid paper track.',
-                        'proposal': proposal,
+                        'status': 'WAIT',
+                        'reason': 'Entry blocked by momentum confirmation gate.',
+                        'reason_code': 'entry_filter_momentum_fail',
+                        'diagnostics': {
+                            'momentum_gate_min_atr_body': round2(min_body_atr),
+                            'entry_body_atr_ratio': round2(body_ratio),
+                            'atr': round2(atr),
+                            'entry_candle_open': round2(float(entry_candle.get('open', 0))) if entry_candle else 0.0,
+                            'entry_candle_close': round2(float(entry_candle.get('close', 0))) if entry_candle else 0.0,
+                        },
                     }
                 else:
-                    decision = {'status': 'WAIT', 'reason': f"Paper risk guard blocked open: {opened.get('reason')}"}
+                    decision = proposal
+
+            if decision.get('status') == 'PROPOSE_TRADE':
+                if proposal['signal_id'] in set(self.state.get('executed_signal_ids', [])):
+                    decision = {'status': 'WAIT', 'reason': 'Duplicate signal skipped in paper simulator.'}
+                else:
+                    opened = self._open_from_proposal(proposal, tick)
+                    if opened.get('ok'):
+                        decision = {
+                            'status': 'PAPER_TRADE_OPEN',
+                            'reason': 'Controlled paper proposal auto-opened inside Hyperliquid paper track.',
+                            'proposal': proposal,
+                        }
+                    else:
+                        decision = {'status': 'WAIT', 'reason': f"Paper risk guard blocked open: {opened.get('reason')}"}
 
         if closed_now:
             decision = {
