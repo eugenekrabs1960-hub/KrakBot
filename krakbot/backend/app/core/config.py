@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     prompt_version: str = "local_analyst_v1"
     repair_enabled: bool = True
 
+    local_model_base_url: str = "http://10.50.0.30:8000"
+    local_model_api_key: str = ""
+    local_model_timeout_sec: int = 20
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""

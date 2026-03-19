@@ -20,3 +20,5 @@ export const getReconciliationHistory = (limit = 20) => fetch(`${API}/reconcilia
 export const getRelayHistory = (limit = 20) => fetch(`${API}/execution/relay/history?limit=${limit}`).then(r => r.json());
 
 export const getWalletSummary = () => fetch(`${API}/wallets/summary`).then(r => r.json());
+
+export const getModelHealth = () => fetch(`${API}/model/health`).then(r => r.json());

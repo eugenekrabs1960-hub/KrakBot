@@ -19,6 +19,7 @@ import {
   getReconciliationHistory,
   getRelayHistory,
   getWalletSummary,
+  getModelHealth,
 } from './api/client';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -35,9 +36,10 @@ function App() {
   const [reconHistory, setReconHistory] = useState<any>(null);
   const [relayHistory, setRelayHistory] = useState<any>(null);
   const [walletSummary, setWalletSummary] = useState<any>(null);
+  const [modelHealth, setModelHealth] = useState<any>(null);
 
   const refresh = async () => {
-    const [o, c, p, d, s, ls, lh, rh, relh, ws] = await Promise.all([
+    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh] = await Promise.all([
       getOverview(),
       getCandidates(),
       getPositions(),
@@ -48,6 +50,7 @@ function App() {
       getReconciliationHistory(20),
       getRelayHistory(20),
       getWalletSummary(),
+      getModelHealth(),
     ]);
     setOverview(o);
     setCandidates(c);
@@ -59,10 +62,13 @@ function App() {
     setReconHistory(rh);
     setRelayHistory(relh);
     setWalletSummary(ws);
+    setModelHealth(mh);
   };
 
   useEffect(() => {
     refresh();
+    const t = setInterval(refresh, 20000);
+    return () => clearInterval(t);
   }, []);
 
   return (
@@ -70,6 +76,7 @@ function App() {
       {page === 'Overview' && (
         <Overview
           data={overview}
+          modelHealth={modelHealth}
           loopsStatus={loopsStatus}
           loopsHistory={loopsHistory}
           reconHistory={reconHistory}

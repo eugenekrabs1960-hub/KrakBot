@@ -1,258 +1,122 @@
+from __future__ import annotations
+
+import json
 from datetime import datetime, timezone
 
+import requests
+
+from app.core.config import settings
 from app.schemas.decision_output import DecisionOutput
 from app.schemas.feature_packet import FeaturePacket
 from app.services.models.adapter_base import LocalModelAdapter
 
 
 class QwenLocalAdapter(LocalModelAdapter):
-    def analyze(self, packet: FeaturePacket) -> DecisionOutput:
-        """Confidence-semantics pass (narrow):
-        - keep strict breakout discipline
-        - remove broad no-trade inflation
-        - make confidence bands explicit and meaningful
-        """
+    def _build_messages(self, packet: FeaturePacket) -> list[dict]:
+        system = (
+            "You are a disciplined local trading analyst. Use only packet fields. "
+            "Return strict JSON only matching DecisionOutput v1 fields. "
+            "Be conservative; prefer no_trade for weak/conflicting setups."
+        )
+        user = {
+            "task": "Evaluate one FeaturePacket and return DecisionOutput JSON only.",
+            "constraints": {
+                "action": ["long", "short", "no_trade"],
+                "setup_type": ["trend_continuation", "breakout_confirmation", "mean_reversion", "range_rejection", "unclear"],
+                "horizon": ["15m", "1h", "4h"],
+                "rules": [
+                    "at least 2 reasons",
+                    "at least 1 risk",
+                    "confidence and uncertainty in [0,1]",
+                    "if action is long/short, invalidation required",
+                ],
+            },
+            "packet": packet.model_dump(mode="json"),
+        }
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user)},
+        ]
+
+    def _extract_json(self, text: str) -> dict:
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        # try direct parse first
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        # fallback: first {...} block
+        l = text.find("{")
+        r = text.rfind("}")
+        if l >= 0 and r > l:
+            return json.loads(text[l : r + 1])
+        raise ValueError("no_json_object_found")
+
+    def _deterministic_fallback(self, packet: FeaturePacket) -> DecisionOutput:
         m = packet.features.returns.momentum_score
         t = packet.ml_scores.tradability_score
-        contradiction = packet.ml_scores.contradiction_score
-        extension = packet.ml_scores.extension_score
-        fragility = packet.ml_scores.fragility_score
-        freshness = packet.features.quality.freshness_score
-        liq = packet.features.quality.liquidity_score
-        rv = packet.features.volatility.rv_1h
-        breakout = packet.features.structure.breakout_state
-        align = packet.features.trend.trend_alignment_score
-        trend_q = packet.features.trend.trend_quality_score
-
-        wallet = packet.optional_signals.wallet_summary if packet.optional_signals else None
-        wallet_bias = str((wallet or {}).get("net_flow_bias", "neutral"))
-        wallet_conviction = float((wallet or {}).get("wallet_conviction_score", 0.0) or 0.0)
-        wallet_agreement = float((wallet or {}).get("wallet_agreement_score", 0.0) or 0.0)
-        wallet_chasing = float((wallet or {}).get("wallet_chasing_risk", 0.0) or 0.0)
-
-        # base directional decision unchanged
         action = "long" if m > 0.2 else ("short" if m < -0.2 else "no_trade")
-
-        # strict breakout gate retained
-        breakout_strong = (
-            breakout == "confirmed" and
-            abs(m) >= 0.45 and
-            align >= 0.55 and
-            trend_q >= 0.55 and
-            contradiction <= 0.45 and
-            extension <= 0.60 and
-            freshness >= 0.45 and
-            liq >= 0.30
-        )
-
-        # strategy identity tuning: mean-reversion-first, trend continuation stricter
-        trend_continuation_strong = (
-            abs(m) >= 0.60 and
-            abs(align) >= 0.74 and
-            trend_q >= 0.72 and
-            contradiction <= 0.32 and
-            extension <= 0.48 and
-            freshness >= 0.48 and
-            fragility <= 0.38
-        )
-
-        if action == "no_trade":
-            setup_type = "unclear"
-        elif breakout_strong:
-            setup_type = "breakout_confirmation"
-        elif trend_continuation_strong:
-            setup_type = "trend_continuation"
-        else:
-            setup_type = "mean_reversion"
-
-        # confidence semantics (explicit bands)
-        edge = 0.45 * abs(m) + 0.35 * t + 0.20 * max(0.0, 1.0 - contradiction)
-        risk = (
-            0.35 * contradiction +
-            0.25 * extension +
-            0.20 * max(0.0, 1.0 - freshness) +
-            0.20 * fragility
-        )
-        score = edge - 0.30 * risk
-
-        # wallet visibility (read-only contextual influence): affects confidence semantics only
-        if wallet is not None:
-            align_wallet = (action == "long" and wallet_bias == "bullish") or (action == "short" and wallet_bias == "bearish")
-            oppose_wallet = (action == "long" and wallet_bias == "bearish") or (action == "short" and wallet_bias == "bullish")
-            if align_wallet:
-                score += 0.05 * wallet_conviction * wallet_agreement
-            elif oppose_wallet:
-                score -= 0.06 * wallet_conviction * wallet_agreement
-            score -= 0.03 * wallet_chasing
-
-        clean = (contradiction <= 0.35 and extension <= 0.50 and freshness >= 0.55 and fragility <= 0.40 and t >= 0.50)
-        tradable = (contradiction <= 0.70 and extension <= 0.80 and freshness >= 0.30 and t >= 0.30)
-
-        if action == "no_trade":
-            conf = min(0.38, max(0.20, 0.24 + 0.20 * max(0.0, score)))
-        else:
-            # high confidence intentionally rare: requires strong edge + very clean context + robust setup evidence
-            high_eligible = (
-                clean and
-                abs(m) >= 0.68 and
-                t >= 0.62 and
-                contradiction <= 0.28 and
-                extension <= 0.42 and
-                freshness >= 0.62 and
-                fragility <= 0.30 and
-                (
-                    breakout_strong or
-                    (abs(align) >= 0.72 and trend_q >= 0.70)
-                )
-            )
-
-            if high_eligible:
-                conf = min(0.82, max(0.72, 0.72 + 0.16 * max(0.0, score)))
-            elif tradable:
-                conf = min(0.69, max(0.45, 0.52 + 0.20 * score))  # mid for imperfect but tradable
-            else:
-                conf = min(0.44, max(0.25, 0.34 + 0.15 * score))  # low for weak-edge cases
-
-        uncertainty = min(0.95, max(0.05, 1.0 - conf + 0.20 * risk))
-
-        wallet_txt = ""
-        if wallet is not None:
-            wallet_txt = f", wallet_bias={wallet_bias}, wallet_conv={wallet_conviction:.2f}, wallet_agree={wallet_agreement:.2f}, wallet_chasing={wallet_chasing:.2f}"
-
-        thesis = (
-            f"{packet.coin} {action} on {packet.decision_context.primary_horizon}: "
-            f"mom={m:.2f}, tradability={t:.2f}, contradiction={contradiction:.2f}, "
-            f"extension={extension:.2f}, freshness={freshness:.2f}, fragility={fragility:.2f}{wallet_txt}."
-        )
-
-        reasons = [
-            {
-                "label": "momentum_alignment",
-                "strength": min(1.0, abs(m)),
-                "explanation": f"momentum_score={m:.2f}",
-            },
-            {
-                "label": "execution_quality",
-                "strength": t,
-                "explanation": f"tradability_score={t:.2f}",
-            },
-        ]
-        if breakout_strong:
-            reasons.append(
-                {
-                    "label": "validated_breakout",
-                    "strength": 0.82,
-                    "explanation": "breakout confirmed with strong alignment and controlled risk",
-                }
-            )
-        else:
-            reasons.append(
-                {
-                    "label": "trend_quality",
-                    "strength": trend_q,
-                    "explanation": f"trend_quality_score={trend_q:.2f}",
-                }
-            )
-        if wallet is not None:
-            reasons.append(
-                {
-                    "label": "wallet_flow_context",
-                    "strength": min(1.0, max(0.0, wallet_conviction)),
-                    "explanation": f"wallet_bias={wallet_bias}, agreement={wallet_agreement:.2f}, chasing={wallet_chasing:.2f}",
-                }
-            )
-
-        risks = [
-            {
-                "label": "regime_contradiction",
-                "severity": min(1.0, contradiction),
-                "explanation": f"contradiction_score={contradiction:.2f}",
-            },
-            {
-                "label": "extension_risk",
-                "severity": min(1.0, extension),
-                "explanation": f"extension_score={extension:.2f}",
-            },
-        ]
-        if freshness < 0.45:
-            risks.append(
-                {
-                    "label": "freshness_risk",
-                    "severity": 1 - freshness,
-                    "explanation": f"freshness_score={freshness:.2f}",
-                }
-            )
-        if fragility > 0.45:
-            risks.append(
-                {
-                    "label": "fragility_risk",
-                    "severity": min(1.0, fragility),
-                    "explanation": f"fragility_score={fragility:.2f}",
-                }
-            )
-        if rv > 0.8:
-            risks.append(
-                {
-                    "label": "high_realized_volatility",
-                    "severity": min(1.0, rv),
-                    "explanation": f"rv_1h={rv:.2f}",
-                }
-            )
-
-        inv = None
-        if action in {"long", "short"}:
-            inv = {
-                "type": "thesis_failure",
-                "value": None,
-                "reason": "momentum weakens and contradiction/extension risk rises",
-            }
-
-        evidence_used = [
-            "features.returns.momentum_score",
-            "ml_scores.tradability_score",
-            "ml_scores.contradiction_score",
-            "ml_scores.extension_score",
-            "features.quality.freshness_score",
-            "ml_scores.fragility_score",
-            "features.trend.trend_alignment_score",
-            "features.trend.trend_quality_score",
-            "features.structure.breakout_state",
-        ]
-        if wallet is not None:
-            evidence_used.extend([
-                "optional_signals.wallet_summary.net_flow_bias",
-                "optional_signals.wallet_summary.wallet_conviction_score",
-                "optional_signals.wallet_summary.wallet_agreement_score",
-                "optional_signals.wallet_summary.wallet_chasing_risk",
-            ])
-
+        setup = "mean_reversion" if action != "no_trade" else "unclear"
+        conf = min(0.69, max(0.32, 0.45 + 0.25 * abs(m) + 0.15 * t)) if action != "no_trade" else 0.33
+        uncertainty = min(0.95, max(0.05, 1.0 - conf))
+        inv = None if action == "no_trade" else {"type": "thesis_failure", "value": None, "reason": "momentum weakens"}
         return DecisionOutput(
             packet_id=packet.packet_id,
             generated_at=datetime.now(timezone.utc),
-            model_name="Qwen3.5-9B",
+            model_name=settings.local_model_name,
             coin=packet.coin,
             symbol=packet.symbol,
             action=action,
-            setup_type=setup_type,
+            setup_type=setup,
             horizon=packet.decision_context.primary_horizon,
             confidence=conf,
             uncertainty=uncertainty,
-            thesis_summary=thesis,
-            reasons=reasons[:4],
-            risks=risks[:4],
-            invalidation=inv,
-            targets={
-                "take_profit_hint": None,
-                "expected_move_magnitude": "small" if action != "no_trade" else "null",
-            },
-            evidence_used=evidence_used,
-            evidence_ignored=["optional_signals.news_summary", "optional_signals.social_summary"],
-            alternatives_considered=[
-                {"action": "no_trade", "reason": "if edge is weak or continuation quality is insufficient"},
-                {"action": "long" if action == "short" else "short", "reason": "if momentum flips with better setup quality"},
+            thesis_summary="fallback_local_analyst_decision",
+            reasons=[
+                {"label": "momentum_alignment", "strength": min(1.0, abs(m)), "explanation": f"momentum_score={m:.2f}"},
+                {"label": "execution_quality", "strength": t, "explanation": f"tradability_score={t:.2f}"},
             ],
-            execution_preference={
-                "urgency": "normal" if action != "no_trade" else "low",
-                "entry_style_hint": "market_or_aggressive_limit" if action != "no_trade" else "none",
-            },
+            risks=[{"label": "regime_shift", "severity": min(1.0, packet.ml_scores.contradiction_score), "explanation": "contradiction risk"}],
+            invalidation=inv,
+            targets={"take_profit_hint": None, "expected_move_magnitude": "small" if action != "no_trade" else "null"},
+            evidence_used=["features.returns.momentum_score", "ml_scores.tradability_score"],
+            evidence_ignored=["optional_signals.news_summary", "optional_signals.social_summary"],
+            alternatives_considered=[{"action": "no_trade", "reason": "if edge weakens"}],
+            execution_preference={"urgency": "normal" if action != "no_trade" else "low", "entry_style_hint": "market_or_aggressive_limit" if action != "no_trade" else "none"},
         )
+
+    def analyze(self, packet: FeaturePacket) -> DecisionOutput:
+        try:
+            messages = self._build_messages(packet)
+            headers = {"content-type": "application/json"}
+            if settings.local_model_api_key:
+                headers["authorization"] = f"Bearer {settings.local_model_api_key}"
+            payload = {
+                "model": settings.local_model_name,
+                "messages": messages,
+                "temperature": settings.local_model_temperature,
+                "max_tokens": settings.local_model_max_tokens,
+            }
+            r = requests.post(
+                f"{settings.local_model_base_url.rstrip('/')}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=settings.local_model_timeout_sec,
+            )
+            r.raise_for_status()
+            body = r.json()
+            text = body["choices"][0]["message"]["content"]
+            parsed = self._extract_json(text)
+            parsed.setdefault("packet_id", packet.packet_id)
+            parsed.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
+            parsed.setdefault("model_name", settings.local_model_name)
+            parsed.setdefault("coin", packet.coin)
+            parsed.setdefault("symbol", packet.symbol)
+            parsed.setdefault("model_role", "local_analyst")
+            return DecisionOutput.model_validate(parsed)
+        except Exception:
+            return self._deterministic_fallback(packet)
