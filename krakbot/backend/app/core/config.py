@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     local_model_api_key: str = Field(default="", validation_alias="QWEN_LOCAL_API_KEY")
     local_model_timeout_sec: int = 15
 
+    # LLM runtime safeguards
+    llm_max_concurrent_requests: int = 1
+    llm_request_timeout_sec: int = 12
+    llm_disable_repair: bool = False
+    llm_safe_mode: bool = True
+    llm_safe_mode_max_candidates: int = 1
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""

@@ -4,6 +4,7 @@ import requests
 from fastapi import APIRouter
 
 from app.core.config import settings
+from app.services.models.qwen_local_adapter import QwenLocalAdapter
 
 router = APIRouter(tags=['model-runtime'])
 
@@ -62,3 +63,8 @@ def model_health():
         'latency_ms': latency_ms,
         'error': err,
     }
+
+
+@router.get('/model/runtime-metrics')
+def model_runtime_metrics():
+    return QwenLocalAdapter.metrics_snapshot()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -11,11 +13,31 @@ from app.schemas.decision_output import DecisionOutput
 from app.schemas.feature_packet import FeaturePacket
 from app.services.models.adapter_base import LocalModelAdapter
 
+logger = logging.getLogger(__name__)
+
 
 class QwenLocalAdapter(LocalModelAdapter):
     _probe_ok: bool | None = None
     _probe_ts: float = 0.0
     _probe_ttl_sec: float = 10.0
+
+    # instrumentation / safeguards
+    _lock = threading.BoundedSemaphore(value=1)
+    _active_requests = 0
+    _active_lock = threading.Lock()
+    _total_calls = 0
+    _fallback_calls = 0
+
+    @classmethod
+    def metrics_snapshot(cls) -> dict:
+        with cls._active_lock:
+            return {
+                'active_requests': cls._active_requests,
+                'total_calls': cls._total_calls,
+                'fallback_calls': cls._fallback_calls,
+                'max_concurrent_config': settings.llm_max_concurrent_requests,
+                'timeout_sec': settings.llm_request_timeout_sec,
+            }
 
     def _model_available(self) -> bool:
         now = time.time()
@@ -141,6 +163,8 @@ class QwenLocalAdapter(LocalModelAdapter):
         return DecisionOutput.model_validate(out)
 
     def _deterministic_fallback(self, packet: FeaturePacket) -> DecisionOutput:
+        with self._active_lock:
+            self.__class__._fallback_calls += 1
         m = packet.features.returns.momentum_score
         t = packet.ml_scores.tradability_score
         action = "long" if m > 0.2 else ("short" if m < -0.2 else "no_trade")
@@ -174,9 +198,22 @@ class QwenLocalAdapter(LocalModelAdapter):
         )
 
     def analyze(self, packet: FeaturePacket) -> DecisionOutput:
-        if not self._model_available():
+        with self._active_lock:
+            self.__class__._total_calls += 1
+
+        acquired = self._lock.acquire(timeout=0.5)
+        if not acquired:
+            logger.warning('llm_call_skipped_concurrency_guard packet=%s', packet.packet_id)
             return self._deterministic_fallback(packet)
+
+        with self._active_lock:
+            self.__class__._active_requests += 1
+
+        started = time.perf_counter()
         try:
+            if not self._model_available():
+                return self._deterministic_fallback(packet)
+
             messages = self._build_messages(packet)
             headers = {"content-type": "application/json"}
             if settings.local_model_api_key:
@@ -187,16 +224,28 @@ class QwenLocalAdapter(LocalModelAdapter):
                 "temperature": settings.local_model_temperature,
                 "max_tokens": settings.local_model_max_tokens,
             }
+
+            payload_size = len(json.dumps(payload, separators=(",", ":")))
+            logger.info('llm_call_start packet=%s active=%s payload_bytes=%s', packet.packet_id, self.metrics_snapshot()['active_requests'], payload_size)
+
             r = requests.post(
                 f"{settings.local_model_base_url.rstrip('/')}/v1/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=settings.local_model_timeout_sec,
+                timeout=settings.llm_request_timeout_sec,
             )
             r.raise_for_status()
             body = r.json()
             text = body["choices"][0]["message"]["content"]
             parsed = self._extract_json(text)
-            return self._normalize(packet, parsed)
-        except Exception:
+            out = self._normalize(packet, parsed)
+            return out
+        except Exception as e:
+            logger.warning('llm_call_fail packet=%s err=%s', packet.packet_id, repr(e))
             return self._deterministic_fallback(packet)
+        finally:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            with self._active_lock:
+                self.__class__._active_requests = max(0, self.__class__._active_requests - 1)
+            self._lock.release()
+            logger.info('llm_call_end packet=%s latency_ms=%s metrics=%s', packet.packet_id, elapsed_ms, self.metrics_snapshot())

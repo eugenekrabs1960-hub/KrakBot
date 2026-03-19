@@ -15,7 +15,7 @@ class AnalystRunner:
         ok, _err = validate_output(decision)
         if ok:
             return decision
-        if settings.repair_enabled:
+        if settings.repair_enabled and not settings.llm_disable_repair:
             repaired = repair_output(decision.model_dump(mode='json'), packet_id=packet.packet_id)
             return repaired
         return decision
