@@ -1,0 +1,120 @@
+{
+  "coin": "ETH",
+  "risks": [
+    {
+      "label": "regime_shift",
+      "severity": 0.5,
+      "explanation": "short-term regime can flip"
+    }
+  ],
+  "action": "long",
+  "symbol": "ETH-PERP",
+  "horizon": "1h",
+  "reasons": [
+    {
+      "label": "momentum",
+      "strength": 0.6936746775689708,
+      "explanation": "momentum influence"
+    },
+    {
+      "label": "tradability",
+      "strength": 0.48825056369417824,
+      "explanation": "liquidity + slippage"
+    }
+  ],
+  "targets": {
+    "take_profit_hint": null,
+    "expected_move_magnitude": "small"
+  },
+  "packet_id": "pkt_2c90bb48472c",
+  "confidence": 0.6936746775689708,
+  "model_name": "Qwen3.5-9B",
+  "model_role": "local_analyst",
+  "setup_type": "trend_continuation",
+  "uncertainty": 0.30632532243102917,
+  "generated_at": "2026-03-19T03:42:50.974737Z",
+  "invalidation": {
+    "type": "thesis_failure",
+    "value": null,
+    "reason": "momentum_score flips"
+  },
+  "evidence_used": [
+    "features.returns.momentum_score",
+    "ml_scores.tradability_score"
+  ],
+  "thesis_summary": "Packet-driven setup evaluation",
+  "decision_version": "1.0",
+  "evidence_ignored": [
+    "optional_signals.news_summary"
+  ],
+  "execution_preference": {
+    "urgency": "normal",
+    "entry_style_hint": "market_or_aggressive_limit"
+  },
+  "alternatives_considered": [
+    {
+      "action": "no_trade",
+      "reason": "if signal weakens"
+    }
+  ]
+}
+{
+  "coin": "SOL",
+  "risks": [
+    {
+      "label": "regime_shift",
+      "severity": 0.5,
+      "explanation": "short-term regime can flip"
+    }
+  ],
+  "action": "long",
+  "symbol": "SOL-PERP",
+  "horizon": "1h",
+  "reasons": [
+    {
+      "label": "momentum",
+      "strength": 0.44818426594160465,
+      "explanation": "momentum influence"
+    },
+    {
+      "label": "tradability",
+      "strength": 0.6508217258131763,
+      "explanation": "liquidity + slippage"
+    }
+  ],
+  "targets": {
+    "take_profit_hint": null,
+    "expected_move_magnitude": "small"
+  },
+  "packet_id": "pkt_dea4bb1ee5d5",
+  "confidence": 0.44818426594160465,
+  "model_name": "Qwen3.5-9B",
+  "model_role": "local_analyst",
+  "setup_type": "trend_continuation",
+  "uncertainty": 0.5518157340583953,
+  "generated_at": "2026-03-19T03:42:50.972148Z",
+  "invalidation": {
+    "type": "thesis_failure",
+    "value": null,
+    "reason": "momentum_score flips"
+  },
+  "evidence_used": [
+    "features.returns.momentum_score",
+    "ml_scores.tradability_score"
+  ],
+  "thesis_summary": "Packet-driven setup evaluation",
+  "decision_version": "1.0",
+  "evidence_ignored": [
+    "optional_signals.news_summary"
+  ],
+  "execution_preference": {
+    "urgency": "normal",
+    "entry_style_hint": "market_or_aggressive_limit"
+  },
+  "alternatives_considered": [
+    {
+      "action": "no_trade",
+      "reason": "if signal weakens"
+    }
+  ]
+}

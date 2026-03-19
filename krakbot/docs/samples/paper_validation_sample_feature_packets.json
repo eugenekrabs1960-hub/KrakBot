@@ -1,0 +1,240 @@
+{
+  "coin": "ETH",
+  "symbol": "ETH-PERP",
+  "features": {
+    "trend": {
+      "trend_1h": "down",
+      "trend_4h": "down",
+      "trend_5m": "down",
+      "trend_15m": "down",
+      "trend_quality_score": 0.37629359999000367,
+      "trend_alignment_score": 0.4770634642742546
+    },
+    "volume": {
+      "volume_zscore_1h": 1.9015250054538644,
+      "volume_zscore_5m": 2.3035752031081707,
+      "volume_acceleration": 0.5200012226964994
+    },
+    "quality": {
+      "freshness_score": 0.6832169570151037,
+      "liquidity_score": 0.0948589204256658,
+      "source_health_score": 0.9484924602903592,
+      "data_completeness_score": 0.8066532430257858
+    },
+    "returns": {
+      "ret_1h": 0.04499173929757601,
+      "ret_1m": 0.0014154457192886646,
+      "ret_4h": 0.05082366741123237,
+      "ret_5m": 0.009435838850154425,
+      "ret_15m": 0.0046808204908448114,
+      "momentum_score": 0.6936746775689708,
+      "acceleration_score": 0.8412437999060045
+    },
+    "orderbook": {
+      "imbalance_10bp": -0.48374381555902524,
+      "imbalance_25bp": -0.7192506864879358,
+      "book_depth_score": 0.29058985514518354,
+      "micro_pressure_score": 0.24166419900536962,
+      "slippage_estimate_bps": 3.5507337911192804
+    },
+    "structure": {
+      "breakout_state": "none",
+      "distance_from_1h_low": 0.042816214979060054,
+      "distance_from_4h_low": 0.00021232578537728753,
+      "distance_from_1h_high": 0.005960834892045225,
+      "distance_from_4h_high": 0.03004876664092955
+    },
+    "volatility": {
+      "rv_1h": 0.7275605560707462,
+      "rv_5m": 0.21567511542084905,
+      "rv_15m": 0.5671091134023084,
+      "volatility_state": "normal"
+    },
+    "derivatives": {
+      "oi_change_1h": 0.11051362209315796,
+      "oi_change_5m": -0.12068042372033308,
+      "funding_state": "neutral",
+      "oi_change_15m": -0.0445150812607647
+    }
+  },
+  "ml_scores": {
+    "market_regime": "trend",
+    "no_trade_prior": 0.5117494363058217,
+    "attention_score": 0.4541483747116488,
+    "extension_score": 0.04499173929757601,
+    "fragility_score": 0.05150753970964084,
+    "crowdedness_score": 0.3,
+    "opportunity_score": 0.8031433074551579,
+    "tradability_score": 0.48825056369417824,
+    "contradiction_score": 0.03265374771556147,
+    "trade_quality_prior": 0.48825056369417824,
+    "move_probability_up_1h": 0.6734186693922427,
+    "move_probability_up_15m": 0.6387349355137941,
+    "move_probability_down_1h": 0.3265813306077573,
+    "move_probability_down_15m": 0.3612650644862058,
+    "regime_compatibility_score": 0.7
+  },
+  "packet_id": "pkt_2c90bb48472c",
+  "generated_at": "2026-03-19T03:42:50.974686Z",
+  "change_summary": {
+    "new_risks": [],
+    "largest_feature_changes": []
+  },
+  "packet_version": "1.0",
+  "policy_context": {
+    "cooldown_active": false,
+    "max_open_positions": 3,
+    "max_total_notional": 300.0,
+    "current_open_positions": 3,
+    "max_notional_per_trade": 50.0
+  },
+  "market_snapshot": {
+    "last_price": 2210.25,
+    "mark_price": 2210.3,
+    "spread_bps": 0.22621363615881052,
+    "index_price": 2211.6,
+    "funding_rate": 0.0000090431,
+    "volume_1h_usd": 73355025.25200824,
+    "volume_5m_usd": 6112918.771000687,
+    "open_interest_usd": 1282883256.4157217
+  },
+  "decision_context": {
+    "mode": "paper",
+    "allowed_actions": [
+      "long",
+      "short",
+      "no_trade"
+    ],
+    "primary_horizon": "1h",
+    "decision_horizons": [
+      "15m",
+      "1h",
+      "4h"
+    ]
+  },
+  "optional_signals": {
+    "news_summary": null,
+    "social_summary": null,
+    "wallet_summary": null
+  }
+}
+{
+  "coin": "SOL",
+  "symbol": "SOL-PERP",
+  "features": {
+    "trend": {
+      "trend_1h": "down",
+      "trend_4h": "down",
+      "trend_5m": "down",
+      "trend_15m": "down",
+      "trend_quality_score": 0.12437953792406775,
+      "trend_alignment_score": 0.06605797436858651
+    },
+    "volume": {
+      "volume_zscore_1h": -2.4150005718329384,
+      "volume_zscore_5m": -2.0577146067835344,
+      "volume_acceleration": 0.37100619607186225
+    },
+    "quality": {
+      "freshness_score": 0.44438442512349197,
+      "liquidity_score": 0.845179538145138,
+      "source_health_score": 0.9695584859248984,
+      "data_completeness_score": 0.867549380378881
+    },
+    "returns": {
+      "ret_1h": -0.0018869961258669576,
+      "ret_1m": 0.003607191449665783,
+      "ret_4h": -0.04454803398890446,
+      "ret_5m": 0.016452415988295648,
+      "ret_15m": -0.01583678083447848,
+      "momentum_score": 0.44818426594160465,
+      "acceleration_score": -0.9577065957825142
+    },
+    "orderbook": {
+      "imbalance_10bp": 0.2850924496310656,
+      "imbalance_25bp": -0.021490154936152805,
+      "book_depth_score": 0.9059998011644486,
+      "micro_pressure_score": 0.35121508699627313,
+      "slippage_estimate_bps": 16.306082595563563
+    },
+    "structure": {
+      "breakout_state": "none",
+      "distance_from_1h_low": 0.0344815134132838,
+      "distance_from_4h_low": 0.09488264149158483,
+      "distance_from_1h_high": 0.012749513874566243,
+      "distance_from_4h_high": 0.03866036336018522
+    },
+    "volatility": {
+      "rv_1h": 0.6204744099339643,
+      "rv_5m": 0.1860290450936306,
+      "rv_15m": 0.45238677249215564,
+      "volatility_state": "low"
+    },
+    "derivatives": {
+      "oi_change_1h": 0.19845385993253428,
+      "oi_change_5m": 0.1768121589898946,
+      "funding_state": "negative",
+      "oi_change_15m": 0.04297254268223927
+    }
+  },
+  "ml_scores": {
+    "market_regime": "trend",
+    "no_trade_prior": 0.3491782741868237,
+    "attention_score": 0.6069823748230181,
+    "extension_score": 0.0018869961258669576,
+    "fragility_score": 0.03044151407510165,
+    "crowdedness_score": 0.3,
+    "opportunity_score": 0.5911346704283857,
+    "tradability_score": 0.6508217258131763,
+    "contradiction_score": 0.19443972284144265,
+    "trade_quality_prior": 0.6508217258131763,
+    "move_probability_up_1h": 0.6120460664854012,
+    "move_probability_up_15m": 0.5896368531883209,
+    "move_probability_down_1h": 0.38795393351459884,
+    "move_probability_down_15m": 0.41036314681167907,
+    "regime_compatibility_score": 0.7
+  },
+  "packet_id": "pkt_dea4bb1ee5d5",
+  "generated_at": "2026-03-19T03:42:50.972091Z",
+  "change_summary": {
+    "new_risks": [],
+    "largest_feature_changes": []
+  },
+  "packet_version": "1.0",
+  "policy_context": {
+    "cooldown_active": false,
+    "max_open_positions": 3,
+    "max_total_notional": 300.0,
+    "current_open_positions": 3,
+    "max_notional_per_trade": 50.0
+  },
+  "market_snapshot": {
+    "last_price": 90.8885,
+    "mark_price": 90.889,
+    "spread_bps": 0.05501215768711147,
+    "index_price": 90.94,
+    "funding_rate": -0.0000072259,
+    "volume_1h_usd": 12409887.70452335,
+    "volume_5m_usd": 1034157.3087102791,
+    "open_interest_usd": 314133397.5367997
+  },
+  "decision_context": {
+    "mode": "paper",
+    "allowed_actions": [
+      "long",
+      "short",
+      "no_trade"
+    ],
+    "primary_horizon": "1h",
+    "decision_horizons": [
+      "15m",
+      "1h",
+      "4h"
+    ]
+  },
+  "optional_signals": {
+    "news_summary": null,
+    "social_summary": null,
+    "wallet_summary": null
+  }
+}
