@@ -64,8 +64,23 @@ class QwenLocalAdapter(LocalModelAdapter):
         if action == "no_trade":
             conf = min(0.38, max(0.20, 0.24 + 0.20 * max(0.0, score)))
         else:
-            if clean and abs(m) >= 0.55:
-                conf = min(0.84, max(0.70, 0.70 + 0.20 * max(0.0, score)))  # high band only for very clean setups
+            # high confidence intentionally rare: requires strong edge + very clean context + robust setup evidence
+            high_eligible = (
+                clean and
+                abs(m) >= 0.68 and
+                t >= 0.62 and
+                contradiction <= 0.28 and
+                extension <= 0.42 and
+                freshness >= 0.62 and
+                fragility <= 0.30 and
+                (
+                    breakout_strong or
+                    (abs(align) >= 0.72 and trend_q >= 0.70)
+                )
+            )
+
+            if high_eligible:
+                conf = min(0.82, max(0.72, 0.72 + 0.16 * max(0.0, score)))
             elif tradable:
                 conf = min(0.69, max(0.45, 0.52 + 0.20 * score))  # mid for imperfect but tradable
             else:
