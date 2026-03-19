@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 from pathlib import Path
 from typing import Any
 import json
@@ -54,6 +55,10 @@ MODE_CONFIGS = {
         "aggressive": False,
         "fee_bps_entry": 40.0,
         "fee_bps_exit": 40.0,
+        "enable_time_exit": False,
+        "max_bars_open": 0,
+        "max_minutes_open": 0,
+        "enable_invalidation_exit": False,
     },
     "btc_15m_conservative_netedge_v1": {
         "label": "BTC/USD 15m conservative netedge v1 (experimental)",
@@ -62,6 +67,10 @@ MODE_CONFIGS = {
         "aggressive": False,
         "fee_bps_entry": 40.0,
         "fee_bps_exit": 40.0,
+        "enable_time_exit": False,
+        "max_bars_open": 0,
+        "max_minutes_open": 0,
+        "enable_invalidation_exit": False,
     },
     "btc_15m_breakout_retest": {
         "label": "BTC/USD 15m breakout-retest experiment",
@@ -70,6 +79,10 @@ MODE_CONFIGS = {
         "aggressive": True,
         "fee_bps_entry": 40.0,
         "fee_bps_exit": 40.0,
+        "enable_time_exit": False,
+        "max_bars_open": 0,
+        "max_minutes_open": 0,
+        "enable_invalidation_exit": False,
     },
 }
 
@@ -695,23 +708,88 @@ def update_position_excursions(p, candle):
     p["max_adverse_excursion"] = round2(max(p.get("max_adverse_excursion", 0.0), mae))
 
 
+def parse_invalidation_price(invalidation: Any) -> float | None:
+    if invalidation is None:
+        return None
+    if isinstance(invalidation, (int, float)):
+        v = float(invalidation)
+        return v if v > 0 else None
+    s = str(invalidation).strip()
+    if not s:
+        return None
+    try:
+        v = float(s)
+        return v if v > 0 else None
+    except Exception:
+        pass
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    try:
+        v = float(m.group(1))
+        return v if v > 0 else None
+    except Exception:
+        return None
+
+
 def maybe_close(p, candle, slip, mode_cfg):
     side = p["side"]
+    price = None
+    reason = None
+
+    # 1) Price-hit exits first (existing behavior priority)
     if side == "BUY":
         if candle["low"] <= p["stop_loss"]:
-            price = p["stop_loss"] * (1 - slip / 100); reason = "STOP_LOSS"
+            price = p["stop_loss"] * (1 - slip / 100)
+            reason = "STOP_LOSS"
         elif candle["high"] >= p["take_profit"]:
-            price = p["take_profit"] * (1 - slip / 100); reason = "TAKE_PROFIT"
-        else:
-            return None
-        gross_realized = (price - p["entry_fill_price"]) * p["qty"]
+            price = p["take_profit"] * (1 - slip / 100)
+            reason = "TAKE_PROFIT"
     else:
         if candle["high"] >= p["stop_loss"]:
-            price = p["stop_loss"] * (1 + slip / 100); reason = "STOP_LOSS"
+            price = p["stop_loss"] * (1 + slip / 100)
+            reason = "STOP_LOSS"
         elif candle["low"] <= p["take_profit"]:
-            price = p["take_profit"] * (1 + slip / 100); reason = "TAKE_PROFIT"
-        else:
-            return None
+            price = p["take_profit"] * (1 + slip / 100)
+            reason = "TAKE_PROFIT"
+
+    # 2) Policy exits (disabled by default)
+    if reason is None and bool(mode_cfg.get("enable_invalidation_exit", False)):
+        inval = parse_invalidation_price(p.get("invalidation"))
+        if inval:
+            if side == "BUY" and candle["close"] <= inval:
+                price = candle["close"] * (1 - slip / 100)
+                reason = "INVALIDATION_EXIT"
+            elif side == "SELL" and candle["close"] >= inval:
+                price = candle["close"] * (1 + slip / 100)
+                reason = "INVALIDATION_EXIT"
+
+    if reason is None and bool(mode_cfg.get("enable_time_exit", False)):
+        bars_open = int(p.get("bars_open", 0) or 0)
+        max_bars_open = int(mode_cfg.get("max_bars_open", 0) or 0)
+        max_minutes_open = int(mode_cfg.get("max_minutes_open", 0) or 0)
+        hit_bars_limit = max_bars_open > 0 and bars_open >= max_bars_open
+        hit_minutes_limit = False
+        if max_minutes_open > 0 and p.get("open_time"):
+            try:
+                opened = datetime.fromisoformat(str(p["open_time"]).replace("Z", "+00:00"))
+                age_min = (datetime.now(timezone.utc) - opened).total_seconds() / 60.0
+                hit_minutes_limit = age_min >= max_minutes_open
+            except Exception:
+                hit_minutes_limit = False
+        if hit_bars_limit or hit_minutes_limit:
+            if side == "BUY":
+                price = candle["close"] * (1 - slip / 100)
+            else:
+                price = candle["close"] * (1 + slip / 100)
+            reason = "TIME_EXIT_STALE"
+
+    if reason is None or price is None:
+        return None
+
+    if side == "BUY":
+        gross_realized = (price - p["entry_fill_price"]) * p["qty"]
+    else:
         gross_realized = (p["entry_fill_price"] - price) * p["qty"]
 
     close_fill_price = round2(price)
@@ -1066,7 +1144,7 @@ async def execute_mode_scan(mode: str):
                 "exit_liquidity": initial_exit_fee_info.get("liquidity"),
                 "fee_pct": entry_fee_info.get("fee_pct"),
                 "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
-                "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
+                "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "open_candle_time": candles[-1]["time"], "last_seen_candle_time": candles[-1]["time"], "bars_open": 0, "close_time": None,
                 "status": "PAPER_TRADE_OPEN",
                 "gross_unrealized_pnl": 0,
                 "estimated_exit_fee": round2(initial_exit_fee),
@@ -1102,6 +1180,9 @@ async def execute_mode_scan(mode: str):
     candle = candles[-1]
     still = []
     for p in bucket["open_positions"]:
+        if p.get("last_seen_candle_time") != candle["time"]:
+            p["bars_open"] = int(p.get("bars_open", 0) or 0) + 1
+            p["last_seen_candle_time"] = candle["time"]
         update_position_excursions(p, candle)
         c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"], cfg)
         if c:
