@@ -61,6 +61,8 @@ BASE_DIR = Path(__file__).resolve().parent
 STATE_DIR = BASE_DIR / "data"
 HL_STATE_FILE = STATE_DIR / "hyperliquid_paper_state.json"
 
+HL_ACTIVE_STRATEGY_KEY = 'hl_15m_trend_follow_momo_gate_v1'
+
 HL_STRATEGY_REGISTRY = {
     'hl_15m_trend_follow': {
         'strategy_key': 'hl_15m_trend_follow',
@@ -243,7 +245,7 @@ class HyperliquidFuturesPaperTrack:
             'private_execution_enabled': False,
             'exchange_execution_routes': [],
             'symbol': 'ETH-PERP',
-            'active_strategy_key': 'hl_15m_trend_follow',
+            'active_strategy_key': HL_ACTIVE_STRATEGY_KEY,
             'strategy_registry': HL_STRATEGY_REGISTRY,
             'leverage_default': 2.0,
             'positions': [],
@@ -337,9 +339,11 @@ class HyperliquidFuturesPaperTrack:
                 registry[sk] = merged
         self.state['strategy_registry'] = registry
 
-        # Ensure active key is valid.
+        # Route execution to requested active strategy key.
         active = self.state.get('active_strategy_key')
-        if active not in registry:
+        if HL_ACTIVE_STRATEGY_KEY in registry:
+            self.state['active_strategy_key'] = HL_ACTIVE_STRATEGY_KEY
+        elif active not in registry:
             self.state['active_strategy_key'] = 'hl_15m_trend_follow'
 
         # Ensure per-strategy metric buckets exist for visibility/comparison.
