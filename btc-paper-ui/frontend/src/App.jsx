@@ -211,6 +211,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const freeCollateral = Math.max(0, 1000 - marginUsed)
 
   const PAPER_START_BALANCE = 1000
+  const latestClosed = closedTrades.slice(-1)[0]
   const realizedPnl = closedTrades.reduce((s, t) => s + Number(t.net_realized_pnl ?? t.realized_pnl ?? 0), 0)
   const unrealizedPnl = positions.reduce((s, p) => s + Number(p.unrealized_pnl_net ?? p.unrealized_pnl ?? 0), 0)
   const netPnl = realizedPnl + unrealizedPnl
@@ -261,6 +262,16 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <div>TP / SL / STALE: {metrics.tp_closes ?? 0} / {metrics.sl_closes ?? 0} / {metrics.time_exit_stale_closes ?? 0}</div>
         <div>Net realized: {fmt2(metrics.net_realized_pnl)} | Net unrealized: {fmt2(metrics.net_unrealized_pnl)} | Fees: {fmt2(metrics.total_fees)} | Fee drag: {fmt2(metrics.fee_drag_pct)}%</div>
         <div>Expectancy (net): {fmt2(metrics.expectancy_net)} | Median time-to-close: {metrics.median_time_to_close_min ?? 0} min</div>
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+        <strong>Latest closed trade</strong>
+        {latestClosed ? (
+          <div style={{ marginTop: 6 }}>
+            <div>Close: {fmtLA(latestClosed.close_time)} | Reason: {latestClosed.close_reason || '-'} | Leverage: {latestClosed.leverage ? `${latestClosed.leverage}x` : '-'}</div>
+            <div>Entry/Close: {fmt2(Number(latestClosed.entry_price ?? latestClosed.entry_fill_price ?? 0))} / {fmt2(Number(latestClosed.close_price ?? latestClosed.close_fill_price ?? 0))} | Net PnL: <strong style={{ color: pnlColor(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0)) }}>{fmt2(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0))}</strong></div>
+          </div>
+        ) : <div style={{ marginTop: 6 }}>No closed trades yet.</div>}
       </div>
 
       <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
@@ -324,7 +335,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <table className='rows' style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Entry notional</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th>
+              <th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Leverage</th><th>Entry notional</th><th>Margin used</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th>
             </tr>
           </thead>
           <tbody>
@@ -335,6 +346,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
               const entryPrice = Number(t.entry_price ?? t.entry_fill_price ?? 0)
               const qty = Number(t.qty ?? 0)
               const entryNotional = Number(t.entry_notional ?? (entryPrice * qty))
+              const marginUsed = Number(t.margin_used ?? (t.leverage ? entryNotional / Number(t.leverage) : 0))
               const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
               return (
                 <tr key={i}>
@@ -345,7 +357,9 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
                   <td>{fmt2(entryPrice)}</td>
                   <td>{fmt2(Number(t.close_price ?? t.close_fill_price ?? 0))}</td>
                   <td>{t.qty ?? '-'}</td>
+                  <td>{t.leverage ? `${t.leverage}x` : '-'}</td>
                   <td>{fmt2(entryNotional)}</td>
+                  <td>{marginUsed > 0 ? fmt2(marginUsed) : '-'}</td>
                   <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
                   <td>{fmt2(feesPaid)}</td>
                   <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
