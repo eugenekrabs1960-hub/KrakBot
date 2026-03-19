@@ -1,80 +1,86 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-
-import AppShell from './components/AppShell';
-import Overview from './pages/Overview';
-import Dashboard from './pages/Dashboard';
-import StrategyComparison from './pages/StrategyComparison';
-import StrategyDetail from './pages/StrategyDetail';
-import TradeHistory from './pages/TradeHistory';
-import MarketData from './pages/MarketData';
-import Controls from './pages/Controls';
-import MarketRegistry from './pages/MarketRegistry';
-import ModelLab from './pages/ModelLab';
-import ModelArena from './pages/ModelArena';
 import './styles/tokens.css';
 import './styles/app.css';
 
-
-type BoundaryProps = { children: React.ReactNode; title?: string };
-type BoundaryState = { error: any };
-
-class PageErrorBoundary extends React.Component<BoundaryProps, BoundaryState> {
-  constructor(props: BoundaryProps) {
-    super(props);
-    this.state = { error: null };
-  }
-  static getDerivedStateFromError(error: any) {
-    return { error };
-  }
-  componentDidCatch(error: any) {
-    console.error('[PageErrorBoundary]', error);
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="card" style={{ marginTop: 12 }}>
-          <h3 style={{ marginTop: 0 }}>{this.props.title || 'Page error'}</h3>
-          <div className="muted">This page crashed while rendering. Please send this message to the developer:</div>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{String(this.state.error?.message || this.state.error)}</pre>
-        </div>
-      );
-    }
-    return this.props.children as any;
-  }
-}
+type CycleLog = any;
 
 function App() {
-  const nav = useMemo(
-    () => [
-      { id: 'overview', label: 'Overview' },
-      { id: 'comparison', label: 'Strategy Comparison' },
-      { id: 'strategy', label: 'Strategy Detail' },
-      { id: 'trades', label: 'Trades + Trace' },
-      { id: 'market', label: 'Market Detail' },
-      { id: 'registry', label: 'Market Registry' },
-      { id: 'wallet', label: 'Benchmark & Wallet Intel' },
-      { id: 'model-lab', label: 'Model Lab' },
-      { id: 'model-arena', label: 'Model Arena' },
-      { id: 'controls', label: 'Controls & Safety' },
-    ],
-    [],
-  );
-  const [active, setActive] = useState('overview');
+  const [health, setHealth] = useState<any>(null);
+  const [state, setState] = useState<any>(null);
+  const [logs, setLogs] = useState<CycleLog[]>([]);
+  const [symbol, setSymbol] = useState('BTC');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    const [h, s, l] = await Promise.all([
+      fetch('/api/lab/health').then(r => r.json()),
+      fetch('/api/lab/state').then(r => r.json()),
+      fetch('/api/lab/logs?limit=20').then(r => r.json()),
+    ]);
+    setHealth(h);
+    setState(s);
+    setLogs(l.items || []);
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const runCycle = async () => {
+    setBusy(true);
+    await fetch('/api/lab/cycle/run-once', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ symbol }),
+    });
+    await refresh();
+    setBusy(false);
+  };
+
+  const switchMode = async (execution_mode: 'paper' | 'live_hyperliquid', live_armed = false) => {
+    setBusy(true);
+    await fetch('/api/lab/mode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ execution_mode, live_armed }),
+    });
+    await refresh();
+    setBusy(false);
+  };
 
   return (
-    <AppShell nav={nav} active={active} onChange={setActive}>
-      {active === 'overview' && <Overview />}
-      {active === 'comparison' && <StrategyComparison />}
-      {active === 'strategy' && <StrategyDetail />}
-      {active === 'trades' && <TradeHistory />}
-      {active === 'market' && <MarketData />}
-      {active === 'registry' && <MarketRegistry />}
-      {active === 'wallet' && <Dashboard />}
-      {active === 'model-lab' && <ModelLab />}
-      {active === 'model-arena' && (<PageErrorBoundary title="Model Arena runtime error"><ModelArena /></PageErrorBoundary>)}
-      {active === 'controls' && <Controls />}
-    </AppShell>
+    <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+      <h1>KrakBot AI Trading Lab</h1>
+      <p className="muted">Focused Hyperliquid futures lab: deterministic packet -> analyst -> policy gate -> broker.</p>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>Mode</h3>
+        <div>Current: <b>{state?.mode?.execution_mode || '-'}</b> | Live armed: <b>{String(state?.mode?.live_armed ?? false)}</b></div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button disabled={busy} onClick={() => switchMode('paper', false)}>Paper</button>
+          <button disabled={busy} onClick={() => switchMode('live_hyperliquid', false)}>Live (disarmed)</button>
+          <button disabled={busy} onClick={() => switchMode('live_hyperliquid', true)}>Live (armed)</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>Run Decision Cycle</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} placeholder="BTC" />
+          <button disabled={busy} onClick={runCycle}>Run once</button>
+          <button disabled={busy} onClick={refresh}>Refresh</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <h3>System</h3>
+        <pre>{JSON.stringify({ health, mode: state?.mode, paper_positions: state?.paper_positions }, null, 2)}</pre>
+      </div>
+
+      <div className="card">
+        <h3>Recent Cycles</h3>
+        <pre style={{ maxHeight: 420, overflow: 'auto' }}>{JSON.stringify(logs, null, 2)}</pre>
+      </div>
+    </div>
   );
 }
 
