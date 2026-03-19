@@ -206,6 +206,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const strategyLatest = (hstate.latest_by_strategy || {})[key] || {}
   const regime = strategyLatest.regime || latest.regime || {}
   const strategyEntry = (hstate.strategy_registry || {})[key] || {}
+  const effectiveStatus = activeStrategyKeys.includes(key) ? 'active / executing' : prettyStatus(strategyEntry.status || 'shadow')
   const metrics = (hstate.metrics || {}).strategy_overall?.[key] || {}
   const book = (hstate.books || {})[key] || {}
   const positions = (book.positions || (hstate.positions || []).filter(p => (p.strategy_key || activeStrategyKey) === key))
@@ -237,7 +238,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        <strong>Strategy:</strong> {key || '-'} {activeStrategyKeys.includes(key) ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {strategyEntry.status || '-'}
+        <strong>Strategy:</strong> {key || '-'} {activeStrategyKeys.includes(key) ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {effectiveStatus}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
