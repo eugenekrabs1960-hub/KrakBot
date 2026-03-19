@@ -47,9 +47,30 @@ CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE = 2.20
 KRAKEN_USE_LLM_SCAN = False
 
 MODE_CONFIGS = {
-    "btc_15m_conservative": {"label": "BTC/USD 15m conservative (frozen baseline)", "interval": 15, "rr_min": 1.5, "aggressive": False},
-    "btc_15m_conservative_netedge_v1": {"label": "BTC/USD 15m conservative netedge v1 (experimental)", "interval": 15, "rr_min": 1.5, "aggressive": False},
-    "btc_15m_breakout_retest": {"label": "BTC/USD 15m breakout-retest experiment", "interval": 15, "rr_min": 1.35, "aggressive": True},
+    "btc_15m_conservative": {
+        "label": "BTC/USD 15m conservative (frozen baseline)",
+        "interval": 15,
+        "rr_min": 1.5,
+        "aggressive": False,
+        "fee_bps_entry": 40.0,
+        "fee_bps_exit": 40.0,
+    },
+    "btc_15m_conservative_netedge_v1": {
+        "label": "BTC/USD 15m conservative netedge v1 (experimental)",
+        "interval": 15,
+        "rr_min": 1.5,
+        "aggressive": False,
+        "fee_bps_entry": 40.0,
+        "fee_bps_exit": 40.0,
+    },
+    "btc_15m_breakout_retest": {
+        "label": "BTC/USD 15m breakout-retest experiment",
+        "interval": 15,
+        "rr_min": 1.35,
+        "aggressive": True,
+        "fee_bps_entry": 40.0,
+        "fee_bps_exit": 40.0,
+    },
 }
 
 STRATEGY_REGISTRY = {
@@ -107,6 +128,30 @@ def round2(x: float) -> float:
 
 def safe_div(a: float, b: float) -> float:
     return round2(a / b) if b else 0.0
+
+
+def fee_from_notional(notional: float, fee_bps: float) -> float:
+    return round2(float(notional) * (float(fee_bps) / 10000.0))
+
+
+def paper_entry_fee(mode_cfg: dict[str, Any], entry_notional: float) -> dict[str, Any]:
+    fee_bps = float(mode_cfg.get("fee_bps_entry", 40.0))
+    return {
+        "fee": fee_from_notional(entry_notional, fee_bps),
+        "fee_bps": fee_bps,
+        "fee_pct": round2(fee_bps / 100.0),
+        "liquidity": "taker",
+    }
+
+
+def paper_exit_fee(mode_cfg: dict[str, Any], exit_notional: float) -> dict[str, Any]:
+    fee_bps = float(mode_cfg.get("fee_bps_exit", mode_cfg.get("fee_bps_entry", 40.0)))
+    return {
+        "fee": fee_from_notional(exit_notional, fee_bps),
+        "fee_bps": fee_bps,
+        "fee_pct": round2(fee_bps / 100.0),
+        "liquidity": "taker",
+    }
 
 
 def kraken_pro_spot_fee_tier(volume_usd: float | None = None) -> dict[str, float]:
@@ -314,7 +359,7 @@ def load_store() -> None:
             bucket["latest"]["current_regime"] = bucket["current_regime"]
             bucket["latest"]["strategy_metrics"] = bucket["strategy_metrics"]
             bucket["latest"]["performance_by_regime"] = bucket["performance_by_regime"]
-            bucket["latest"]["mode_stats"] = mode_stats(bucket)
+            bucket["latest"]["mode_stats"] = mode_stats(bucket, MODE_CONFIGS.get(mode, {}))
         store["modes"][mode] = bucket
 
 
@@ -613,7 +658,7 @@ async def call_clawbot(scan_payload: dict[str, Any], timeframe: str, rr_min: flo
     return normalize_decision(d, rr_min)
 
 
-def compute_unrealized(p, bid, ask):
+def compute_unrealized(p, bid, ask, mode_cfg):
     qty = p["qty"]
     entry = p["entry_fill_price"]
     if p["side"] == "BUY":
@@ -622,13 +667,15 @@ def compute_unrealized(p, bid, ask):
     else:
         mark = ask
         gross = (entry - mark) * qty
-    exit_liquidity = p.get("exit_liquidity", KRAKEN_EXIT_LIQUIDITY_ASSUMPTION)
-    exit_fee_est = kraken_fill_fee(mark * qty, exit_liquidity).get("fee", 0.0)
+    exit_fee_est_info = paper_exit_fee(mode_cfg, mark * qty)
+    exit_fee_est = exit_fee_est_info.get("fee", 0.0)
     total_fee_est = p.get("entry_fee", 0.0) + exit_fee_est
     net = gross - total_fee_est
     return {
         "gross_unrealized_pnl": round2(gross),
+        "estimated_exit_fee": round2(exit_fee_est),
         "net_unrealized_pnl": round2(net),
+        "unrealized_pnl": round2(net),
         "estimated_total_fees": round2(total_fee_est),
     }
 
@@ -648,7 +695,7 @@ def update_position_excursions(p, candle):
     p["max_adverse_excursion"] = round2(max(p.get("max_adverse_excursion", 0.0), mae))
 
 
-def maybe_close(p, candle, slip):
+def maybe_close(p, candle, slip, mode_cfg):
     side = p["side"]
     if side == "BUY":
         if candle["low"] <= p["stop_loss"]:
@@ -669,8 +716,7 @@ def maybe_close(p, candle, slip):
 
     close_fill_price = round2(price)
     close_notional = close_fill_price * p["qty"]
-    close_liquidity = p.get("exit_liquidity", KRAKEN_EXIT_LIQUIDITY_ASSUMPTION)
-    close_fee_info = kraken_fill_fee(close_notional, close_liquidity)
+    close_fee_info = paper_exit_fee(mode_cfg, close_notional)
     close_fee = close_fee_info.get("fee", 0.0)
     total_fees = p.get("entry_fee", 0.0) + close_fee
     net_realized = gross_realized - total_fees
@@ -682,7 +728,9 @@ def maybe_close(p, candle, slip):
         "close_fill_price": close_fill_price,
         "close_notional": round2(close_notional),
         "close_fee": round2(close_fee),
+        "exit_fee": round2(close_fee),
         "close_fee_pct": close_fee_info.get("fee_pct"),
+        "close_fee_bps": close_fee_info.get("fee_bps"),
         "close_liquidity": close_fee_info.get("liquidity"),
         "total_fees": round2(total_fees),
         "gross_realized_pnl": round2(gross_realized),
@@ -846,7 +894,10 @@ def build_metrics_snapshot(closed, openp):
     gross_realized = round2(sum(x.get("gross_realized_pnl", x["realized_pnl"]) for x in closed))
     unrealized = round2(sum(x.get("unrealized_pnl", 0) for x in openp))
     gross_unrealized = round2(sum(x.get("gross_unrealized_pnl", x.get("unrealized_pnl", 0)) for x in openp))
-    total_fees = round2(sum(x.get("total_fees", x.get("entry_fee", 0.0)) for x in closed) + sum(x.get("entry_fee", 0.0) for x in openp))
+    total_fees = round2(
+        sum(x.get("total_fees", x.get("entry_fee", 0.0)) for x in closed)
+        + sum(x.get("estimated_total_fees", x.get("entry_fee", 0.0)) for x in openp)
+    )
     gross_total_pnl = round2(gross_realized + gross_unrealized)
     expectancy = round2(sum(x["realized_pnl"] for x in closed) / len(closed)) if closed else 0.0
     fee_drag_pct = round2((total_fees / abs(gross_total_pnl) * 100) if gross_total_pnl else 0.0)
@@ -877,8 +928,9 @@ def build_metrics_snapshot(closed, openp):
     }
 
 
-def mode_stats(bucket):
+def mode_stats(bucket, mode_cfg: dict[str, Any] | None = None):
     closed, openp = bucket["closed_trades"], bucket["open_positions"]
+    mode_cfg = mode_cfg or {}
     strategy_metrics = build_metrics_snapshot(closed, openp)
     performance_by_regime = regime_metrics_bucket()
     for regime in REGIME_TYPES:
@@ -907,11 +959,11 @@ def mode_stats(bucket):
         "fee_drag_pct_of_gross_pnl": strategy_metrics["fee_drag_pct"],
         "fee_model": PAPER_FEE_MODEL,
         "fee_assumptions": {
-            "tier_30d_volume_usd": KRAKEN_PRO_BASE_30D_VOLUME_USD,
-            "entry_liquidity": KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION,
-            "entry_fee_pct": kraken_fee_pct(KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION),
-            "exit_liquidity": KRAKEN_EXIT_LIQUIDITY_ASSUMPTION,
-            "exit_fee_pct": kraken_fee_pct(KRAKEN_EXIT_LIQUIDITY_ASSUMPTION),
+            "entry_fee_bps": mode_cfg.get("fee_bps_entry", 40.0),
+            "entry_fee_pct": round2(float(mode_cfg.get("fee_bps_entry", 40.0)) / 100.0),
+            "exit_fee_bps": mode_cfg.get("fee_bps_exit", mode_cfg.get("fee_bps_entry", 40.0)),
+            "exit_fee_pct": round2(float(mode_cfg.get("fee_bps_exit", mode_cfg.get("fee_bps_entry", 40.0))) / 100.0),
+            "liquidity_assumption": "taker",
         },
         "max_drawdown": strategy_metrics["max_drawdown"],
         "strategy_metrics": strategy_metrics,
@@ -993,8 +1045,10 @@ async def execute_mode_scan(mode: str):
             fill = round2((ask * (1 + slip / 100)) if d["side"] == "BUY" else (bid * (1 - slip / 100)))
             qty = 1.0
             entry_notional = fill * qty
-            entry_fee_info = kraken_fill_fee(entry_notional, KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION)
+            entry_fee_info = paper_entry_fee(cfg, entry_notional)
             entry_fee = entry_fee_info["fee"]
+            initial_exit_fee_info = paper_exit_fee(cfg, entry_notional)
+            initial_exit_fee = initial_exit_fee_info["fee"]
             pos = {
                 "mode": mode, "strategy_key": mode, "strategy_family": bucket["strategy_registry_entry"].get("family") if bucket.get("strategy_registry_entry") else None,
                 "market_regime": current_regime.get("regime"), "market_regime_confidence": current_regime.get("confidence"),
@@ -1003,16 +1057,22 @@ async def execute_mode_scan(mode: str):
                 "entry_notional": round2(entry_notional),
                 "entry_fee": round2(entry_fee),
                 "fee_model": PAPER_FEE_MODEL,
-                "fee_schedule": "kraken_pro_spot",
+                "fee_schedule": "mode_fee_bps",
+                "entry_fee_bps": entry_fee_info.get("fee_bps"),
                 "entry_fee_pct": entry_fee_info.get("fee_pct"),
                 "entry_liquidity": entry_fee_info.get("liquidity"),
-                "exit_fee_pct_assumption": kraken_fee_pct(KRAKEN_EXIT_LIQUIDITY_ASSUMPTION),
-                "exit_liquidity": KRAKEN_EXIT_LIQUIDITY_ASSUMPTION,
-                "fee_tier_30d_volume_usd": entry_fee_info.get("tier_30d_volume_usd"),
+                "exit_fee_bps_assumption": initial_exit_fee_info.get("fee_bps"),
+                "exit_fee_pct_assumption": initial_exit_fee_info.get("fee_pct"),
+                "exit_liquidity": initial_exit_fee_info.get("liquidity"),
                 "fee_pct": entry_fee_info.get("fee_pct"),
                 "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
                 "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "close_time": None,
-                "status": "PAPER_TRADE_OPEN", "unrealized_pnl": round2(-entry_fee), "gross_unrealized_pnl": 0, "net_unrealized_pnl": round2(-entry_fee), "realized_pnl": 0,
+                "status": "PAPER_TRADE_OPEN",
+                "gross_unrealized_pnl": 0,
+                "estimated_exit_fee": round2(initial_exit_fee),
+                "net_unrealized_pnl": round2(-(entry_fee + initial_exit_fee)),
+                "unrealized_pnl": round2(-(entry_fee + initial_exit_fee)),
+                "realized_pnl": 0,
                 "max_favorable_excursion": 0.0, "max_adverse_excursion": 0.0,
             }
             bucket["pending_orders"].append({"timestamp": now_iso(), "mode": mode, "signal_id": d["signal_id"], "status": "QUEUED_TO_PAPER_EXECUTOR", "decision": d})
@@ -1026,9 +1086,11 @@ async def execute_mode_scan(mode: str):
                 "decision": d,
                 "entry_fill_price": fill,
                 "entry_fee": round2(entry_fee),
+                "entry_fee_bps": entry_fee_info.get("fee_bps"),
                 "entry_fee_pct": entry_fee_info.get("fee_pct"),
                 "entry_liquidity": entry_fee_info.get("liquidity"),
-                "exit_liquidity_assumption": KRAKEN_EXIT_LIQUIDITY_ASSUMPTION,
+                "exit_fee_bps_assumption": initial_exit_fee_info.get("fee_bps"),
+                "exit_liquidity_assumption": initial_exit_fee_info.get("liquidity"),
                 "fee_model": PAPER_FEE_MODEL,
             })
             bucket["pending_orders"] = [o for o in bucket["pending_orders"] if o.get("signal_id") != d["signal_id"]]
@@ -1041,7 +1103,7 @@ async def execute_mode_scan(mode: str):
     still = []
     for p in bucket["open_positions"]:
         update_position_excursions(p, candle)
-        c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"])
+        c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"], cfg)
         if c:
             bucket["closed_trades"].append(c)
             bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "gross_realized_pnl": c["gross_realized_pnl"], "net_realized_pnl": c["net_realized_pnl"], "realized_pnl": c["realized_pnl"], "total_fees": c["total_fees"]})
@@ -1050,15 +1112,16 @@ async def execute_mode_scan(mode: str):
             d = {"status": "PAPER_TRADE_CLOSED", "side": c["side"], "entry_price": c["entry_fill_price"], "stop_loss": c["stop_loss"], "take_profit": c["take_profit"], "risk_reward_ratio": c["risk_reward_ratio"], "invalidation": c["invalidation"], "regime_label": c["regime_label"], "reason": f"Closed by {c['close_reason']} with realized PnL {c['realized_pnl']}", "signal_id": c["signal_id"]}
             bucket["notify_user"] = {"timestamp": now_iso(), "message": f"{mode}: PAPER_TRADE_CLOSED", "decision": d}
         else:
-            u = compute_unrealized(p, bid, ask)
+            u = compute_unrealized(p, bid, ask, cfg)
             p["gross_unrealized_pnl"] = u["gross_unrealized_pnl"]
+            p["estimated_exit_fee"] = u["estimated_exit_fee"]
             p["net_unrealized_pnl"] = u["net_unrealized_pnl"]
-            p["unrealized_pnl"] = u["net_unrealized_pnl"]
+            p["unrealized_pnl"] = u["unrealized_pnl"]
             p["estimated_total_fees"] = u["estimated_total_fees"]
             still.append(p)
     bucket["open_positions"] = still
 
-    stats = mode_stats(bucket)
+    stats = mode_stats(bucket, cfg)
     shadow_routing = shadow_route_snapshot(current_regime)
     strategy_status = strategy_status_for_display(bucket["strategy_registry_entry"] or {}, bucket["strategy_metrics"], shadow_routing)
     latest = {
@@ -1086,15 +1149,18 @@ async def execute_mode_scan(mode: str):
             "unrealized": round2(sum(p.get("unrealized_pnl", 0) for p in bucket["open_positions"])),
             "gross_realized": round2(sum(t.get("gross_realized_pnl", t.get("realized_pnl", 0)) for t in bucket["closed_trades"])),
             "gross_unrealized": round2(sum(p.get("gross_unrealized_pnl", p.get("unrealized_pnl", 0)) for p in bucket["open_positions"])),
-            "total_fees": round2(sum(t.get("total_fees", t.get("entry_fee", 0.0)) for t in bucket["closed_trades"]) + sum(p.get("entry_fee", 0.0) for p in bucket["open_positions"])),
+            "total_fees": round2(
+                sum(t.get("total_fees", t.get("entry_fee", 0.0)) for t in bucket["closed_trades"])
+                + sum(p.get("estimated_total_fees", p.get("entry_fee", 0.0)) for p in bucket["open_positions"])
+            ),
             "fee_drag_pct_of_gross_pnl": stats["fee_drag_pct_of_gross_pnl"],
             "fee_model": PAPER_FEE_MODEL,
             "fee_assumptions": {
-                "tier_30d_volume_usd": KRAKEN_PRO_BASE_30D_VOLUME_USD,
-                "entry_liquidity": KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION,
-                "entry_fee_pct": kraken_fee_pct(KRAKEN_ENTRY_LIQUIDITY_ASSUMPTION),
-                "exit_liquidity": KRAKEN_EXIT_LIQUIDITY_ASSUMPTION,
-                "exit_fee_pct": kraken_fee_pct(KRAKEN_EXIT_LIQUIDITY_ASSUMPTION),
+                "entry_fee_bps": cfg.get("fee_bps_entry", 40.0),
+                "entry_fee_pct": round2(float(cfg.get("fee_bps_entry", 40.0)) / 100.0),
+                "exit_fee_bps": cfg.get("fee_bps_exit", cfg.get("fee_bps_entry", 40.0)),
+                "exit_fee_pct": round2(float(cfg.get("fee_bps_exit", cfg.get("fee_bps_entry", 40.0))) / 100.0),
+                "liquidity_assumption": "taker",
             },
         },
         "mode_stats": stats,
