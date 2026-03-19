@@ -62,6 +62,46 @@ def _top_candidates_snapshot(db: Session, coins: list[str]) -> list[dict]:
 
 
 
+
+
+def _paper_open_positions_from_exec(exec_rows: list[dict]) -> list[dict]:
+    net: dict[str, float] = {}
+    last_fill: dict[str, dict] = {}
+    for e in exec_rows:
+        if e.get('status') != 'filled':
+            continue
+        sym = e.get('symbol')
+        if not sym:
+            continue
+        px = float(e.get('fill_price') or 100.0)
+        notional = float(e.get('filled_notional_usd') or e.get('notional_usd') or 0.0)
+        qty = (notional / px) if px > 0 else 0.0
+        if e.get('action') == 'short':
+            qty = -qty
+        net[sym] = net.get(sym, 0.0) + qty
+        last_fill[sym] = e
+
+    out = []
+    for sym, qty in net.items():
+        if abs(qty) <= 1e-9:
+            continue
+        f = last_fill.get(sym, {})
+        out.append({
+            'coin': sym.replace('-PERP', ''),
+            'symbol': sym,
+            'side': 'long' if qty > 0 else 'short',
+            'qty': qty,
+            'entry_price': float(f.get('fill_price') or 100.0),
+            'current_price': None,
+            'unrealized_pnl': 0.0,
+            'opened_at': f.get('created_at'),
+            'setup_type': None,
+            'confidence': None,
+            'mode': 'paper',
+        })
+    return out
+
+
 def _derive_recent_trade_rows(exec_rows: list[dict]) -> tuple[list[dict], float, int, int, float | None]:
     # simplistic paper trade derivation: pair opposite-side fills on same symbol in order
     open_by_symbol: dict[str, dict] = {}
@@ -146,7 +186,7 @@ def overview(db: Session = Depends(get_db)):
         k = b.get('downgrade_or_block_reason') or 'unspecified'
         block_reasons[k] = block_reasons.get(k, 0) + 1
 
-    exec_rows_db = db.query(ExecutionRecordDB).order_by(desc(ExecutionRecordDB.created_at)).limit(400).all()
+    exec_rows_db = db.query(ExecutionRecordDB).order_by(desc(ExecutionRecordDB.created_at)).all()
 
     policy_by_packet = {}
     for r in policy_rows:
@@ -171,8 +211,7 @@ def overview(db: Session = Depends(get_db)):
     recent_exec = [r.payload for r in exec_rows_db]
 
     # positions + unrealized
-    pos_raw = broker.get_positions()
-    dec_rows = db.query(DecisionOutputDB).order_by(desc(DecisionOutputDB.generated_at)).limit(400).all()
+    dec_rows = db.query(DecisionOutputDB).order_by(desc(DecisionOutputDB.generated_at)).all()
     latest_decision_by_symbol = {}
     for d in dec_rows:
         p = d.payload or {}
@@ -180,44 +219,53 @@ def overview(db: Session = Depends(get_db)):
         if sym and sym not in latest_decision_by_symbol:
             latest_decision_by_symbol[sym] = p
 
-    last_fill_by_symbol = {}
-    for e in recent_exec:
-        sym = e.get('symbol')
-        if not sym:
-            continue
-        if sym not in last_fill_by_symbol and e.get('status') == 'filled':
-            last_fill_by_symbol[sym] = e
+    if runtime_settings.mode.execution_mode == 'paper':
+        open_positions = _paper_open_positions_from_exec(recent_exec)
+        for op in open_positions:
+            d = latest_decision_by_symbol.get(op['symbol'], {})
+            op['setup_type'] = d.get('setup_type')
+            op['confidence'] = d.get('confidence')
+        unrealized_total = 0.0
+    else:
+        pos_raw = broker.get_positions()
+        last_fill_by_symbol = {}
+        for e in recent_exec:
+            sym = e.get('symbol')
+            if not sym:
+                continue
+            if sym not in last_fill_by_symbol and e.get('status') == 'filled':
+                last_fill_by_symbol[sym] = e
 
-    open_positions = []
-    unrealized_total = 0.0
-    for p in pos_raw:
-        sym = p.get('symbol')
-        qty = float(p.get('qty') or 0.0)
-        coin = sym.replace('-PERP', '')
-        m = fetch_market_snapshot(coin)
-        mark = float(m.get('mark_price') or m.get('last_price') or 0.0)
-        fill = last_fill_by_symbol.get(sym, {})
-        entry = float(p.get('entry_px') or fill.get('fill_price') or 0.0)
-        side = 'long' if qty > 0 else 'short' if qty < 0 else 'flat'
-        unreal = 0.0
-        if entry > 0 and mark > 0:
-            sign = 1 if qty > 0 else -1
-            unreal = sign * ((mark / entry) - 1.0) * float(fill.get('filled_notional_usd') or fill.get('notional_usd') or abs(qty) * mark)
-        unrealized_total += unreal
-        d = latest_decision_by_symbol.get(sym, {})
-        open_positions.append({
-            'coin': coin,
-            'symbol': sym,
-            'side': side,
-            'qty': qty,
-            'entry_price': entry,
-            'current_price': mark,
-            'unrealized_pnl': unreal,
-            'opened_at': fill.get('created_at'),
-            'setup_type': d.get('setup_type'),
-            'confidence': d.get('confidence'),
-            'mode': runtime_settings.mode.execution_mode,
-        })
+        open_positions = []
+        unrealized_total = 0.0
+        for p in pos_raw:
+            sym = p.get('symbol')
+            qty = float(p.get('qty') or 0.0)
+            coin = sym.replace('-PERP', '')
+            m = fetch_market_snapshot(coin)
+            mark = float(m.get('mark_price') or m.get('last_price') or 0.0)
+            fill = last_fill_by_symbol.get(sym, {})
+            entry = float(p.get('entry_px') or fill.get('fill_price') or 0.0)
+            side = 'long' if qty > 0 else 'short' if qty < 0 else 'flat'
+            unreal = 0.0
+            if entry > 0 and mark > 0:
+                sign = 1 if qty > 0 else -1
+                unreal = sign * ((mark / entry) - 1.0) * float(fill.get('filled_notional_usd') or fill.get('notional_usd') or abs(qty) * mark)
+            unrealized_total += unreal
+            d = latest_decision_by_symbol.get(sym, {})
+            open_positions.append({
+                'coin': coin,
+                'symbol': sym,
+                'side': side,
+                'qty': qty,
+                'entry_price': entry,
+                'current_price': mark,
+                'unrealized_pnl': unreal,
+                'opened_at': fill.get('created_at'),
+                'setup_type': d.get('setup_type'),
+                'confidence': d.get('confidence'),
+                'mode': runtime_settings.mode.execution_mode,
+            })
 
     trades_panel, realized_pnl, wins, losses, avg_pnl = _derive_recent_trade_rows(recent_exec[::-1])
 
