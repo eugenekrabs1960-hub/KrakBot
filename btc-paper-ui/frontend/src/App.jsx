@@ -191,7 +191,7 @@ function RuntimePanel({ state }) {
   )
 }
 
-function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
+function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   if (!hstate) return null
   const latest = hstate.latest || {}
   const market = latest.market || {}
@@ -201,10 +201,11 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   const fees = hstate.fee_model || {}
   const feeAssumption = hstate.execution_fee_assumption || {}
   const activeStrategyKey = latest.active_strategy_key || hstate.active_strategy_key
-  const activeStrategy = latest.active_strategy_entry || (hstate.strategy_registry || {})[activeStrategyKey] || {}
-  const metrics = (hstate.metrics || {}).strategy_overall?.[activeStrategyKey] || {}
-  const positions = hstate.positions || []
-  const closedTrades = hstate.closed_trades || []
+  const key = strategyKey || activeStrategyKey
+  const strategyEntry = (hstate.strategy_registry || {})[key] || {}
+  const metrics = (hstate.metrics || {}).strategy_overall?.[key] || {}
+  const positions = (hstate.positions || []).filter(p => (p.strategy_key || activeStrategyKey) === key)
+  const closedTrades = (hstate.closed_trades || []).filter(t => (t.strategy_key || activeStrategyKey) === key)
   const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
   const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
   const freeCollateral = Math.max(0, 1000 - marginUsed)
@@ -221,7 +222,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
   return (
     <div className='panel' style={{ marginBottom: 12, borderColor: '#7e22ce' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Hyperliquid Futures Paper Track</h3>
+        <h3 style={{ margin: 0 }}>Hyperliquid Futures Paper Track · {key}</h3>
         <span className='badge'>PAPER ONLY · NO LIVE EXECUTION</span>
       </div>
       <div style={{ fontSize: 12, marginTop: 6 }}>
@@ -231,7 +232,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        <strong>Active strategy:</strong> {activeStrategyKey || '-'} | <strong>Family:</strong> {activeStrategy.family || '-'} | <strong>Status:</strong> {activeStrategy.status || '-'}
+        <strong>Strategy:</strong> {key || '-'} {key === activeStrategyKey ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {strategyEntry.status || '-'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
@@ -239,7 +240,7 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         <div><strong>Free collateral*</strong><div>{fmt2(freeCollateral)}</div></div>
         <div><strong>Regime</strong><div>{regime.regime || '-'}</div></div>
         <div><strong>Regime confidence</strong><div>{regime.confidence ?? '-'}</div></div>
-        <div><strong>Decision</strong><div>{latest?.decision?.status || '-'}</div></div>
+        <div><strong>Decision</strong><div>{key === activeStrategyKey ? (latest?.decision?.status || '-') : 'SHADOW_TRACKING'}</div></div>
         <div><strong>Maker fee (bps)</strong><div>{fees.maker_bps ?? '-'}</div></div>
         <div><strong>Taker fee (bps)</strong><div>{fees.taker_bps ?? '-'}</div></div>
         <div><strong>Fee source</strong><div>{fees.fee_source || '-'}</div></div>
@@ -274,10 +275,12 @@ function HyperliquidPanel({ hstate, onScan, onMockOpen }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <button onClick={onScan}>Run Hyperliquid Mock Scan</button>
-        <button style={{ marginLeft: 8 }} onClick={onMockOpen}>Mock Open Paper Position</button>
-      </div>
+      {key === activeStrategyKey && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={onScan}>Run Hyperliquid Mock Scan</button>
+          <button style={{ marginLeft: 8 }} onClick={onMockOpen}>Mock Open Paper Position</button>
+        </div>
+      )}
 
       <details style={{ marginTop: 10 }}>
         <summary>Open futures paper trades ({positions.length})</summary>
@@ -697,6 +700,7 @@ export default function App() {
   }
 
   rows.sort((a, b) => (b.expectancy - a.expectancy) || (a.feeDrag - b.feeDrag))
+  const hlPanelKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1'].filter(k => (hyperState?.strategy_registry || {})[k])
 
   return (
     <div className={`wrap theme-${theme}`}>
@@ -717,7 +721,9 @@ export default function App() {
           <SharedChart state={state} theme={theme} />
         </div>
         <div>
-          <HyperliquidPanel hstate={hyperState} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
+          {hlPanelKeys.map((k) => (
+            <HyperliquidPanel key={k} hstate={hyperState} strategyKey={k} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
+          ))}
         </div>
       </div>
       <ScoreboardTable rows={rows} />
