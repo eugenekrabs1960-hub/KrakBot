@@ -44,7 +44,7 @@ def run_decision_cycle(db: Session) -> dict:
             features=f,
             ml_scores=s,
             policy_context={
-                'current_open_positions': len([p for p in broker.get_positions() if abs(float(p.get('qty', 0))) > 1e-9]),
+                'current_open_positions': len([p for p in broker.get_positions() if abs(float(p.get('qty', 0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)]),
                 'max_open_positions': runtime_settings.risk.max_open_positions,
                 'max_notional_per_trade': runtime_settings.risk.max_notional_per_trade,
                 'max_total_notional': runtime_settings.risk.max_total_notional,

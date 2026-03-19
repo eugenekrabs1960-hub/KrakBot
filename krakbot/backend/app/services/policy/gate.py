@@ -10,8 +10,14 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     checks = check_market_quality(packet, settings)
     schema_valid = True
     direction_allowed = (decision.action != "long" or settings.allow_long) and (decision.action != "short" or settings.allow_short)
-    max_positions_ok = packet.policy_context.current_open_positions < risk_profile["max_open_positions"]
-    max_total_ok = True
+
+    # portfolio checks
+    current_open = int(packet.policy_context.current_open_positions)
+    per_trade = float(fixed_small_notional(settings, risk_profile))
+    estimated_total_notional = current_open * per_trade
+
+    max_positions_ok = current_open < risk_profile["max_open_positions"]
+    max_total_ok = estimated_total_notional + per_trade <= risk_profile["max_total_notional"]
 
     final_action = "allow_trade"
     reasons = []
@@ -26,14 +32,34 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     elif not all([checks["freshness_ok"], checks["liquidity_ok"], checks["volatility_ok"]]):
         final_action = "block_market_conditions"
         block_reason = "market_quality"
+        if not checks["freshness_ok"]:
+            reasons.append("freshness_check_failed")
+        if not checks["liquidity_ok"]:
+            reasons.append("liquidity_check_failed")
+        if not checks["volatility_ok"]:
+            reasons.append("volatility_check_failed")
     elif not all([checks["contradiction_ok"], checks["crowdedness_ok"], checks["extension_ok"], checks["cooldown_ok"]]):
         final_action = "block_risk"
         block_reason = "risk_environment"
+        if not checks["contradiction_ok"]:
+            reasons.append("contradiction_check_failed")
+        if not checks["crowdedness_ok"]:
+            reasons.append("crowdedness_check_failed")
+        if not checks["extension_ok"]:
+            reasons.append("extension_check_failed")
+        if not checks["cooldown_ok"]:
+            reasons.append("cooldown_check_failed")
     elif not all([max_positions_ok, max_total_ok, direction_allowed]):
         final_action = "block_risk"
         block_reason = "portfolio_limits"
+        if not max_positions_ok:
+            reasons.append("max_open_positions_failed")
+        if not max_total_ok:
+            reasons.append("max_total_notional_failed")
+        if not direction_allowed:
+            reasons.append("direction_not_allowed")
 
-    notional = fixed_small_notional(settings, risk_profile) if final_action == "allow_trade" else None
+    notional = per_trade if final_action == "allow_trade" else None
     return PolicyDecision(
         policy_decision_id=f"pol_{uuid.uuid4().hex[:12]}",
         packet_id=packet.packet_id,

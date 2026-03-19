@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     no_pyramiding: bool = True
     max_open_positions: int = 3
     max_total_notional: float = 300.0
+    paper_material_position_qty_threshold: float = 0.75
     leverage_cap: float = 3.0
     allow_long: bool = True
     allow_short: bool = True
