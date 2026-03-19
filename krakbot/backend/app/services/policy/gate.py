@@ -7,7 +7,7 @@ from app.services.policy.sizing import fixed_small_notional
 
 
 def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> PolicyDecision:
-    checks = check_market_quality(packet, settings)
+    checks = check_market_quality(packet, settings, mode_settings.execution_mode)
     schema_valid = True
     direction_allowed = (decision.action != "long" or settings.allow_long) and (decision.action != "short" or settings.allow_short)
 

@@ -1,7 +1,9 @@
-def check_market_quality(packet, settings):
-    # tuned paper thresholds (modest loosening)
+def check_market_quality(packet, settings, execution_mode: str = "paper"):
+    # freshness threshold currently unified across modes; paper-only experiments are run as temporary branches/tests
+    freshness_threshold = settings.min_freshness_score
+
     return {
-        "freshness_ok": packet.features.quality.freshness_score >= settings.min_freshness_score,
+        "freshness_ok": packet.features.quality.freshness_score >= freshness_threshold,
         "liquidity_ok": packet.features.quality.liquidity_score >= settings.min_liquidity_score,
         "volatility_ok": packet.features.volatility.rv_1h <= settings.max_volatility_rv_1h,
         "contradiction_ok": packet.ml_scores.contradiction_score <= settings.max_contradiction,
