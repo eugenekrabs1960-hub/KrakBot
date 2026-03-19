@@ -32,3 +32,6 @@ frontend/*.tsbuildinfo
 
 # Generated model/dataset artifacts
 backend/data/*
+
+# Vite cache
+frontend/.vite/
