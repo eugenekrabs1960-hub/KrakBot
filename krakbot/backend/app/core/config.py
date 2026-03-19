@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     prompt_version: str = "local_analyst_v1"
     repair_enabled: bool = True
 
+
+    hyperliquid_account_address: str = ""
+    hyperliquid_order_relay_url: str = ""
+    hyperliquid_order_relay_token: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

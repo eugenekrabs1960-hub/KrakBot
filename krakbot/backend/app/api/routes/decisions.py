@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.config import settings as cfg
 from app.core.profiles import PAPER_V1, LIVE_V1
 from app.services.ingest.hyperliquid_market import fetch_market_snapshot
+from app.services.ingest.hyperliquid_account import fetch_account_snapshot
 from app.services.features.market_features import compute_market_features
 from app.services.features.ml_scores import compute_ml_scores
 from app.services.features.packet_builder import build_feature_packet
@@ -26,6 +27,7 @@ def run_cycle(db: Session = Depends(get_db)):
     mode = runtime_settings.mode.execution_mode
     risk_profile = PAPER_V1 if mode == 'paper' else LIVE_V1
 
+    account = fetch_account_snapshot()
     cands = []
     for coin in runtime_settings.universe.tracked_coins:
         m = fetch_market_snapshot(coin)
@@ -46,7 +48,7 @@ def run_cycle(db: Session = Depends(get_db)):
             features=f,
             ml_scores=s,
             policy_context={
-                'current_open_positions': 0,
+                'current_open_positions': len([p for p in broker.get_positions() if abs(float(p.get('qty',0))) > 1e-9]),
                 'max_open_positions': runtime_settings.risk.max_open_positions,
                 'max_notional_per_trade': runtime_settings.risk.max_notional_per_trade,
                 'max_total_notional': runtime_settings.risk.max_total_notional,
@@ -82,6 +84,7 @@ def run_cycle(db: Session = Depends(get_db)):
             'decision': decision.model_dump(),
             'policy': policy.model_dump(),
             'execution': execution_record,
+            'account': account,
         })
     return {'items': outputs}
 
