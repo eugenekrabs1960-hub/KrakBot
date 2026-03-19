@@ -201,6 +201,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const fees = hstate.fee_model || {}
   const feeAssumption = hstate.execution_fee_assumption || {}
   const activeStrategyKey = latest.active_strategy_key || hstate.active_strategy_key
+  const activeStrategyKeys = latest.active_strategy_keys || hstate.active_strategy_keys || (activeStrategyKey ? [activeStrategyKey] : [])
   const key = strategyKey || activeStrategyKey
   const strategyLatest = (hstate.latest_by_strategy || {})[key] || {}
   const regime = strategyLatest.regime || latest.regime || {}
@@ -236,7 +237,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        <strong>Strategy:</strong> {key || '-'} {key === activeStrategyKey ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {strategyEntry.status || '-'}
+        <strong>Strategy:</strong> {key || '-'} {activeStrategyKeys.includes(key) ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {strategyEntry.status || '-'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
@@ -244,7 +245,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <div><strong>Free collateral*</strong><div>{fmt2(freeCollateral)}</div></div>
         <div><strong>Regime</strong><div>{regime.regime || '-'}</div></div>
         <div><strong>Regime confidence</strong><div>{regime.confidence ?? '-'}</div></div>
-        <div><strong>Decision</strong><div>{strategyLatest?.decision?.status || (key === activeStrategyKey ? (latest?.decision?.status || '-') : 'SHADOW_TRACKING')}</div></div>
+        <div><strong>Decision</strong><div>{strategyLatest?.decision?.status || (activeStrategyKeys.includes(key) ? (latest?.decision?.status || '-') : 'SHADOW_TRACKING')}</div></div>
         <div><strong>Maker fee (bps)</strong><div>{fees.maker_bps ?? '-'}</div></div>
         <div><strong>Taker fee (bps)</strong><div>{fees.taker_bps ?? '-'}</div></div>
         <div><strong>Fee source</strong><div>{fees.fee_source || '-'}</div></div>
@@ -289,7 +290,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         </div>
       </div>
 
-      {key === activeStrategyKey && (
+      {activeStrategyKeys.includes(key) && (
         <div style={{ marginTop: 10 }}>
           <button onClick={onScan}>Run Hyperliquid Mock Scan</button>
           <button style={{ marginLeft: 8 }} onClick={onMockOpen}>Mock Open Paper Position</button>
@@ -686,6 +687,7 @@ export default function App() {
   }
 
   const hKey = hyperState?.active_strategy_key
+  const hActiveKeys = hyperState?.active_strategy_keys || (hKey ? [hKey] : [])
   const hOverall = (hyperState?.metrics || {}).strategy_overall || {}
   const hRegistry = hyperState?.strategy_registry || {}
   const hKeys = Array.from(new Set([...Object.keys(hRegistry), ...Object.keys(hOverall)]))
@@ -700,7 +702,7 @@ export default function App() {
     const expectancy = Number(hm.expectancy_net ?? 0)
     const feeDrag = Number(hm.fee_drag_pct ?? 0)
     const score = 50 + (expectancy * 120) - (feeDrag * 0.2) + (best?.ex > 0 ? 8 : -8)
-    const status = sk === hKey ? 'active' : prettyStatus(hRegistry?.[sk]?.status || 'shadow')
+    const status = hActiveKeys.includes(sk) ? 'active' : prettyStatus(hRegistry?.[sk]?.status || 'shadow')
     rows.push({
       key: sk,
       family: hRegistry?.[sk]?.family || 'trend_follow',
