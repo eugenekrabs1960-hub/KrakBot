@@ -666,29 +666,33 @@ export default function App() {
   }
 
   const hKey = hyperState?.active_strategy_key
-  const hMetrics = (hyperState?.metrics || {}).strategy_overall?.[hKey]
-  if (hKey && hMetrics) {
+  const hOverall = (hyperState?.metrics || {}).strategy_overall || {}
+  const hRegistry = hyperState?.strategy_registry || {}
+  const hKeys = Array.from(new Set([...Object.keys(hRegistry), ...Object.keys(hOverall)]))
+  for (const sk of hKeys) {
+    const hm = hOverall?.[sk] || {}
     const byReg = (hyperState?.metrics || {}).strategy_regime || {}
     const regimeRows = Object.entries(byReg)
-      .filter(([rk]) => rk.startsWith(`${hKey}|`))
+      .filter(([rk]) => rk.startsWith(`${sk}|`))
       .map(([rk, v]) => ({ regime: rk.split('|')[1], ex: Number(v?.expectancy_net ?? 0), sample: Number(v?.sample_closed ?? 0) }))
       .sort((a, b) => b.ex - a.ex)
     const best = regimeRows[0]
-    const expectancy = Number(hMetrics.expectancy_net ?? 0)
-    const feeDrag = Number(hMetrics.fee_drag_pct ?? 0)
+    const expectancy = Number(hm.expectancy_net ?? 0)
+    const feeDrag = Number(hm.fee_drag_pct ?? 0)
     const score = 50 + (expectancy * 120) - (feeDrag * 0.2) + (best?.ex > 0 ? 8 : -8)
+    const status = sk === hKey ? 'active' : prettyStatus(hRegistry?.[sk]?.status || 'shadow')
     rows.push({
-      key: hKey,
-      family: hyperState?.strategy_registry?.[hKey]?.family || 'trend_follow',
+      key: sk,
+      family: hRegistry?.[sk]?.family || 'trend_follow',
       symbol: hyperState?.symbol || 'ETH-PERP',
-      status: 'active',
+      status,
       bestRegime: best?.regime || '-',
       expectancy,
       feeDrag,
-      netRealized: Number(hMetrics.net_realized_pnl ?? 0),
+      netRealized: Number(hm.net_realized_pnl ?? 0),
       score,
-      closed: Number(hMetrics.sample_closed ?? 0),
-      confidence: strategyConfidence({ closed: Number(hMetrics.sample_closed ?? 0), bestRegimeSample: Number(best?.sample ?? 0), expectancy, feeDrag }),
+      closed: Number(hm.sample_closed ?? 0),
+      confidence: strategyConfidence({ closed: Number(hm.sample_closed ?? 0), bestRegimeSample: Number(best?.sample ?? 0), expectancy, feeDrag }),
     })
   }
 
