@@ -39,11 +39,22 @@ class QwenLocalAdapter(LocalModelAdapter):
             liq >= 0.30
         )
 
+        # strategy identity tuning: mean-reversion-first, trend continuation stricter
+        trend_continuation_strong = (
+            abs(m) >= 0.60 and
+            abs(align) >= 0.74 and
+            trend_q >= 0.72 and
+            contradiction <= 0.32 and
+            extension <= 0.48 and
+            freshness >= 0.48 and
+            fragility <= 0.38
+        )
+
         if action == "no_trade":
             setup_type = "unclear"
         elif breakout_strong:
             setup_type = "breakout_confirmation"
-        elif abs(align) > 0.60 and trend_q > 0.55:
+        elif trend_continuation_strong:
             setup_type = "trend_continuation"
         else:
             setup_type = "mean_reversion"
@@ -202,7 +213,7 @@ class QwenLocalAdapter(LocalModelAdapter):
             evidence_used=evidence_used,
             evidence_ignored=["optional_signals.news_summary", "optional_signals.social_summary"],
             alternatives_considered=[
-                {"action": "no_trade", "reason": "if edge is weak after risk adjustment"},
+                {"action": "no_trade", "reason": "if edge is weak or continuation quality is insufficient"},
                 {"action": "long" if action == "short" else "short", "reason": "if momentum flips with better setup quality"},
             ],
             execution_preference={
