@@ -16,6 +16,8 @@ def _snapshot_numeric(features: dict, ml_scores: dict) -> dict[str, float]:
         "attention_score": float(ml_scores["attention_score"]),
         "opportunity_score": float(ml_scores["opportunity_score"]),
         "tradability_score": float(ml_scores["tradability_score"]),
+        "trade_quality_prior": float(ml_scores["trade_quality_prior"]),
+        "regime_compatibility_score": float(ml_scores["regime_compatibility_score"]),
         "contradiction_score": float(ml_scores["contradiction_score"]),
         "extension_score": float(ml_scores["extension_score"]),
     }
@@ -48,6 +50,10 @@ def _build_change_summary(coin: str, features: dict, ml_scores: dict) -> dict:
         risks.append("liquidity_dropped_below_threshold")
     if current["rv_1h"] > 0.85 and prev.get("rv_1h", 0) <= 0.85:
         risks.append("volatility_regime_heating_up")
+    if current["trade_quality_prior"] < 0.40 and prev.get("trade_quality_prior", 1) >= 0.40:
+        risks.append("asymmetry_quality_degraded")
+    if current["regime_compatibility_score"] < 0.45 and prev.get("regime_compatibility_score", 1) >= 0.45:
+        risks.append("regime_compatibility_degraded")
 
     return {
         "largest_feature_changes": largest,
