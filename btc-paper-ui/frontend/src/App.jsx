@@ -197,16 +197,18 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const latest = hstate.latest || {}
   const market = latest.market || {}
   const candleCount = (latest.candles || []).length
-  const regime = latest.regime || {}
   const risk = hstate.risk_limits || {}
   const fees = hstate.fee_model || {}
   const feeAssumption = hstate.execution_fee_assumption || {}
   const activeStrategyKey = latest.active_strategy_key || hstate.active_strategy_key
   const key = strategyKey || activeStrategyKey
+  const strategyLatest = (hstate.latest_by_strategy || {})[key] || {}
+  const regime = strategyLatest.regime || latest.regime || {}
   const strategyEntry = (hstate.strategy_registry || {})[key] || {}
   const metrics = (hstate.metrics || {}).strategy_overall?.[key] || {}
-  const positions = (hstate.positions || []).filter(p => (p.strategy_key || activeStrategyKey) === key)
-  const closedTrades = (hstate.closed_trades || []).filter(t => (t.strategy_key || activeStrategyKey) === key)
+  const book = (hstate.books || {})[key] || {}
+  const positions = (book.positions || (hstate.positions || []).filter(p => (p.strategy_key || activeStrategyKey) === key))
+  const closedTrades = (book.closed_trades || (hstate.closed_trades || []).filter(t => (t.strategy_key || activeStrategyKey) === key))
   const exposure = positions.reduce((s, p) => s + Number(p.entry_price || 0) * Number(p.qty || 0), 0)
   const marginUsed = positions.reduce((s, p) => s + Number(p.margin_used || 0), 0)
   const freeCollateral = Math.max(0, 1000 - marginUsed)
@@ -242,7 +244,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <div><strong>Free collateral*</strong><div>{fmt2(freeCollateral)}</div></div>
         <div><strong>Regime</strong><div>{regime.regime || '-'}</div></div>
         <div><strong>Regime confidence</strong><div>{regime.confidence ?? '-'}</div></div>
-        <div><strong>Decision</strong><div>{key === activeStrategyKey ? (latest?.decision?.status || '-') : 'SHADOW_TRACKING'}</div></div>
+        <div><strong>Decision</strong><div>{strategyLatest?.decision?.status || (key === activeStrategyKey ? (latest?.decision?.status || '-') : 'SHADOW_TRACKING')}</div></div>
         <div><strong>Maker fee (bps)</strong><div>{fees.maker_bps ?? '-'}</div></div>
         <div><strong>Taker fee (bps)</strong><div>{fees.taker_bps ?? '-'}</div></div>
         <div><strong>Fee source</strong><div>{fees.fee_source || '-'}</div></div>
