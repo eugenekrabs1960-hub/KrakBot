@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -12,6 +13,25 @@ from app.services.models.adapter_base import LocalModelAdapter
 
 
 class QwenLocalAdapter(LocalModelAdapter):
+    _probe_ok: bool | None = None
+    _probe_ts: float = 0.0
+    _probe_ttl_sec: float = 10.0
+
+    def _model_available(self) -> bool:
+        now = time.time()
+        if self._probe_ok is not None and (now - self._probe_ts) < self._probe_ttl_sec:
+            return self._probe_ok
+        headers = {}
+        if settings.local_model_api_key:
+            headers['Authorization'] = f"Bearer {settings.local_model_api_key}"
+        try:
+            r = requests.get(f"{settings.local_model_base_url.rstrip('/')}/v1/models", headers=headers, timeout=1.2)
+            self._probe_ok = r.status_code == 200
+        except Exception:
+            self._probe_ok = False
+        self._probe_ts = now
+        return bool(self._probe_ok)
+
     def _build_messages(self, packet: FeaturePacket) -> list[dict]:
         system = (
             "You are a disciplined local trading analyst. Use only packet fields. "
@@ -44,12 +64,10 @@ class QwenLocalAdapter(LocalModelAdapter):
             text = text.strip("`")
             if text.lower().startswith("json"):
                 text = text[4:].strip()
-        # try direct parse first
         try:
             return json.loads(text)
         except Exception:
             pass
-        # fallback: first {...} block
         l = text.find("{")
         r = text.rfind("}")
         if l >= 0 and r > l:
@@ -90,6 +108,8 @@ class QwenLocalAdapter(LocalModelAdapter):
         )
 
     def analyze(self, packet: FeaturePacket) -> DecisionOutput:
+        if not self._model_available():
+            return self._deterministic_fallback(packet)
         try:
             messages = self._build_messages(packet)
             headers = {"content-type": "application/json"}

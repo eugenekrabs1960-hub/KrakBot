@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,14 +26,14 @@ class Settings(BaseSettings):
     allow_long: bool = True
     allow_short: bool = True
 
-    # policy thresholds (paper tuning pass: modest loosening)
+    # policy thresholds
     max_spread_bps: float = 12.0
-    min_liquidity_score: float = 0.20  # was 0.25
-    min_freshness_score: float = 0.30  # new; was hardcoded 0.40
-    max_volatility_rv_1h: float = 0.95  # was hardcoded 0.90
-    max_contradiction: float = 0.85  # was 0.70
-    max_crowdedness: float = 0.85  # was 0.80
-    max_extension: float = 0.90  # was 0.85
+    min_liquidity_score: float = 0.20
+    min_freshness_score: float = 0.30
+    max_volatility_rv_1h: float = 0.95
+    max_contradiction: float = 0.85
+    max_crowdedness: float = 0.85
+    max_extension: float = 0.90
     max_fragility: float = 0.85
     freshness_threshold_sec: int = 90
 
@@ -44,8 +45,9 @@ class Settings(BaseSettings):
     repair_enabled: bool = True
 
     local_model_base_url: str = "http://10.50.0.30:8000"
-    local_model_api_key: str = ""
-    local_model_timeout_sec: int = 20
+    # alias supports existing env naming in compose
+    local_model_api_key: str = Field(default="", validation_alias="QWEN_LOCAL_API_KEY")
+    local_model_timeout_sec: int = 2
 
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
