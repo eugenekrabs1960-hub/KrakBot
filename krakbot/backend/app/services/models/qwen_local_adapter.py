@@ -24,6 +24,12 @@ class QwenLocalAdapter(LocalModelAdapter):
         align = packet.features.trend.trend_alignment_score
         trend_q = packet.features.trend.trend_quality_score
 
+        wallet = packet.optional_signals.wallet_summary if packet.optional_signals else None
+        wallet_bias = str((wallet or {}).get("net_flow_bias", "neutral"))
+        wallet_conviction = float((wallet or {}).get("wallet_conviction_score", 0.0) or 0.0)
+        wallet_agreement = float((wallet or {}).get("wallet_agreement_score", 0.0) or 0.0)
+        wallet_chasing = float((wallet or {}).get("wallet_chasing_risk", 0.0) or 0.0)
+
         # base directional decision unchanged
         action = "long" if m > 0.2 else ("short" if m < -0.2 else "no_trade")
 
@@ -69,6 +75,16 @@ class QwenLocalAdapter(LocalModelAdapter):
         )
         score = edge - 0.30 * risk
 
+        # wallet visibility (read-only contextual influence): affects confidence semantics only
+        if wallet is not None:
+            align_wallet = (action == "long" and wallet_bias == "bullish") or (action == "short" and wallet_bias == "bearish")
+            oppose_wallet = (action == "long" and wallet_bias == "bearish") or (action == "short" and wallet_bias == "bullish")
+            if align_wallet:
+                score += 0.05 * wallet_conviction * wallet_agreement
+            elif oppose_wallet:
+                score -= 0.06 * wallet_conviction * wallet_agreement
+            score -= 0.03 * wallet_chasing
+
         clean = (contradiction <= 0.35 and extension <= 0.50 and freshness >= 0.55 and fragility <= 0.40 and t >= 0.50)
         tradable = (contradiction <= 0.70 and extension <= 0.80 and freshness >= 0.30 and t >= 0.30)
 
@@ -99,10 +115,14 @@ class QwenLocalAdapter(LocalModelAdapter):
 
         uncertainty = min(0.95, max(0.05, 1.0 - conf + 0.20 * risk))
 
+        wallet_txt = ""
+        if wallet is not None:
+            wallet_txt = f", wallet_bias={wallet_bias}, wallet_conv={wallet_conviction:.2f}, wallet_agree={wallet_agreement:.2f}, wallet_chasing={wallet_chasing:.2f}"
+
         thesis = (
             f"{packet.coin} {action} on {packet.decision_context.primary_horizon}: "
             f"mom={m:.2f}, tradability={t:.2f}, contradiction={contradiction:.2f}, "
-            f"extension={extension:.2f}, freshness={freshness:.2f}, fragility={fragility:.2f}."
+            f"extension={extension:.2f}, freshness={freshness:.2f}, fragility={fragility:.2f}{wallet_txt}."
         )
 
         reasons = [
@@ -131,6 +151,14 @@ class QwenLocalAdapter(LocalModelAdapter):
                     "label": "trend_quality",
                     "strength": trend_q,
                     "explanation": f"trend_quality_score={trend_q:.2f}",
+                }
+            )
+        if wallet is not None:
+            reasons.append(
+                {
+                    "label": "wallet_flow_context",
+                    "strength": min(1.0, max(0.0, wallet_conviction)),
+                    "explanation": f"wallet_bias={wallet_bias}, agreement={wallet_agreement:.2f}, chasing={wallet_chasing:.2f}",
                 }
             )
 
@@ -190,6 +218,13 @@ class QwenLocalAdapter(LocalModelAdapter):
             "features.trend.trend_quality_score",
             "features.structure.breakout_state",
         ]
+        if wallet is not None:
+            evidence_used.extend([
+                "optional_signals.wallet_summary.net_flow_bias",
+                "optional_signals.wallet_summary.wallet_conviction_score",
+                "optional_signals.wallet_summary.wallet_agreement_score",
+                "optional_signals.wallet_summary.wallet_chasing_risk",
+            ])
 
         return DecisionOutput(
             packet_id=packet.packet_id,
