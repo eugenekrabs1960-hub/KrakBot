@@ -6,6 +6,7 @@ from typing import Any
 from pathlib import Path
 import json
 import random
+import shutil
 
 import httpx
 
@@ -304,6 +305,55 @@ class HyperliquidFuturesPaperTrack:
         self._load_state()
         self._reconcile_registry_and_metrics()
 
+    def _backup_state_file(self, reason: str = 'pre-save') -> None:
+        try:
+            if not self.state_file.exists():
+                return
+            ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+            bak = self.state_file.with_name(f"{self.state_file.stem}.{reason}.{ts}.bak.json")
+            if bak.exists():
+                return
+            shutil.copy2(self.state_file, bak)
+        except Exception:
+            pass
+
+    def _legacy_migration_needed(self, books: dict[str, Any] | None, data: dict[str, Any]) -> bool:
+        legacy_positions = data.get('positions') or []
+        legacy_closed = data.get('closed_trades') or []
+        if not legacy_positions and not legacy_closed:
+            return False
+        if not isinstance(books, dict) or not books:
+            return True
+        book_pos = sum(len((b or {}).get('positions', []) or []) for b in books.values() if isinstance(b, dict))
+        book_closed = sum(len((b or {}).get('closed_trades', []) or []) for b in books.values() if isinstance(b, dict))
+        return (book_pos == 0 and len(legacy_positions) > 0) or (book_closed == 0 and len(legacy_closed) > 0)
+
+    def _migrate_legacy_into_books(self, books: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        migrated = {k: (v if isinstance(v, dict) else blank_book()) for k, v in books.items()}
+        for p in data.get('positions', []) or []:
+            sk = p.get('strategy_key') or 'hl_15m_trend_follow'
+            migrated.setdefault(sk, blank_book())['positions'].append(p)
+        for t in data.get('closed_trades', []) or []:
+            sk = t.get('strategy_key') or 'hl_15m_trend_follow'
+            migrated.setdefault(sk, blank_book())['closed_trades'].append(t)
+        base = migrated.setdefault('hl_15m_trend_follow', blank_book())
+        if not base.get('history'):
+            base['history'] = list(data.get('history', []) or [])[-1000:]
+        for sk, b in migrated.items():
+            ids = list(b.get('executed_signal_ids', []) or [])
+            if not ids:
+                for p in b.get('positions', []) or []:
+                    if p.get('signal_id'):
+                        ids.append(p['signal_id'])
+                for t in b.get('closed_trades', []) or []:
+                    if t.get('signal_id'):
+                        ids.append(t['signal_id'])
+            b['executed_signal_ids'] = ids[-1000:]
+            b['positions'] = (b.get('positions') or [])[-300:]
+            b['closed_trades'] = (b.get('closed_trades') or [])[-1000:]
+            b['history'] = (b.get('history') or [])[-1000:]
+        return migrated
+
     def _persist_state(self) -> None:
         try:
             STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -327,6 +377,7 @@ class HyperliquidFuturesPaperTrack:
                 'metrics': self.state.get('metrics'),
                 'learning': self.state.get('learning'),
             }
+            self._backup_state_file('pre-save')
             tmp = self.state_file.with_suffix('.tmp')
             tmp.write_text(json.dumps(snapshot, separators=(',', ':')), encoding='utf-8')
             tmp.replace(self.state_file)
@@ -359,28 +410,12 @@ class HyperliquidFuturesPaperTrack:
                     merged_registry[k] = {**merged_registry.get(k, {}), **v}
         self.state['strategy_registry'] = merged_registry
 
-        # Migration: if books are missing, split existing legacy arrays into per-strategy books.
-        books = self.state.get('books') if isinstance(self.state.get('books'), dict) else None
-        if not books:
-            books = {k: blank_book() for k in merged_registry.keys()}
-            for p in self.state.get('positions', []) or []:
-                sk = p.get('strategy_key') or 'hl_15m_trend_follow'
-                books.setdefault(sk, blank_book())['positions'].append(p)
-            for t in self.state.get('closed_trades', []) or []:
-                sk = t.get('strategy_key') or 'hl_15m_trend_follow'
-                books.setdefault(sk, blank_book())['closed_trades'].append(t)
-            # Keep legacy history intact under baseline if strategy key not explicit.
-            books.setdefault('hl_15m_trend_follow', blank_book())['history'] = list(self.state.get('history', []) or [])[-1000:]
-            for sk, b in books.items():
-                ids = []
-                for p in b.get('positions', []):
-                    if p.get('signal_id'):
-                        ids.append(p['signal_id'])
-                for t in b.get('closed_trades', []):
-                    if t.get('signal_id'):
-                        ids.append(t['signal_id'])
-                b['executed_signal_ids'] = ids[-1000:]
-            self.state['books'] = books
+        # Migration: move legacy top-level arrays into per-strategy books when needed.
+        books = self.state.get('books') if isinstance(self.state.get('books'), dict) else {}
+        if self._legacy_migration_needed(books, data):
+            self._backup_state_file('pre-migration')
+            books = self._migrate_legacy_into_books(books or {k: blank_book() for k in merged_registry.keys()}, data)
+        self.state['books'] = books
 
     def _reconcile_registry_and_metrics(self) -> None:
         registry = self.state.get('strategy_registry') or {}
