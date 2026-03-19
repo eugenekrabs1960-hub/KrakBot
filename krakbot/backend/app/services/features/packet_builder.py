@@ -61,7 +61,7 @@ def _build_change_summary(coin: str, features: dict, ml_scores: dict) -> dict:
     }
 
 
-def build_feature_packet(coin: str, mode: str, market_snapshot: dict, features: dict, ml_scores: dict, policy_context: dict) -> FeaturePacket:
+def build_feature_packet(coin: str, mode: str, market_snapshot: dict, features: dict, ml_scores: dict, policy_context: dict, wallet_summary: dict | None = None) -> FeaturePacket:
     return FeaturePacket(
         packet_id=f"pkt_{uuid.uuid4().hex[:12]}",
         generated_at=datetime.now(timezone.utc),
@@ -77,6 +77,6 @@ def build_feature_packet(coin: str, mode: str, market_snapshot: dict, features: 
         features=features,
         ml_scores=ml_scores,
         change_summary=_build_change_summary(coin, features, ml_scores),
-        optional_signals={"wallet_summary": None, "news_summary": None, "social_summary": None},
+        optional_signals={"wallet_summary": wallet_summary, "news_summary": None, "social_summary": None},
         policy_context=policy_context,
     )

@@ -18,3 +18,5 @@ export const getLoopsStatus = () => fetch(`${API}/loops/status`).then(r => r.jso
 export const getLoopsHistory = (limit = 20) => fetch(`${API}/loops/history?limit=${limit}`).then(r => r.json());
 export const getReconciliationHistory = (limit = 20) => fetch(`${API}/reconciliation/history?limit=${limit}`).then(r => r.json());
 export const getRelayHistory = (limit = 20) => fetch(`${API}/execution/relay/history?limit=${limit}`).then(r => r.json());
+
+export const getWalletSummary = () => fetch(`${API}/wallets/summary`).then(r => r.json());

@@ -119,3 +119,26 @@ class ReconciliationRunDB(Base):
     status: Mapped[str] = mapped_column(String)
     payload: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class WalletEventDB(Base):
+    __tablename__ = "wallet_events"
+    event_id: Mapped[str] = mapped_column(String, primary_key=True)
+    coin: Mapped[str] = mapped_column(String, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    wallet_address: Mapped[str] = mapped_column(String, index=True)
+    side: Mapped[str] = mapped_column(String)
+    notional_usd: Mapped[float] = mapped_column(Float)
+    event_ts: Mapped[datetime] = mapped_column(DateTime)
+    bucket_ts: Mapped[int] = mapped_column(Integer, index=True)
+    source: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class WalletSummaryDB(Base):
+    __tablename__ = "wallet_summaries"
+    summary_id: Mapped[str] = mapped_column(String, primary_key=True)
+    coin: Mapped[str] = mapped_column(String, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    payload: Mapped[dict] = mapped_column(JSON)

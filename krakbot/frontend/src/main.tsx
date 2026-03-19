@@ -18,6 +18,7 @@ import {
   getLoopsHistory,
   getReconciliationHistory,
   getRelayHistory,
+  getWalletSummary,
 } from './api/client';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -33,9 +34,10 @@ function App() {
   const [loopsHistory, setLoopsHistory] = useState<any>(null);
   const [reconHistory, setReconHistory] = useState<any>(null);
   const [relayHistory, setRelayHistory] = useState<any>(null);
+  const [walletSummary, setWalletSummary] = useState<any>(null);
 
   const refresh = async () => {
-    const [o, c, p, d, s, ls, lh, rh, relh] = await Promise.all([
+    const [o, c, p, d, s, ls, lh, rh, relh, ws] = await Promise.all([
       getOverview(),
       getCandidates(),
       getPositions(),
@@ -45,6 +47,7 @@ function App() {
       getLoopsHistory(20),
       getReconciliationHistory(20),
       getRelayHistory(20),
+      getWalletSummary(),
     ]);
     setOverview(o);
     setCandidates(c);
@@ -55,6 +58,7 @@ function App() {
     setLoopsHistory(lh);
     setReconHistory(rh);
     setRelayHistory(relh);
+    setWalletSummary(ws);
   };
 
   useEffect(() => {
@@ -70,6 +74,7 @@ function App() {
           loopsHistory={loopsHistory}
           reconHistory={reconHistory}
           relayHistory={relayHistory}
+          walletSummary={walletSummary}
           onRun={async () => {
             await runCycle();
             await refresh();

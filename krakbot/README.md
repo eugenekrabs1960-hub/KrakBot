@@ -59,4 +59,5 @@ npm run dev
 
 
 ## Ops
+- Wallet signal normalization: `docs/wallet-signal-normalization.md`
 - Operator runbook: `docs/operator-runbook.md`

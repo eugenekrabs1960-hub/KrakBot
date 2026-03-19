@@ -10,12 +10,16 @@ function Box({ title, children }: any) {
   );
 }
 
-export default function Overview({ data, loopsStatus, loopsHistory, reconHistory, relayHistory, onRun }: any) {
+export default function Overview({ data, loopsStatus, loopsHistory, reconHistory, relayHistory, walletSummary, onRun }: any) {
   return (
     <div>
       <h2>Overview</h2>
       <ModeBadge mode={data?.mode?.execution_mode || 'paper'} armed={!!data?.mode?.live_armed} />
       <div style={{ marginTop: 10 }}><button onClick={onRun}>Run Decision Cycle</button></div>
+
+      <Box title="Wallet Intelligence (Read-Only)">
+        <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(walletSummary?.items || data?.wallet_summaries || [], null, 2)}</pre>
+      </Box>
 
       <Box title="Loop Health / History">
         <div style={{ marginBottom: 8 }}>

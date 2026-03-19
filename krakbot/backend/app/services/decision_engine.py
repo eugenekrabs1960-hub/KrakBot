@@ -17,6 +17,7 @@ from app.services.models.analyst_runner import analyst_runner
 from app.services.policy.gate import evaluate_policy
 from app.services.execution.broker_router import get_broker
 from app.services.journal.writer import write_cycle
+from app.services.wallet_signals import ingest_wallet_events_for_coin, generate_wallet_summary_for_coin
 
 
 def run_decision_cycle(db: Session) -> dict:
@@ -27,16 +28,18 @@ def run_decision_cycle(db: Session) -> dict:
     cands = []
     for coin in runtime_settings.universe.tracked_coins:
         m = fetch_market_snapshot(coin)
+        ingest_wallet_events_for_coin(db, coin=coin, market_snapshot=m)
+        wallet_summary = generate_wallet_summary_for_coin(db, coin=coin)
         f = compute_market_features(m)
         s = compute_ml_scores(f)
         rank = 0.45 * s['attention_score'] + 0.35 * s['opportunity_score'] + 0.2 * s['tradability_score']
-        cands.append((rank, coin, m, f, s))
+        cands.append((rank, coin, m, f, s, wallet_summary))
     cands.sort(key=lambda x: x[0], reverse=True)
 
     outputs = []
     broker = get_broker(mode)
     top_n = max(2, min(runtime_settings.universe.max_candidates_per_cycle, 3))
-    for rank, coin, m, f, s in cands[:top_n]:
+    for rank, coin, m, f, s, wallet_summary in cands[:top_n]:
         packet = build_feature_packet(
             coin=coin,
             mode=mode,
@@ -50,6 +53,7 @@ def run_decision_cycle(db: Session) -> dict:
                 'max_total_notional': runtime_settings.risk.max_total_notional,
                 'cooldown_active': False,
             },
+            wallet_summary=wallet_summary,
         )
         decision = analyst_runner.run(packet)
         policy = evaluate_policy(packet, decision, runtime_settings.mode, risk_profile, cfg)
