@@ -49,3 +49,10 @@ cd frontend
 npm install
 npm run dev
 ```
+
+
+## Phase 2c Additions
+- Automatic feature (1m) and decision (5m) loops on app lifespan
+- Loop run metrics persisted (`loop_runs`) with `/api/loops/history`
+- Idempotent live relay write tracking (`live_relay_requests`) with `/api/execution/relay/history`
+- Reconciliation history + drift alerts (`reconciliation_runs`) with `/api/reconciliation/history`

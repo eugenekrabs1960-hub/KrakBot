@@ -86,3 +86,36 @@ class ReviewReportDB(Base):
     recommendation: Mapped[str] = mapped_column(String)
     payload: Mapped[dict] = mapped_column(JSON)
     generated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class LoopRunDB(Base):
+    __tablename__ = "loop_runs"
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    loop_type: Mapped[str] = mapped_column(String, index=True)  # feature|decision
+    status: Mapped[str] = mapped_column(String)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class LiveRelayRequestDB(Base):
+    __tablename__ = "live_relay_requests"
+    idempotency_key: Mapped[str] = mapped_column(String, primary_key=True)
+    action: Mapped[str] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+    response: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ReconciliationRunDB(Base):
+    __tablename__ = "reconciliation_runs"
+    recon_id: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String)
+    broker_position_count: Mapped[int] = mapped_column(Integer)
+    local_position_count: Mapped[int] = mapped_column(Integer)
+    drift_count: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime)

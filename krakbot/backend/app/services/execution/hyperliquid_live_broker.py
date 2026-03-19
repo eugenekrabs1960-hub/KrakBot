@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timezone
+
 import requests
 
 from app.core.config import settings
+from app.core.database import SessionLocal
+from app.models.db_models import LiveRelayRequestDB
 from app.services.execution.broker_base import BrokerBase
 
 
@@ -10,26 +16,48 @@ HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 
 
 class HyperliquidLiveBroker(BrokerBase):
-    """Live broker first implementation.
+    """Live broker first implementation with idempotent relay writes."""
 
-    Uses read-only Hyperliquid info endpoints directly.
-    For write operations, routes to a configurable local relay that performs
-    wallet signing. This keeps signing keys out of the app process.
-    """
+    def _idem_key(self, payload: dict) -> str:
+        blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode()).hexdigest()[:40]
 
     def _relay(self, payload: dict) -> dict:
+        idem = self._idem_key(payload)
+
+        with SessionLocal() as db:
+            existing = db.get(LiveRelayRequestDB, idem)
+            if existing:
+                return existing.response
+
         if not settings.hyperliquid_order_relay_url:
-            return {"accepted": False, "reason": "relay_not_configured"}
-        headers = {}
-        if settings.hyperliquid_order_relay_token:
-            headers["Authorization"] = f"Bearer {settings.hyperliquid_order_relay_token}"
-        r = requests.post(settings.hyperliquid_order_relay_url, json=payload, headers=headers, timeout=15)
-        if r.status_code >= 400:
-            return {"accepted": False, "reason": f"relay_error_{r.status_code}", "body": r.text[:400]}
-        body = r.json()
-        if "accepted" not in body:
-            body["accepted"] = bool(body.get("status") == "ok")
-        return body
+            response = {"accepted": False, "reason": "relay_not_configured", "idempotency_key": idem}
+        else:
+            headers = {"X-Idempotency-Key": idem}
+            if settings.hyperliquid_order_relay_token:
+                headers["Authorization"] = f"Bearer {settings.hyperliquid_order_relay_token}"
+            r = requests.post(settings.hyperliquid_order_relay_url, json=payload, headers=headers, timeout=15)
+            if r.status_code >= 400:
+                response = {"accepted": False, "reason": f"relay_error_{r.status_code}", "body": r.text[:400], "idempotency_key": idem}
+            else:
+                body = r.json()
+                if "accepted" not in body:
+                    body["accepted"] = bool(body.get("status") == "ok")
+                body["idempotency_key"] = idem
+                response = body
+
+        with SessionLocal() as db:
+            db.add(LiveRelayRequestDB(
+                idempotency_key=idem,
+                action=str(payload.get("action", "unknown")),
+                status="ok" if response.get("accepted") else "rejected",
+                payload=payload,
+                response=response,
+                created_at=datetime.now(timezone.utc),
+            ))
+            db.commit()
+
+        return response
 
     def place_order(self, symbol: str, side: str, notional_usd: float, reduce_only: bool = False) -> dict:
         return self._relay({
