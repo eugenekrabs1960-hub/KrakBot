@@ -24,11 +24,14 @@ class Settings(BaseSettings):
     allow_long: bool = True
     allow_short: bool = True
 
+    # policy thresholds (paper tuning pass: modest loosening)
     max_spread_bps: float = 12.0
-    min_liquidity_score: float = 0.25
-    max_contradiction: float = 0.7
-    max_crowdedness: float = 0.8
-    max_extension: float = 0.85
+    min_liquidity_score: float = 0.20  # was 0.25
+    min_freshness_score: float = 0.30  # new; was hardcoded 0.40
+    max_volatility_rv_1h: float = 0.95  # was hardcoded 0.90
+    max_contradiction: float = 0.85  # was 0.70
+    max_crowdedness: float = 0.85  # was 0.80
+    max_extension: float = 0.90  # was 0.85
     max_fragility: float = 0.85
     freshness_threshold_sec: int = 90
 
@@ -38,7 +41,6 @@ class Settings(BaseSettings):
     local_model_temperature: float = 0.2
     prompt_version: str = "local_analyst_v1"
     repair_enabled: bool = True
-
 
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""

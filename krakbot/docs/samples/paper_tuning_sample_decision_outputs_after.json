@@ -1,0 +1,158 @@
+[
+  {
+    "coin": "SOL",
+    "risks": [
+      {
+        "label": "regime_contradiction",
+        "severity": 0.3032739674430295,
+        "explanation": "contradiction_score=0.30"
+      },
+      {
+        "label": "extension_risk",
+        "severity": 0.012723885088034903,
+        "explanation": "extension_score=0.01"
+      }
+    ],
+    "action": "short",
+    "symbol": "SOL-PERP",
+    "horizon": "1h",
+    "reasons": [
+      {
+        "label": "momentum_alignment",
+        "strength": 0.28119426290342786,
+        "explanation": "momentum_score=-0.28 supports directional bias"
+      },
+      {
+        "label": "execution_quality",
+        "strength": 0.740510422129168,
+        "explanation": "tradability_score=0.74 from liquidity/slippage context"
+      },
+      {
+        "label": "structure_breakout_context",
+        "strength": 0.65,
+        "explanation": "breakout_state=attempt"
+      }
+    ],
+    "targets": {
+      "take_profit_hint": null,
+      "expected_move_magnitude": "small"
+    },
+    "packet_id": "pkt_4760278d6602",
+    "confidence": 0.5250612725631455,
+    "model_name": "Qwen3.5-9B",
+    "model_role": "local_analyst",
+    "setup_type": "mean_reversion",
+    "uncertainty": 0.4768473102000597,
+    "generated_at": "2026-03-19T04:00:25.868142Z",
+    "invalidation": {
+      "type": "thesis_failure",
+      "value": null,
+      "reason": "momentum alignment decays and contradiction rises"
+    },
+    "evidence_used": [
+      "features.returns.momentum_score",
+      "ml_scores.tradability_score",
+      "ml_scores.contradiction_score",
+      "ml_scores.extension_score",
+      "features.structure.breakout_state"
+    ],
+    "thesis_summary": "SOL short on 1h: momentum=-0.28, tradability=0.74, contradiction=0.30, breakout=attempt.",
+    "decision_version": "1.0",
+    "evidence_ignored": [
+      "optional_signals.news_summary",
+      "optional_signals.social_summary"
+    ],
+    "execution_preference": {
+      "urgency": "normal",
+      "entry_style_hint": "market_or_aggressive_limit"
+    },
+    "alternatives_considered": [
+      {
+        "action": "no_trade",
+        "reason": "if contradiction rises or liquidity weakens"
+      },
+      {
+        "action": "long",
+        "reason": "if momentum flips sign"
+      }
+    ]
+  },
+  {
+    "coin": "BTC",
+    "risks": [
+      {
+        "label": "regime_contradiction",
+        "severity": 0.1111367343328583,
+        "explanation": "contradiction_score=0.11"
+      },
+      {
+        "label": "extension_risk",
+        "severity": 0.0471932761450556,
+        "explanation": "extension_score=0.05"
+      }
+    ],
+    "action": "long",
+    "symbol": "BTC-PERP",
+    "horizon": "1h",
+    "reasons": [
+      {
+        "label": "momentum_alignment",
+        "strength": 0.8111063762627526,
+        "explanation": "momentum_score=0.81 supports directional bias"
+      },
+      {
+        "label": "execution_quality",
+        "strength": 0.3951951391196245,
+        "explanation": "tradability_score=0.40 from liquidity/slippage context"
+      },
+      {
+        "label": "trend_quality",
+        "strength": 0.3942467394311703,
+        "explanation": "trend_quality_score=0.39"
+      }
+    ],
+    "targets": {
+      "take_profit_hint": null,
+      "expected_move_magnitude": "small"
+    },
+    "packet_id": "pkt_e75d41f75a3a",
+    "confidence": 0.6810888211435356,
+    "model_name": "Qwen3.5-9B",
+    "model_role": "local_analyst",
+    "setup_type": "mean_reversion",
+    "uncertainty": 0.3259901702782227,
+    "generated_at": "2026-03-19T04:00:25.865811Z",
+    "invalidation": {
+      "type": "thesis_failure",
+      "value": null,
+      "reason": "momentum alignment decays and contradiction rises"
+    },
+    "evidence_used": [
+      "features.returns.momentum_score",
+      "ml_scores.tradability_score",
+      "ml_scores.contradiction_score",
+      "ml_scores.extension_score",
+      "features.structure.breakout_state"
+    ],
+    "thesis_summary": "BTC long on 1h: momentum=0.81, tradability=0.40, contradiction=0.11, breakout=none.",
+    "decision_version": "1.0",
+    "evidence_ignored": [
+      "optional_signals.news_summary",
+      "optional_signals.social_summary"
+    ],
+    "execution_preference": {
+      "urgency": "normal",
+      "entry_style_hint": "market_or_aggressive_limit"
+    },
+    "alternatives_considered": [
+      {
+        "action": "no_trade",
+        "reason": "if contradiction rises or liquidity weakens"
+      },
+      {
+        "action": "short",
+        "reason": "if momentum flips sign"
+      }
+    ]
+  }
+]
