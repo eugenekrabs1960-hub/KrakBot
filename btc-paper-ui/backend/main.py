@@ -72,6 +72,18 @@ MODE_CONFIGS = {
         "max_minutes_open": 0,
         "enable_invalidation_exit": False,
     },
+    "btc_15m_conservative_inverse_v1": {
+        "label": "BTC/USD 15m conservative inverse v1 (experimental)",
+        "interval": 15,
+        "rr_min": 1.5,
+        "aggressive": False,
+        "fee_bps_entry": 40.0,
+        "fee_bps_exit": 40.0,
+        "enable_time_exit": False,
+        "max_bars_open": 0,
+        "max_minutes_open": 0,
+        "enable_invalidation_exit": False,
+    },
     "btc_15m_breakout_retest": {
         "label": "BTC/USD 15m breakout-retest experiment",
         "interval": 15,
@@ -108,6 +120,17 @@ STRATEGY_REGISTRY = {
         "routing_enabled": False,
         "allowed_regimes": ["trend", "breakout", "chop"],
         "notes": "Controlled conservative experiment: only the after-fee net-edge gate is tightened versus frozen baseline.",
+    },
+    "btc_15m_conservative_inverse_v1": {
+        "strategy_key": "btc_15m_conservative_inverse_v1",
+        "label": "BTC/USD 15m conservative inverse v1 (experimental)",
+        "family": "trend_structure_inverse",
+        "timeframe": "15m",
+        "status": "experimental",
+        "paper_only": True,
+        "routing_enabled": False,
+        "allowed_regimes": ["trend", "breakout", "chop"],
+        "notes": "Directional hypothesis test: mechanically invert conservative direction while preserving paper controls.",
     },
     "btc_15m_breakout_retest": {
         "strategy_key": "btc_15m_breakout_retest",
@@ -419,6 +442,36 @@ def normalize_decision(d: dict[str, Any], rr_min: float):
     return n
 
 
+def invert_conservative_decision(d: dict[str, Any], rr_min: float) -> dict[str, Any]:
+    if d.get("status") != "PROPOSE_TRADE":
+        return d
+    side = d.get("side")
+    entry = float(d.get("entry_price") or 0)
+    stop = float(d.get("stop_loss") or 0)
+    tp = float(d.get("take_profit") or 0)
+    if side not in {"BUY", "SELL"} or entry <= 0 or stop <= 0 or tp <= 0:
+        return normalize_decision({"status": "WAIT", "regime_label": "inverse_invalid_fields", "reason": "Inverse mode blocked: invalid baseline decision fields."}, rr_min)
+
+    inv_side = "SELL" if side == "BUY" else "BUY"
+    inv_stop = tp
+    inv_tp = stop
+    inv_rr = abs(entry - inv_tp) / max(abs(inv_stop - entry), 1e-9)
+
+    if (inv_side == "BUY" and not (inv_stop < entry < inv_tp)) or (inv_side == "SELL" and not (inv_tp < entry < inv_stop)):
+        return normalize_decision({"status": "WAIT", "regime_label": "inverse_invalid_structure", "reason": "Inverse mode blocked: inverted stop/take-profit structure is invalid."}, rr_min)
+
+    return normalize_decision({
+        **d,
+        "side": inv_side,
+        "stop_loss": round2(inv_stop),
+        "take_profit": round2(inv_tp),
+        "risk_reward_ratio": round2(inv_rr),
+        "invalidation": f"inverse_of:{d.get('invalidation', '')}",
+        "regime_label": f"inverse_{d.get('regime_label', 'unknown')}",
+        "reason": f"Inverse v1 of conservative signal: {d.get('reason', '')}",
+    }, rr_min)
+
+
 def conservative_fee_efficiency_gate(d, mode: str):
     """Paper-only fee-adjusted efficiency gate for conservative family modes."""
     if d.get("status") != "PROPOSE_TRADE":
@@ -427,6 +480,7 @@ def conservative_fee_efficiency_gate(d, mode: str):
     threshold_by_mode = {
         "btc_15m_conservative": CONSERVATIVE_MIN_REWARD_TO_FEE,
         "btc_15m_conservative_netedge_v1": CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE,
+        "btc_15m_conservative_inverse_v1": CONSERVATIVE_MIN_REWARD_TO_FEE,
     }
     min_reward_to_fee = float(threshold_by_mode.get(mode, CONSERVATIVE_MIN_REWARD_TO_FEE))
     rr_min = MODE_CONFIGS.get(mode, MODE_CONFIGS["btc_15m_conservative"])["rr_min"]
@@ -1082,7 +1136,10 @@ async def execute_mode_scan(mode: str):
         if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
             d = fb
 
-    if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1"} and d.get("status") == "PROPOSE_TRADE":
+    if mode == "btc_15m_conservative_inverse_v1" and d.get("status") == "PROPOSE_TRADE":
+        d = invert_conservative_decision(d, cfg["rr_min"])
+
+    if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1", "btc_15m_conservative_inverse_v1"} and d.get("status") == "PROPOSE_TRADE":
         d = conservative_fee_efficiency_gate(d, mode)
 
     # Tightening applies ONLY to the 15m experiment mode; 15m baseline remains frozen.
