@@ -7,12 +7,10 @@ from app.services.models.adapter_base import LocalModelAdapter
 
 class QwenLocalAdapter(LocalModelAdapter):
     def analyze(self, packet: FeaturePacket) -> DecisionOutput:
-        """Confidence-calibration + breakout-discipline pass (narrow).
-
-        Changes:
-        - stronger confidence penalties for contradiction/extension/freshness/fragility
-        - breakout_confirmation requires stricter evidence
-        - modest no_trade bias for risky/ambiguous packets
+        """Confidence-semantics pass (narrow):
+        - keep strict breakout discipline
+        - remove broad no-trade inflation
+        - make confidence bands explicit and meaningful
         """
         m = packet.features.returns.momentum_score
         t = packet.ml_scores.tradability_score
@@ -26,20 +24,10 @@ class QwenLocalAdapter(LocalModelAdapter):
         align = packet.features.trend.trend_alignment_score
         trend_q = packet.features.trend.trend_quality_score
 
-        # base directional bias
+        # base directional decision unchanged
         action = "long" if m > 0.2 else ("short" if m < -0.2 else "no_trade")
 
-        # confidence penalties (core goal)
-        risk_penalty = (
-            0.30 * min(1.0, contradiction) +
-            0.20 * min(1.0, extension) +
-            0.30 * max(0.0, 1.0 - freshness) +
-            0.20 * min(1.0, fragility)
-        )
-        base_conf = 0.50 * abs(m) + 0.30 * t + 0.20 * max(0.0, 1.0 - contradiction)
-        conf = max(0.20, min(0.93, base_conf - 0.35 * risk_penalty))
-
-        # breakout discipline: require explicit strong evidence
+        # strict breakout gate retained
         breakout_strong = (
             breakout == "confirmed" and
             abs(m) >= 0.45 and
@@ -51,11 +39,6 @@ class QwenLocalAdapter(LocalModelAdapter):
             liq >= 0.30
         )
 
-        # modest no_trade increase in weak/risky contexts
-        if action != "no_trade":
-            if conf < 0.42 or contradiction > 0.75 or extension > 0.75 or freshness < 0.30 or fragility > 0.75:
-                action = "no_trade"
-
         if action == "no_trade":
             setup_type = "unclear"
         elif breakout_strong:
@@ -65,17 +48,30 @@ class QwenLocalAdapter(LocalModelAdapter):
         else:
             setup_type = "mean_reversion"
 
-        # keep high-confidence rare/meaningful
-        if action == "no_trade":
-            conf = min(conf, 0.58)
-        elif setup_type == "breakout_confirmation" and not breakout_strong:
-            conf = min(conf, 0.62)
-        elif conf >= 0.70:
-            # only retain very high confidence under clean conditions
-            if contradiction > 0.40 or extension > 0.55 or freshness < 0.50 or fragility > 0.45:
-                conf = 0.66
+        # confidence semantics (explicit bands)
+        edge = 0.45 * abs(m) + 0.35 * t + 0.20 * max(0.0, 1.0 - contradiction)
+        risk = (
+            0.35 * contradiction +
+            0.25 * extension +
+            0.20 * max(0.0, 1.0 - freshness) +
+            0.20 * fragility
+        )
+        score = edge - 0.30 * risk
 
-        uncertainty = min(0.95, max(0.05, 1.0 - conf + 0.20 * risk_penalty))
+        clean = (contradiction <= 0.35 and extension <= 0.50 and freshness >= 0.55 and fragility <= 0.40 and t >= 0.50)
+        tradable = (contradiction <= 0.70 and extension <= 0.80 and freshness >= 0.30 and t >= 0.30)
+
+        if action == "no_trade":
+            conf = min(0.38, max(0.20, 0.24 + 0.20 * max(0.0, score)))
+        else:
+            if clean and abs(m) >= 0.55:
+                conf = min(0.84, max(0.70, 0.70 + 0.20 * max(0.0, score)))  # high band only for very clean setups
+            elif tradable:
+                conf = min(0.69, max(0.45, 0.52 + 0.20 * score))  # mid for imperfect but tradable
+            else:
+                conf = min(0.44, max(0.25, 0.34 + 0.15 * score))  # low for weak-edge cases
+
+        uncertainty = min(0.95, max(0.05, 1.0 - conf + 0.20 * risk))
 
         thesis = (
             f"{packet.coin} {action} on {packet.decision_context.primary_horizon}: "
@@ -95,13 +91,12 @@ class QwenLocalAdapter(LocalModelAdapter):
                 "explanation": f"tradability_score={t:.2f}",
             },
         ]
-
         if breakout_strong:
             reasons.append(
                 {
                     "label": "validated_breakout",
                     "strength": 0.82,
-                    "explanation": "breakout confirmed with alignment/quality and low contradiction/extension",
+                    "explanation": "breakout confirmed with strong alignment and controlled risk",
                 }
             )
         else:
@@ -192,8 +187,8 @@ class QwenLocalAdapter(LocalModelAdapter):
             evidence_used=evidence_used,
             evidence_ignored=["optional_signals.news_summary", "optional_signals.social_summary"],
             alternatives_considered=[
-                {"action": "no_trade", "reason": "if contradiction/extension/freshness risk dominates"},
-                {"action": "long" if action == "short" else "short", "reason": "if momentum flips sign with cleaner risk profile"},
+                {"action": "no_trade", "reason": "if edge is weak after risk adjustment"},
+                {"action": "long" if action == "short" else "short", "reason": "if momentum flips with better setup quality"},
             ],
             execution_preference={
                 "urgency": "normal" if action != "no_trade" else "low",
