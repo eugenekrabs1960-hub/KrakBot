@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.api.models import runtime_settings
+from app.services.wildcard_universe import resolve_active_universe
 from app.core.database import get_db
 from app.models.db_models import WalletSummaryDB, PolicyDecisionDB, ExecutionRecordDB, DecisionOutputDB, FeaturePacketDB
 from app.services.journal.queries import recent_decisions
@@ -165,7 +166,9 @@ def overview(db: Session = Depends(get_db)):
     decisions = recent_decisions(db, limit=20)
 
     wallet_items = []
-    for coin in runtime_settings.universe.tracked_coins:
+    universe_state = resolve_active_universe(db, runtime_settings)
+    active_coins = universe_state.get('active_coins', runtime_settings.universe.tracked_coins)
+    for coin in active_coins:
         row = (
             db.query(WalletSummaryDB)
             .filter(WalletSummaryDB.coin == coin)
@@ -295,7 +298,7 @@ def overview(db: Session = Depends(get_db)):
     allowed_count = sum(1 for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade')
     blocked_count = sum(1 for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_'))
 
-    top_candidates = _top_candidates_snapshot(db, runtime_settings.universe.tracked_coins)
+    top_candidates = _top_candidates_snapshot(db, active_coins)
     degraded = [c for c in latest_feature_status.values() if c.get('degraded')]
 
     return {
@@ -312,6 +315,7 @@ def overview(db: Session = Depends(get_db)):
         'recent_trade_fills': trades_panel,
         'top_candidates': top_candidates,
         'feature_degraded_count': len(degraded),
+        'active_universe': universe_state,
         'wallet_summaries': wallet_items,
         'latest_news_signals': latest_news,
         'latest_community_signals': latest_community,

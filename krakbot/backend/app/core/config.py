@@ -9,6 +9,11 @@ class Settings(BaseSettings):
 
     # defaults requested
     tracked_coins_default: str = "BTC,ETH,SOL"
+    wildcard_pool_default: str = "XRP,DOGE,ADA,AVAX,LINK"
+    wildcard_slots_default: int = 2
+    wildcard_reeval_minutes_default: int = 30
+    wildcard_min_hold_minutes_default: int = 60
+    wildcard_replace_threshold_default: float = 0.08
     feature_refresh_seconds: int = 60
     decision_cycle_seconds: int = 300
     top_candidates_per_cycle: int = 3

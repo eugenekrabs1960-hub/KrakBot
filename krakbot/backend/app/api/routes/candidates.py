@@ -4,6 +4,7 @@ from sqlalchemy import desc
 
 from app.core.database import get_db
 from app.api.models import runtime_settings
+from app.services.wildcard_universe import resolve_active_universe
 from app.models.db_models import WalletSummaryDB, DecisionOutputDB, PolicyDecisionDB, FeaturePacketDB
 from app.services.ingest.hyperliquid_market import fetch_market_snapshot
 from app.services.features.market_features import compute_market_features
@@ -53,7 +54,9 @@ def _latest_packet_for_coin(db: Session, coin: str):
 @router.get('/candidates')
 def list_candidates(db: Session = Depends(get_db)):
     wallet_map = {}
-    for coin in runtime_settings.universe.tracked_coins:
+    universe_state = resolve_active_universe(db, runtime_settings)
+    active_coins = universe_state.get('active_coins', runtime_settings.universe.tracked_coins)
+    for coin in active_coins:
         ws = (
             db.query(WalletSummaryDB)
             .filter(WalletSummaryDB.coin == coin)
@@ -64,7 +67,7 @@ def list_candidates(db: Session = Depends(get_db)):
             wallet_map[coin] = ws.payload
 
     items = []
-    for coin in runtime_settings.universe.tracked_coins:
+    for coin in active_coins:
         m = fetch_market_snapshot(coin)
         f = compute_market_features(m)
         s = compute_ml_scores(f)

@@ -22,6 +22,7 @@ from app.services.journal.writer import write_cycle
 from app.services.wallet_signals import ingest_wallet_events_for_coin, generate_wallet_summary_for_coin
 from app.services.news_signals import get_news_summary
 from app.services.community_signals import get_community_summary
+from app.services.wildcard_universe import resolve_active_universe
 
 _cycle_lock = threading.Lock()
 
@@ -36,7 +37,9 @@ def run_decision_cycle(db: Session) -> dict:
 
         account = fetch_account_snapshot(cfg.hyperliquid_account_address)
         cands = []
-        for coin in runtime_settings.universe.tracked_coins:
+        universe_state = resolve_active_universe(db, runtime_settings)
+        active_coins = universe_state.get('active_coins', runtime_settings.universe.tracked_coins)
+        for coin in active_coins:
             m = fetch_market_snapshot(coin)
             ingest_wallet_events_for_coin(db, coin=coin, market_snapshot=m)
             wallet_summary = generate_wallet_summary_for_coin(db, coin=coin)
@@ -131,6 +134,6 @@ def run_decision_cycle(db: Session) -> dict:
                 'execution': execution_record,
                 'account': account,
             })
-        return {'items': outputs, 'status': 'ok', 'top_n': top_n}
+        return {'items': outputs, 'status': 'ok', 'top_n': top_n, 'universe': universe_state}
     finally:
         _cycle_lock.release()

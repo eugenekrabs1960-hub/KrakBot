@@ -11,6 +11,12 @@ class ModeSettings(BaseModel):
 class UniverseSettings(BaseModel):
     tracked_coins: list[str] = ["BTC", "ETH", "SOL"]
     max_candidates_per_cycle: int = 3
+    core_coins: list[str] = ["BTC", "ETH", "SOL"]
+    wildcard_pool: list[str] = ["XRP", "DOGE", "ADA", "AVAX", "LINK"]
+    wildcard_slots: int = 2
+    wildcard_reeval_minutes: int = 30
+    wildcard_min_hold_minutes: int = 60
+    wildcard_replace_threshold: float = 0.08
 
 
 class LoopSettings(BaseModel):

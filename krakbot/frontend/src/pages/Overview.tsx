@@ -41,6 +41,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const newsSignals = data?.latest_news_signals || {};
   const communitySignals = data?.latest_community_signals || {};
   const featureStatus = data?.latest_feature_status || {};
+  const activeUniverse = data?.active_universe || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
 
@@ -95,6 +96,35 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
                   </tr>
                 ))
               )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+
+      <Card title="Active Trading Universe (Core + Wildcards)">
+        <div className="muted" style={{ marginBottom: 6 }}>Core coins are fixed; wildcard slots rotate deterministically with hold/cadence/hysteresis.</div>
+        <div style={{ marginBottom: 8 }}>
+          <span className="badge info2">Core: {(activeUniverse.core_coins || []).join(', ') || '-'}</span>{' '}
+          <span className="badge info2">Wildcards: {((activeUniverse.wildcards || []).map((w:any)=>w.coin).join(', ')) || '-'}</span>{' '}
+          <span className="badge neutral">Next Re-eval: {fmtTsLA(activeUniverse.next_reeval_at)}</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Wildcard</th><th className="num">Score</th><th className="num">Tradability</th><th className="num">Opportunity</th><th className="num">News Freshness</th><th className="num">Community Trend</th><th className="num">Crowding Penalty</th></tr></thead>
+            <tbody>
+              {(activeUniverse.wildcards || []).length===0 ? (<tr><td colSpan={7} className="muted">No wildcard slots selected.</td></tr>) :
+              (activeUniverse.wildcards || []).map((w:any)=>(
+                <tr key={w.coin}>
+                  <td>{w.coin}</td>
+                  <td className="num">{fmtNum(w.score,3)}</td>
+                  <td className="num">{fmtNum(w.reason?.tradability,3)}</td>
+                  <td className="num">{fmtNum(w.reason?.opportunity,3)}</td>
+                  <td className="num">{fmtNum(w.reason?.news_freshness,3)}</td>
+                  <td className="num">{fmtNum(w.reason?.community_trend,3)}</td>
+                  <td className="num">{fmtNum(w.reason?.penalty_crowding,3)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
