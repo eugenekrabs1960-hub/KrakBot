@@ -122,6 +122,7 @@ class OptionalSignals(BaseModel):
     # note: priced_in_risk_score inside news_summary is hybrid (news + market microstructure), not pure RSS
     news_summary: dict | None = None
     social_summary: dict | None = None
+    community_summary: dict | None = None
 
 
 class PolicyContext(BaseModel):

@@ -39,6 +39,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const blocked = data?.recent_blocked_trades || [];
   const paperAccount = data?.paper_account || {};
   const newsSignals = data?.latest_news_signals || {};
+  const communitySignals = data?.latest_community_signals || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
 
@@ -181,6 +182,33 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
           <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(loopsHistory?.items || [], null, 2)}</pre>
           <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(reconHistory?.items || [], null, 2)}</pre>
           <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(relayHistory?.items || [], null, 2)}</pre>
+        </div>
+      </Card>
+
+
+      <Card title="Trending / Community Heat">
+        <div className="muted" style={{ marginBottom: 6 }}>Daily community attention/sentiment summary (not a direct trade trigger).</div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Coin</th><th className="num">Mention Velocity</th><th className="num">Trendiness</th><th className="num">Sentiment</th><th className="num">Hype</th><th className="num">Crowding Risk</th><th>Summary</th></tr></thead>
+            <tbody>
+              {Object.keys(communitySignals).length === 0 ? (
+                <tr><td colSpan={7} className="muted">No community summary yet.</td></tr>
+              ) : (
+                Object.entries(communitySignals).map(([coin, cs]: any) => (
+                  <tr key={coin}>
+                    <td>{coin}</td>
+                    <td className="num">{fmtNum(cs?.mention_velocity_score, 3)}</td>
+                    <td className="num">{fmtNum(cs?.trendiness_score, 3)}</td>
+                    <td className="num">{fmtNum(cs?.sentiment_score, 3)}</td>
+                    <td className="num">{fmtNum(cs?.hype_score, 3)}</td>
+                    <td className="num">{fmtNum(cs?.crowding_risk, 3)}</td>
+                    <td>{cs?.summary_text || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </Card>
 

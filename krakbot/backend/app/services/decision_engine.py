@@ -20,6 +20,7 @@ from app.services.execution.broker_router import get_broker
 from app.services.journal.writer import write_cycle
 from app.services.wallet_signals import ingest_wallet_events_for_coin, generate_wallet_summary_for_coin
 from app.services.news_signals import get_news_summary
+from app.services.community_signals import get_community_summary
 
 _cycle_lock = threading.Lock()
 
@@ -39,10 +40,19 @@ def run_decision_cycle(db: Session) -> dict:
             ingest_wallet_events_for_coin(db, coin=coin, market_snapshot=m)
             wallet_summary = generate_wallet_summary_for_coin(db, coin=coin)
             news_summary = get_news_summary(coin, m)
+            community_summary = get_community_summary(coin)
             f = compute_market_features(m)
             s = compute_ml_scores(f)
+            # community signal influences attention ranking only (never direct trade trigger)
+            comm_attention_boost = 0.0
+            comm_crowding_penalty = 0.0
+            if community_summary:
+                comm_attention_boost = 0.05 * float(community_summary.get('trendiness_score') or 0.0)
+                comm_crowding_penalty = 0.04 * float(community_summary.get('crowding_risk') or 0.0)
+
             rank = 0.45 * s['attention_score'] + 0.35 * s['opportunity_score'] + 0.2 * s['tradability_score']
-            cands.append((rank, coin, m, f, s, wallet_summary, news_summary))
+            rank = rank + comm_attention_boost - comm_crowding_penalty
+            cands.append((rank, coin, m, f, s, wallet_summary, news_summary, community_summary))
         cands.sort(key=lambda x: x[0], reverse=True)
 
         outputs = []
@@ -51,7 +61,7 @@ def run_decision_cycle(db: Session) -> dict:
         if cfg.llm_safe_mode:
             top_n = min(top_n, max(1, cfg.llm_safe_mode_max_candidates))
 
-        for rank, coin, m, f, s, wallet_summary, news_summary in cands[:top_n]:
+        for rank, coin, m, f, s, wallet_summary, news_summary, community_summary in cands[:top_n]:
             packet = build_feature_packet(
                 coin=coin,
                 mode=mode,
@@ -67,6 +77,7 @@ def run_decision_cycle(db: Session) -> dict:
                 },
                 wallet_summary=wallet_summary,
                 news_summary=news_summary,
+                community_summary=community_summary,
             )
             decision = analyst_runner.run(packet)
             policy = evaluate_policy(packet, decision, runtime_settings.mode, risk_profile, cfg)

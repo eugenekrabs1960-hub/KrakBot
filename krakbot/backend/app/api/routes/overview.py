@@ -184,12 +184,17 @@ def overview(db: Session = Depends(get_db)):
     # latest compact news signals by coin
     fp_rows = db.query(FeaturePacketDB).order_by(desc(FeaturePacketDB.generated_at)).limit(200).all()
     latest_news = {}
+    latest_community = {}
     for r in fp_rows:
         p = r.payload or {}
         coin = p.get('coin')
-        ns = ((p.get('optional_signals') or {}).get('news_summary'))
+        opt = p.get('optional_signals') or {}
+        ns = opt.get('news_summary')
+        cs = opt.get('community_summary')
         if coin and ns and coin not in latest_news:
             latest_news[coin] = ns
+        if coin and cs and coin not in latest_community:
+            latest_community[coin] = cs
 
     allowed = [r.payload for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade'][:20]
     blocked = [r.payload for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_')][:20]
@@ -303,6 +308,7 @@ def overview(db: Session = Depends(get_db)):
         'top_candidates': top_candidates,
         'wallet_summaries': wallet_items,
         'latest_news_signals': latest_news,
+        'latest_community_signals': latest_community,
         'last_decision_cycle_at': (policy_rows[0].payload or {}).get('evaluated_at') if policy_rows else None,
         'performance_summary': {
             'realized_pnl': paper_account.get('realized_pnl_usd', realized_pnl) if runtime_settings.mode.execution_mode=='paper' else realized_pnl,

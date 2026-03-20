@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     news_signal_source_url: str = "https://feeds.feedburner.com/CoinDesk"
     news_signal_ttl_sec: int = 300
 
+    # controlled community heat signal (daily attention/sentiment summary)
+    community_signal_enabled: bool = True
+    community_signal_source_url: str = "https://api.coingecko.com/api/v3/search/trending"
+    community_signal_ttl_sec: int = 900
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12
