@@ -72,6 +72,17 @@ BASE_DIR = Path(__file__).resolve().parent
 STATE_DIR = BASE_DIR / "data"
 HL_STATE_FILE = STATE_DIR / "hyperliquid_paper_state.json"
 
+# Persistence safety caps (disk-usage guardrails)
+MAX_POSITIONS_PERSIST = 300
+MAX_CLOSED_TRADES_PERSIST = 300
+MAX_HISTORY_PERSIST = 300
+MAX_SIGNAL_IDS_PERSIST = 500
+MAX_LATEST_POSITIONS_VIEW = 10
+MAX_LATEST_CLOSED_VIEW = 10
+
+BACKUP_RETENTION_COUNT = 6
+BACKUP_MIN_INTERVAL_SECONDS = 3600
+
 HL_ACTIVE_STRATEGY_KEYS = [
     'hl_15m_trend_follow',
     'hl_15m_trend_follow_momo_gate_v1',
@@ -305,15 +316,39 @@ class HyperliquidFuturesPaperTrack:
         self._load_state()
         self._reconcile_registry_and_metrics()
 
-    def _backup_state_file(self, reason: str = 'pre-save') -> None:
+    def _rotate_backups(self) -> None:
+        try:
+            pattern = f"{self.state_file.stem}.*.bak.json"
+            backups = sorted(self.state_file.parent.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+            for stale in backups[BACKUP_RETENTION_COUNT:]:
+                stale.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def _has_recent_backup(self, reason: str) -> bool:
+        try:
+            pattern = f"{self.state_file.stem}.{reason}.*.bak.json"
+            backups = sorted(self.state_file.parent.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not backups:
+                return False
+            newest = backups[0]
+            age = datetime.now(timezone.utc).timestamp() - newest.stat().st_mtime
+            return age < BACKUP_MIN_INTERVAL_SECONDS
+        except Exception:
+            return False
+
+    def _backup_state_file(self, reason: str = 'pre-save', force: bool = False) -> None:
         try:
             if not self.state_file.exists():
+                return
+            if not force and self._has_recent_backup(reason):
                 return
             ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
             bak = self.state_file.with_name(f"{self.state_file.stem}.{reason}.{ts}.bak.json")
             if bak.exists():
                 return
             shutil.copy2(self.state_file, bak)
+            self._rotate_backups()
         except Exception:
             pass
 
@@ -338,7 +373,7 @@ class HyperliquidFuturesPaperTrack:
             migrated.setdefault(sk, blank_book())['closed_trades'].append(t)
         base = migrated.setdefault('hl_15m_trend_follow', blank_book())
         if not base.get('history'):
-            base['history'] = list(data.get('history', []) or [])[-1000:]
+            base['history'] = list(data.get('history', []) or [])[-MAX_HISTORY_PERSIST:]
         for sk, b in migrated.items():
             ids = list(b.get('executed_signal_ids', []) or [])
             if not ids:
@@ -348,10 +383,10 @@ class HyperliquidFuturesPaperTrack:
                 for t in b.get('closed_trades', []) or []:
                     if t.get('signal_id'):
                         ids.append(t['signal_id'])
-            b['executed_signal_ids'] = ids[-1000:]
-            b['positions'] = (b.get('positions') or [])[-300:]
-            b['closed_trades'] = (b.get('closed_trades') or [])[-1000:]
-            b['history'] = (b.get('history') or [])[-1000:]
+            b['executed_signal_ids'] = ids[-MAX_SIGNAL_IDS_PERSIST:]
+            b['positions'] = (b.get('positions') or [])[-MAX_POSITIONS_PERSIST:]
+            b['closed_trades'] = (b.get('closed_trades') or [])[-MAX_CLOSED_TRADES_PERSIST:]
+            b['history'] = (b.get('history') or [])[-MAX_HISTORY_PERSIST:]
         return migrated
 
     def _persist_state(self) -> None:
@@ -365,12 +400,12 @@ class HyperliquidFuturesPaperTrack:
                 'strategy_registry': self.state.get('strategy_registry'),
                 'leverage_default': self.state.get('leverage_default'),
                 'books': self.state.get('books', {}),
-                'positions': self.state.get('positions', [])[-300:],
-                'closed_trades': self.state.get('closed_trades', [])[-1000:],
-                'history': self.state.get('history', [])[-1000:],
+                'positions': self.state.get('positions', [])[-MAX_POSITIONS_PERSIST:],
+                'closed_trades': self.state.get('closed_trades', [])[-MAX_CLOSED_TRADES_PERSIST:],
+                'history': self.state.get('history', [])[-MAX_HISTORY_PERSIST:],
                 'latest': self.state.get('latest'),
                 'latest_by_strategy': self.state.get('latest_by_strategy', {}),
-                'executed_signal_ids': self.state.get('executed_signal_ids', [])[-1000:],
+                'executed_signal_ids': self.state.get('executed_signal_ids', [])[-MAX_SIGNAL_IDS_PERSIST:],
                 'risk_limits': self.state.get('risk_limits'),
                 'fee_model': self.state.get('fee_model'),
                 'execution_fee_assumption': self.state.get('execution_fee_assumption'),
@@ -413,7 +448,7 @@ class HyperliquidFuturesPaperTrack:
         # Migration: move legacy top-level arrays into per-strategy books when needed.
         books = self.state.get('books') if isinstance(self.state.get('books'), dict) else {}
         if self._legacy_migration_needed(books, data):
-            self._backup_state_file('pre-migration')
+            self._backup_state_file('pre-migration', force=True)
             books = self._migrate_legacy_into_books(books or {k: blank_book() for k in merged_registry.keys()}, data)
         self.state['books'] = books
 
@@ -450,6 +485,10 @@ class HyperliquidFuturesPaperTrack:
                 books[sk].setdefault('history', [])
                 books[sk].setdefault('executed_signal_ids', [])
                 books[sk].setdefault('latest', None)
+                books[sk]['positions'] = (books[sk].get('positions') or [])[-MAX_POSITIONS_PERSIST:]
+                books[sk]['closed_trades'] = (books[sk].get('closed_trades') or [])[-MAX_CLOSED_TRADES_PERSIST:]
+                books[sk]['history'] = (books[sk].get('history') or [])[-MAX_HISTORY_PERSIST:]
+                books[sk]['executed_signal_ids'] = (books[sk].get('executed_signal_ids') or [])[-MAX_SIGNAL_IDS_PERSIST:]
         self.state['books'] = books
 
         # Ensure per-strategy metric buckets exist for visibility/comparison.
@@ -681,7 +720,7 @@ class HyperliquidFuturesPaperTrack:
         )
         book['positions'].append(asdict(p))
         book['executed_signal_ids'].append(proposal['signal_id'])
-        book['executed_signal_ids'] = book['executed_signal_ids'][-500:]
+        book['executed_signal_ids'] = book['executed_signal_ids'][-MAX_SIGNAL_IDS_PERSIST:]
         return {'ok': True, 'position': asdict(p)}
 
     def _update_positions(self, book: dict[str, Any], tick: dict[str, Any]) -> list[dict[str, Any]]:
@@ -750,7 +789,7 @@ class HyperliquidFuturesPaperTrack:
         book['positions'] = still
         if closed:
             book['closed_trades'].extend(closed)
-            book['closed_trades'] = book['closed_trades'][-300:]
+            book['closed_trades'] = book['closed_trades'][-MAX_CLOSED_TRADES_PERSIST:]
         return closed
 
     def _recompute_metrics(self) -> None:
@@ -830,10 +869,10 @@ class HyperliquidFuturesPaperTrack:
             agg_ids.extend(b.get('executed_signal_ids', []))
             if b.get('latest'):
                 latest_by[sk] = b.get('latest')
-        self.state['positions'] = agg_positions[-300:]
-        self.state['closed_trades'] = agg_closed[-1000:]
-        self.state['history'] = agg_history[-1000:]
-        self.state['executed_signal_ids'] = agg_ids[-1000:]
+        self.state['positions'] = agg_positions[-MAX_POSITIONS_PERSIST:]
+        self.state['closed_trades'] = agg_closed[-MAX_CLOSED_TRADES_PERSIST:]
+        self.state['history'] = agg_history[-MAX_HISTORY_PERSIST:]
+        self.state['executed_signal_ids'] = agg_ids[-MAX_SIGNAL_IDS_PERSIST:]
         self.state['latest_by_strategy'] = latest_by
 
     def run_scan(self) -> dict[str, Any]:
@@ -915,12 +954,12 @@ class HyperliquidFuturesPaperTrack:
                 'regime': regime,
                 'decision': decision,
                 'positions_open': len(book.get('positions', [])),
-                'positions': (book.get('positions', []) or [])[-20:],
-                'closed_trades': (book.get('closed_trades', []) or [])[-20:],
+                'positions': (book.get('positions', []) or [])[-MAX_LATEST_POSITIONS_VIEW:],
+                'closed_trades': (book.get('closed_trades', []) or [])[-MAX_LATEST_CLOSED_VIEW:],
             }
             book['latest'] = s_latest
             book.setdefault('history', []).append(s_latest)
-            book['history'] = book['history'][-1000:]
+            book['history'] = book['history'][-MAX_HISTORY_PERSIST:]
             latest_by_strategy[strategy_key] = s_latest
 
         self._recompute_metrics()
@@ -944,8 +983,8 @@ class HyperliquidFuturesPaperTrack:
             'metrics': self.state.get('metrics', {}),
             'latest_by_strategy': latest_by_strategy,
             'positions_open': len(self.state.get('positions', [])),
-            'positions': self.state.get('positions', [])[-20:],
-            'closed_trades': self.state.get('closed_trades', [])[-20:],
+            'positions': self.state.get('positions', [])[-MAX_LATEST_POSITIONS_VIEW:],
+            'closed_trades': self.state.get('closed_trades', [])[-MAX_LATEST_CLOSED_VIEW:],
             'max_positions': self.risk.max_positions,
             'portfolio_summary': {
                 'strategies_active': len(self.state.get('active_strategy_keys', [])),
