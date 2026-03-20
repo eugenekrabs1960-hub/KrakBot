@@ -189,9 +189,10 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
           <pre>{JSON.stringify(modelHealth || {}, null, 2)}</pre>
           <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(walletSummary?.items || data?.wallet_summaries || [], null, 2)}</pre>
         </div>
+        <div className="muted" style={{ marginBottom: 6 }}>Priced-in Risk is a hybrid signal (news context + market microstructure), not RSS-only.</div>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>
-            <thead><tr><th>Coin</th><th className="num">Sentiment</th><th className="num">Novelty</th><th className="num">Freshness</th><th className="num">Priced-in Risk</th><th>Summary</th></tr></thead>
+            <thead><tr><th>Coin</th><th className="num">Sentiment</th><th className="num">Novelty</th><th className="num">Freshness</th><th className="num">Priced-in Risk (hybrid)</th><th>Summary</th></tr></thead>
             <tbody>
               {Object.keys(newsSignals).length === 0 ? (
                 <tr><td colSpan={6} className="muted">No news summary yet.</td></tr>

@@ -119,6 +119,7 @@ class ChangeSummary(BaseModel):
 
 class OptionalSignals(BaseModel):
     wallet_summary: dict | None = None
+    # note: priced_in_risk_score inside news_summary is hybrid (news + market microstructure), not pure RSS
     news_summary: dict | None = None
     social_summary: dict | None = None
 
