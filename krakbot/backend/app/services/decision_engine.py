@@ -89,6 +89,7 @@ def run_decision_cycle(db: Session) -> dict:
                 filled_notional = er.get('notional_usd', policy.position_sizing.notional_usd or 0.0)
                 fee_bps = cfg.paper_taker_fee_bps if mode == 'paper' else 0.0
                 fee_usd = float(filled_notional or 0.0) * (float(fee_bps) / 10000.0)
+                leverage = float(policy.position_sizing.max_leverage or 1.0)
                 execution_record = {
                     'execution_id': f"exe_{uuid.uuid4().hex[:12]}",
                     'packet_id': packet.packet_id,
@@ -101,6 +102,7 @@ def run_decision_cycle(db: Session) -> dict:
                     'fill_price': er.get('fill_price'),
                     'filled_notional_usd': filled_notional,
                     'fee_type': 'taker' if mode == 'paper' else None,
+                    'leverage': leverage,
                     'fee_bps': fee_bps,
                     'fee_usd': fee_usd,
                     'broker_order_id': er.get('order_id'),

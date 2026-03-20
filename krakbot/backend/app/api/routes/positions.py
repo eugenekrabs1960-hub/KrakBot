@@ -43,6 +43,7 @@ def _paper_positions_from_exec(exec_rows: list[dict], decision_by_packet: dict[s
             'opened_at': None,
             'open_packet_id': None,
             'last_packet_id': None,
+            'last_leverage': 1.0,
         })
 
         prev_qty = st['qty']
@@ -79,6 +80,7 @@ def _paper_positions_from_exec(exec_rows: list[dict], decision_by_packet: dict[s
                 st['open_packet_id'] = e.get('packet_id')
 
         st['last_packet_id'] = e.get('packet_id')
+        st['last_leverage'] = _safe_float(e.get('leverage') or st.get('last_leverage') or 1.0, 1.0)
         state[sym] = st
 
     out = []
@@ -121,7 +123,7 @@ def _paper_positions_from_exec(exec_rows: list[dict], decision_by_packet: dict[s
             'mode': 'paper',
             'opened_at': st.get('opened_at'),
             'setup_type': setup,
-            'leverage': 1.0,
+            'leverage': _safe_float(st.get('last_leverage') or 1.0, 1.0),
         })
     return out
 
