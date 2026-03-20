@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     external_api_enabled: bool = False
     auto_loops_enabled: bool = False
 
+    # controlled news summary path (single source, compact)
+    news_signal_enabled: bool = True
+    news_signal_source_url: str = "https://feeds.feedburner.com/CoinDesk"
+    news_signal_ttl_sec: int = 300
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12

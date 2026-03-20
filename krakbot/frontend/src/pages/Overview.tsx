@@ -38,6 +38,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const recentDecisions = data?.recent_decision_trace || [];
   const blocked = data?.recent_blocked_trades || [];
   const paperAccount = data?.paper_account || {};
+  const newsSignals = data?.latest_news_signals || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
 
@@ -183,10 +184,31 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         </div>
       </Card>
 
-      <Card title="Model + Wallet Signals">
+      <Card title="Model, Wallet, and News Signals">
         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <pre>{JSON.stringify(modelHealth || {}, null, 2)}</pre>
           <pre style={{ maxHeight: 180, overflow: 'auto' }}>{JSON.stringify(walletSummary?.items || data?.wallet_summaries || [], null, 2)}</pre>
+        </div>
+        <div className="table-wrap" style={{ marginTop: 10 }}>
+          <table>
+            <thead><tr><th>Coin</th><th className="num">Sentiment</th><th className="num">Novelty</th><th className="num">Freshness</th><th className="num">Priced-in Risk</th><th>Summary</th></tr></thead>
+            <tbody>
+              {Object.keys(newsSignals).length === 0 ? (
+                <tr><td colSpan={6} className="muted">No news summary yet.</td></tr>
+              ) : (
+                Object.entries(newsSignals).map(([coin, ns]: any) => (
+                  <tr key={coin}>
+                    <td>{coin}</td>
+                    <td className="num">{fmtNum(ns?.sentiment_score, 3)}</td>
+                    <td className="num">{fmtNum(ns?.novelty_score, 3)}</td>
+                    <td className="num">{fmtNum(ns?.freshness_score, 3)}</td>
+                    <td className="num">{fmtNum(ns?.priced_in_risk_score, 3)}</td>
+                    <td>{ns?.summary_text || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </Card>
     </div>
