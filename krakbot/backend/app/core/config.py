@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     leverage_cap: float = 3.0
     allow_long: bool = True
     allow_short: bool = True
+    # runtime-selectivity knob (no-op unless raised): mean_reversion confidence floor for allow_trade
+    mean_reversion_min_confidence: float = 0.0
 
     # policy thresholds
     max_spread_bps: float = 12.0

@@ -114,6 +114,16 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     max_positions_ok = current_open < risk_profile['max_open_positions']
     max_total_ok = (estimated_total_notional + effective_notional) <= risk_profile['max_total_notional']
 
+
+    # setup-specific selectivity knob: tighten mean_reversion allow_trade via runtime confidence floor
+    mr_floor = float(getattr(settings, 'mean_reversion_min_confidence', 0.0) or 0.0)
+    if final_action == 'allow_trade' and decision.setup_type == 'mean_reversion' and float(decision.confidence or 0.0) < mr_floor:
+        final_action = 'downgrade_to_watch'
+        block_reason = 'mean_reversion_selectivity'
+        reasons.append('mean_reversion_confidence_below_floor')
+        lev = 1.0
+        effective_notional = 0.0
+
     if final_action == 'allow_trade' and not all([max_positions_ok, max_total_ok, direction_allowed]):
         final_action = 'block_risk'
         block_reason = 'portfolio_limits'

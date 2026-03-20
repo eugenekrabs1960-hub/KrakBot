@@ -37,6 +37,7 @@ class RiskSettings(BaseModel):
     allow_long: bool = True
     allow_short: bool = True
     no_pyramiding: bool = True
+    mean_reversion_min_confidence: float = 0.0
 
 
 class SettingsBundle(BaseModel):

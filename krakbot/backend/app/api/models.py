@@ -33,5 +33,6 @@ runtime_settings = SettingsBundle(
         allow_long=cfg.allow_long,
         allow_short=cfg.allow_short,
         no_pyramiding=cfg.no_pyramiding,
+        mean_reversion_min_confidence=cfg.mean_reversion_min_confidence,
     ),
 )
