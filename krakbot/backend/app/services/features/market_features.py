@@ -179,8 +179,11 @@ def compute_market_features(market: dict, series: list[dict] | None = None) -> d
     source_ok = 1.0 if source == 'hyperliquid_public' else 0.0
     freshness = 1.0
     if len(hist) >= 2:
-        dt = (hist[-1]['ts'] - hist[-2]['ts']).total_seconds()
-        freshness = _clamp(1.0 - max(0.0, dt - 60.0) / 240.0)
+        t1 = _norm_ts(hist[-1]['ts'])
+        t0 = _norm_ts(hist[-2]['ts'])
+        if t1 is not None and t0 is not None:
+            dt = (t1 - t0).total_seconds()
+            freshness = _clamp(1.0 - max(0.0, dt - 60.0) / 240.0)
 
     liquidity = _clamp(0.6 * depth_score + 0.4 * (1.0 - _clamp(spread_bps / 30.0)))
     completeness = _clamp(
