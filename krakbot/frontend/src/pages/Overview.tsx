@@ -187,10 +187,10 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
 
 
       <Card title="Trending / Community Heat">
-        <div className="muted" style={{ marginBottom: 6 }}>Daily community attention/sentiment summary (not a direct trade trigger).</div>
+        <div className="muted" style={{ marginBottom: 6 }}>Daily community attention summary (not a direct trade trigger). Community bias is a lightweight proxy, not full social sentiment analysis.</div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Coin</th><th className="num">Mention Velocity</th><th className="num">Trendiness</th><th className="num">Sentiment</th><th className="num">Hype</th><th className="num">Crowding Risk</th><th>Summary</th></tr></thead>
+            <thead><tr><th>Coin</th><th className="num">Mention Velocity</th><th className="num">Trendiness</th><th className="num">Community Bias (proxy)</th><th className="num">Hype</th><th className="num">Crowding Risk</th><th>Summary</th></tr></thead>
             <tbody>
               {Object.keys(communitySignals).length === 0 ? (
                 <tr><td colSpan={7} className="muted">No community summary yet.</td></tr>
@@ -200,7 +200,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
                     <td>{coin}</td>
                     <td className="num">{fmtNum(cs?.mention_velocity_score, 3)}</td>
                     <td className="num">{fmtNum(cs?.trendiness_score, 3)}</td>
-                    <td className="num">{fmtNum(cs?.sentiment_score, 3)}</td>
+                    <td className="num">{fmtNum(cs?.community_bias_score, 3)}</td>
                     <td className="num">{fmtNum(cs?.hype_score, 3)}</td>
                     <td className="num">{fmtNum(cs?.crowding_risk, 3)}</td>
                     <td>{cs?.summary_text || '-'}</td>
@@ -220,7 +220,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <div className="muted" style={{ marginBottom: 6 }}>Priced-in Risk is a hybrid signal (news context + market microstructure), not RSS-only.</div>
         <div className="table-wrap" style={{ marginTop: 10 }}>
           <table>
-            <thead><tr><th>Coin</th><th className="num">Sentiment</th><th className="num">Novelty</th><th className="num">Freshness</th><th className="num">Priced-in Risk (hybrid)</th><th>Summary</th></tr></thead>
+            <thead><tr><th>Coin</th><th className="num">Community Bias (proxy)</th><th className="num">Novelty</th><th className="num">Freshness</th><th className="num">Priced-in Risk (hybrid)</th><th>Summary</th></tr></thead>
             <tbody>
               {Object.keys(newsSignals).length === 0 ? (
                 <tr><td colSpan={6} className="muted">No news summary yet.</td></tr>
