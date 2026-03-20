@@ -12,6 +12,7 @@ from app.core.profiles import PAPER_V1, LIVE_V1
 from app.services.ingest.hyperliquid_market import fetch_market_snapshot
 from app.services.ingest.hyperliquid_account import fetch_account_snapshot
 from app.services.features.market_features import compute_market_features
+from app.services.features.market_series import persist_market_snapshot, load_market_series
 from app.services.features.ml_scores import compute_ml_scores
 from app.services.features.packet_builder import build_feature_packet
 from app.services.models.analyst_runner import analyst_runner
@@ -41,15 +42,18 @@ def run_decision_cycle(db: Session) -> dict:
             wallet_summary = generate_wallet_summary_for_coin(db, coin=coin)
             news_summary = get_news_summary(coin, m)
             community_summary = get_community_summary(coin)
-            f = compute_market_features(m)
+            persist_market_snapshot(db, m)
+            db.flush()
+            series = load_market_series(db, coin, lookback_hours=6)
+            f = compute_market_features(m, series=series)
             s = compute_ml_scores(f)
 
             feature_status = {
                 'market_source': m.get('source'),
                 'data_completeness_score': f.get('quality', {}).get('data_completeness_score'),
                 'source_health_score': f.get('quality', {}).get('source_health_score'),
-                'degraded': bool((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.75)),
-                'reason': 'realtime_feature_prerequisites_missing' if ((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.75)) else None,
+                'degraded': bool((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)),
+                'reason': 'realtime_feature_prerequisites_missing_or_warmup' if ((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)) else None,
             }
             # community signal influences attention ranking only (never direct trade trigger)
             comm_attention_boost = 0.0

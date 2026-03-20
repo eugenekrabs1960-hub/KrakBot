@@ -28,17 +28,26 @@ def _zscore(v: float, xs: list[float]) -> float:
     return (v - mu) / sd
 
 
+def _norm_ts(dt):
+    if dt is None:
+        return None
+    if getattr(dt, "tzinfo", None) is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def _value_ago(hist: deque, key: str, seconds: int):
     if not hist:
         return None
-    t_now = hist[-1]['ts']
+    t_now = _norm_ts(hist[-1]['ts'])
     for row in reversed(hist):
-        if (t_now - row['ts']).total_seconds() >= seconds:
+        t_row = _norm_ts(row['ts'])
+        if t_now is not None and t_row is not None and (t_now - t_row).total_seconds() >= seconds:
             return row.get(key)
     return None
 
 
-def compute_market_features(market: dict) -> dict:
+def compute_market_features(market: dict, series: list[dict] | None = None) -> dict:
     coin = market.get('coin') or market.get('symbol', 'UNK').replace('-PERP', '')
     now = datetime.now(timezone.utc)
     px = float(market.get('mark_price') or market.get('last_price') or 0.0)
@@ -50,7 +59,12 @@ def compute_market_features(market: dict) -> dict:
     source = str(market.get('source') or 'unknown')
 
     hist = _HIST[coin]
-    hist.append({'ts': now, 'px': px, 'vol5': vol5, 'oi': oi, 'funding': funding})
+    if series is not None and len(series) > 0:
+        hist.clear()
+        for row in series[-500:]:
+            hist.append({'ts': row['ts'], 'px': float(row['px']), 'vol5': float(row.get('vol5') or 0.0), 'oi': float(row.get('oi') or 0.0), 'funding': float(row.get('funding') or 0.0)})
+    else:
+        hist.append({'ts': now, 'px': px, 'vol5': vol5, 'oi': oi, 'funding': funding})
     prices = [x['px'] for x in hist]
     vols = [x['vol5'] for x in hist]
     ois = [x['oi'] for x in hist]
@@ -75,8 +89,8 @@ def compute_market_features(market: dict) -> dict:
     def rv_sec(sec: int) -> float:
         if len(hist) < 3:
             return 0.0
-        t_now = hist[-1]['ts']
-        pts = [row for row in hist if (t_now - row['ts']).total_seconds() <= sec]
+        t_now = _norm_ts(hist[-1]['ts'])
+        pts = [row for row in hist if t_now is not None and _norm_ts(row['ts']) is not None and (t_now - _norm_ts(row['ts'])).total_seconds() <= sec]
         if len(pts) < 3:
             return 0.0
         p = [float(x['px']) for x in pts]
@@ -92,8 +106,8 @@ def compute_market_features(market: dict) -> dict:
     def ma_sec(sec: int) -> float:
         if not hist:
             return 0.0
-        t_now = hist[-1]['ts']
-        pts = [float(row['px']) for row in hist if (t_now - row['ts']).total_seconds() <= sec]
+        t_now = _norm_ts(hist[-1]['ts'])
+        pts = [float(row['px']) for row in hist if t_now is not None and _norm_ts(row['ts']) is not None and (t_now - _norm_ts(row['ts'])).total_seconds() <= sec]
         if not pts:
             pts = [prices[-1]]
         return float(statistics.mean(pts))
@@ -146,9 +160,9 @@ def compute_market_features(market: dict) -> dict:
     funding_state = 'positive' if funding > 0.00001 else ('negative' if funding < -0.00001 else 'neutral')
 
     # structure
-    t_now = hist[-1]['ts']
-    p1h = [float(row['px']) for row in hist if (t_now - row['ts']).total_seconds() <= 3600] or prices[-1:]
-    p4h = [float(row['px']) for row in hist if (t_now - row['ts']).total_seconds() <= 14400] or prices[-1:]
+    t_now = _norm_ts(hist[-1]['ts'])
+    p1h = [float(row['px']) for row in hist if t_now is not None and _norm_ts(row['ts']) is not None and (t_now - _norm_ts(row['ts'])).total_seconds() <= 3600] or prices[-1:]
+    p4h = [float(row['px']) for row in hist if t_now is not None and _norm_ts(row['ts']) is not None and (t_now - _norm_ts(row['ts'])).total_seconds() <= 14400] or prices[-1:]
     high1h = max(p1h) if p1h else px
     low1h = min(p1h) if p1h else px
     high4h = max(p4h) if p4h else px
@@ -169,12 +183,12 @@ def compute_market_features(market: dict) -> dict:
         freshness = _clamp(1.0 - max(0.0, dt - 60.0) / 240.0)
 
     liquidity = _clamp(0.6 * depth_score + 0.4 * (1.0 - _clamp(spread_bps / 30.0)))
-    completeness = _clamp((
-        (1.0 if px > 0 else 0.0) +
-        (1.0 if vol1h > 0 else 0.0) +
-        (1.0 if oi >= 0 else 0.0) +
-        (1.0 if history_ready else 0.0)
-    ) / 4.0)
+    completeness = _clamp(
+        0.20 * (1.0 if px > 0 else 0.0) +
+        0.20 * (1.0 if vol1h > 0 else 0.0) +
+        0.20 * (1.0 if oi >= 0 else 0.0) +
+        0.40 * (1.0 if history_ready else 0.0)
+    )
     source_health = _clamp(0.7 * source_ok + 0.3 * freshness)
 
     return {

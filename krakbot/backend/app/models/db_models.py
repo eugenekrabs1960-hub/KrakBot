@@ -151,3 +151,20 @@ class ExperimentRunDB(Base):
     status: Mapped[str] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class MarketSnapshot1mDB(Base):
+    __tablename__ = "market_snapshots_1m"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    coin: Mapped[str] = mapped_column(String, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    mid_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mark_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    index_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    funding_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_5m_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_1h_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String, default='unknown')
