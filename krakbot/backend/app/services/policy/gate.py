@@ -73,6 +73,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     direction_allowed = (decision.action != 'long' or settings.allow_long) and (decision.action != 'short' or settings.allow_short)
 
     current_open = int(packet.policy_context.current_open_positions)
+    symbol_open = bool(getattr(packet.policy_context, 'symbol_open_position', False))
     base_notional = float(fixed_small_notional(settings, risk_profile))
 
     final_action = 'allow_trade'
@@ -132,7 +133,9 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
         lev = 1.0
         effective_notional = 0.0
 
-    if final_action == 'allow_trade' and not all([max_positions_ok, max_total_ok, direction_allowed]):
+    no_pyramiding_ok = (not settings.no_pyramiding) or (not symbol_open)
+
+    if final_action == 'allow_trade' and not all([max_positions_ok, max_total_ok, direction_allowed, no_pyramiding_ok]):
         final_action = 'block_risk'
         block_reason = 'portfolio_limits'
         if not max_positions_ok:
@@ -141,6 +144,8 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
             reasons.append('max_total_notional_failed')
         if not direction_allowed:
             reasons.append('direction_not_allowed')
+        if not no_pyramiding_ok:
+            reasons.append('no_pyramiding_failed')
         lev = 1.0
         effective_notional = 0.0
 
@@ -166,6 +171,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
             'max_total_notional_ok': max_total_ok,
             'daily_loss_ok': True,
             'direction_allowed': direction_allowed,
+            'no_pyramiding_ok': no_pyramiding_ok,
         },
         reasons=reasons,
         downgrade_or_block_reason=block_reason,
