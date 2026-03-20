@@ -1121,23 +1121,43 @@ async def execute_mode_scan(mode: str):
         "regime_context": current_regime,
         "strategy_registry_entry": bucket["strategy_registry_entry"],
     }
-    if KRAKEN_USE_LLM_SCAN:
-        d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+    if mode == "btc_15m_conservative_inverse_v1":
+        # True mirror mode: only react to final executable conservative open events.
+        base_latest = (store.get("modes", {}).get("btc_15m_conservative", {}) or {}).get("latest") or {}
+        base_decision = base_latest.get("latest_decision") or {}
+        if base_decision.get("status") == "PAPER_TRADE_OPEN":
+            mirrored_source = {
+                "status": "PROPOSE_TRADE",
+                "side": base_decision.get("side"),
+                "entry_price": base_decision.get("entry_fill_price") or base_decision.get("entry_price"),
+                "stop_loss": base_decision.get("stop_loss"),
+                "take_profit": base_decision.get("take_profit"),
+                "risk_reward_ratio": base_decision.get("risk_reward_ratio"),
+                "regime_label": base_decision.get("regime_label"),
+                "reason": "Mirroring final conservative paper open decision.",
+                "invalidation": base_decision.get("invalidation"),
+                "signal_id": f"{mode}|mirror|{base_decision.get('signal_id')}",
+            }
+            d = invert_conservative_decision(mirrored_source, cfg["rr_min"])
+            d["inverse_of_mode"] = "btc_15m_conservative"
+            d["inverse_of_signal_id"] = base_decision.get("signal_id")
+        else:
+            d = normalize_decision({"status": "WAIT", "regime_label": "inverse_mirror_idle", "reason": "No final conservative open event to mirror on this scan."}, cfg["rr_min"])
     else:
-        d = normalize_decision({"status": "WAIT", "regime_label": "llm_scan_disabled", "reason": "Kraken no-LLM mode active."}, cfg["rr_min"])
+        if KRAKEN_USE_LLM_SCAN:
+            d = await call_clawbot(payload, timeframe, cfg["rr_min"])
+        else:
+            d = normalize_decision({"status": "WAIT", "regime_label": "llm_scan_disabled", "reason": "Kraken no-LLM mode active."}, cfg["rr_min"])
 
-    # Experiment slot must remain a different family from the frozen baseline.
-    if mode == "btc_15m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
-        if not str(d.get("regime_label", "")).startswith("brk15_"):
-            d = normalize_decision({"status": "WAIT", "regime_label": "brk15_family_mismatch", "reason": "15m experiment family gate blocked non-breakout-retest proposal."}, cfg["rr_min"])
+        # Experiment slot must remain a different family from the frozen baseline.
+        if mode == "btc_15m_breakout_retest" and d.get("status") == "PROPOSE_TRADE":
+            if not str(d.get("regime_label", "")).startswith("brk15_"):
+                d = normalize_decision({"status": "WAIT", "regime_label": "brk15_family_mismatch", "reason": "15m experiment family gate blocked non-breakout-retest proposal."}, cfg["rr_min"])
 
-    if d["status"] == "WAIT":
-        fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
-        if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
-            d = fb
-
-    if mode == "btc_15m_conservative_inverse_v1" and d.get("status") == "PROPOSE_TRADE":
-        d = invert_conservative_decision(d, cfg["rr_min"])
+        if d["status"] == "WAIT":
+            fb = fallback_construct(candles, cfg["rr_min"], cfg["aggressive"], timeframe)
+            if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
+                d = fb
 
     if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1", "btc_15m_conservative_inverse_v1"} and d.get("status") == "PROPOSE_TRADE":
         d = conservative_fee_efficiency_gate(d, mode)
@@ -1169,6 +1189,8 @@ async def execute_mode_scan(mode: str):
             "risk_reward_ratio": decision.get("risk_reward_ratio", 0),
             "invalidation": decision.get("invalidation", ""),
             "signal_id": decision.get("signal_id", ""),
+            "inverse_of_mode": decision.get("inverse_of_mode"),
+            "inverse_of_signal_id": decision.get("inverse_of_signal_id"),
         }
 
     # auto execution per-mode lock only
@@ -1202,6 +1224,7 @@ async def execute_mode_scan(mode: str):
                 "fee_pct": entry_fee_info.get("fee_pct"),
                 "stop_loss": d["stop_loss"], "take_profit": d["take_profit"], "invalidation": d["invalidation"],
                 "regime_label": d["regime_label"], "reason": d["reason"], "risk_reward_ratio": d["risk_reward_ratio"], "open_time": now_iso(), "open_candle_time": candles[-1]["time"], "last_seen_candle_time": candles[-1]["time"], "bars_open": 0, "close_time": None,
+                "inverse_of_mode": d.get("inverse_of_mode"), "inverse_of_signal_id": d.get("inverse_of_signal_id"),
                 "status": "PAPER_TRADE_OPEN",
                 "gross_unrealized_pnl": 0,
                 "estimated_exit_fee": round2(initial_exit_fee),
