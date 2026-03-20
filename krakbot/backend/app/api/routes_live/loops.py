@@ -12,7 +12,7 @@ router = APIRouter(tags=["loops"])
 @router.get('/loops/status')
 def loops_status():
     return {
-        "running": True,
+        "running": bool(loop_scheduler._running),
         "tracked_scores": list(loop_scheduler.last_feature_scores.keys()),
         "feature_count": len(loop_scheduler.last_feature_scores),
         "last_feature_run_at": loop_scheduler.last_feature_run_at,
