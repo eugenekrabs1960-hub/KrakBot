@@ -15,19 +15,20 @@ class ExperimentSpec(BaseModel):
     change_path: str
     change_value: object
     cycles: int = 40
+    include_control_rerun: bool = False
 
 
 @router.post('/experiments/run')
 def experiments_run(spec: ExperimentSpec, db: Session = Depends(get_db)):
     try:
-        out = run_experiment(
+        return run_experiment(
             db,
             name=spec.name,
             change_path=spec.change_path,
             change_value=spec.change_value,
             cycles=spec.cycles,
+            include_control_rerun=spec.include_control_rerun,
         )
-        return out
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -35,19 +36,18 @@ def experiments_run(spec: ExperimentSpec, db: Session = Depends(get_db)):
 @router.get('/experiments/runs')
 def experiments_runs(limit: int = 20, db: Session = Depends(get_db)):
     rows = db.query(ExperimentRunDB).order_by(desc(ExperimentRunDB.created_at)).limit(max(1, min(limit, 200))).all()
-    return {
-        'items': [
-            {
-                'run_id': r.run_id,
-                'name': r.name,
-                'status': r.status,
-                'created_at': r.created_at,
-                'classification': (r.payload or {}).get('classification'),
-                'spec': (r.payload or {}).get('spec'),
-            }
-            for r in rows
-        ]
-    }
+    return {'items': [
+        {
+            'run_id': r.run_id,
+            'name': r.name,
+            'status': r.status,
+            'created_at': r.created_at,
+            'classification': (r.payload or {}).get('classification'),
+            'spec': (r.payload or {}).get('spec'),
+            'methodology': (r.payload or {}).get('methodology'),
+        }
+        for r in rows
+    ]}
 
 
 @router.get('/experiments/runs/{run_id}')
