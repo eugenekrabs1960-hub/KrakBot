@@ -22,3 +22,6 @@ export const getRelayHistory = (limit = 20) => fetch(`${API}/execution/relay/his
 export const getWalletSummary = () => fetch(`${API}/wallets/summary`).then(r => r.json());
 
 export const getModelHealth = () => fetch(`${API}/model/health`).then(r => r.json());
+
+export const runExperiment = (body: any) => fetch(`${API}/experiments/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+export const getExperimentRuns = (limit = 20) => fetch(`${API}/experiments/runs?limit=${limit}`).then(r => r.json());

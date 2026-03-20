@@ -142,3 +142,12 @@ class WalletSummaryDB(Base):
     symbol: Mapped[str] = mapped_column(String, index=True)
     generated_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class ExperimentRunDB(Base):
+    __tablename__ = "experiment_runs"
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    payload: Mapped[dict] = mapped_column(JSON)

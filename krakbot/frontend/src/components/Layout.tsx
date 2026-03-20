@@ -1,7 +1,7 @@
 import React from 'react';
 
 export default function Layout({ page, setPage, children }: any) {
-  const tabs = ['Overview', 'Candidates', 'Positions', 'Decisions', 'Settings'];
+  const tabs = ['Overview', 'Candidates', 'Positions', 'Decisions', 'Experiments', 'Settings'];
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 16 }}>
       <h1>KrakBot AI Trading Lab</h1>

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from app.core.logging import setup_logging
 from app.core.database import Base, engine
 from app.models import db_models  # noqa: F401
-from app.api.routes import health, overview, candidates, decisions, positions, trades, settings, execution, profiles, wallets, model_runtime
+from app.api.routes import health, overview, candidates, decisions, positions, trades, settings, execution, profiles, wallets, model_runtime, experiments
 from app.api.routes_live import loops, reconciliation, relay_stub
 from app.services.loops.scheduler import loop_scheduler
 from app.core.config import settings as app_settings
@@ -37,6 +37,7 @@ app.include_router(execution.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
 app.include_router(wallets.router, prefix="/api")
 app.include_router(model_runtime.router, prefix="/api")
+app.include_router(experiments.router, prefix="/api")
 app.include_router(loops.router, prefix="/api")
 app.include_router(reconciliation.router, prefix="/api")
 app.include_router(relay_stub.router, prefix="/api")

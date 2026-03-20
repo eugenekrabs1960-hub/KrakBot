@@ -6,6 +6,7 @@ import Candidates from './pages/Candidates';
 import Positions from './pages/Positions';
 import Decisions from './pages/Decisions';
 import Settings from './pages/Settings';
+import Experiments from './pages/Experiments';
 import {
   getOverview,
   getCandidates,
@@ -20,6 +21,8 @@ import {
   getRelayHistory,
   getWalletSummary,
   getModelHealth,
+  runExperiment,
+  getExperimentRuns,
 } from './api/client';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -37,9 +40,10 @@ function App() {
   const [relayHistory, setRelayHistory] = useState<any>(null);
   const [walletSummary, setWalletSummary] = useState<any>(null);
   const [modelHealth, setModelHealth] = useState<any>(null);
+  const [experimentRuns, setExperimentRuns] = useState<any>(null);
 
   const refresh = async () => {
-    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh] = await Promise.all([
+    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh, exr] = await Promise.all([
       getOverview(),
       getCandidates(),
       getPositions(),
@@ -51,6 +55,7 @@ function App() {
       getRelayHistory(20),
       getWalletSummary(),
       getModelHealth(),
+      getExperimentRuns(20),
     ]);
     setOverview(o);
     setCandidates(c);
@@ -63,6 +68,7 @@ function App() {
     setRelayHistory(relh);
     setWalletSummary(ws);
     setModelHealth(mh);
+    setExperimentRuns(exr);
   };
 
   useEffect(() => {
@@ -91,6 +97,18 @@ function App() {
       {page === 'Candidates' && <Candidates data={candidates} />}
       {page === 'Positions' && <Positions data={positions} />}
       {page === 'Decisions' && <Decisions data={decisions} />}
+
+      {page === 'Experiments' && (
+        <Experiments
+          runs={experimentRuns}
+          onRefresh={refresh}
+          onRun={async (spec: any) => {
+            await runExperiment(spec);
+            await refresh();
+          }}
+        />
+      )}
+
       {page === 'Settings' && (
         <Settings
           data={settings}
