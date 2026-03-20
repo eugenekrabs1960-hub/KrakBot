@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     community_signal_source_url: str = "https://api.coingecko.com/api/v3/search/trending"
     community_signal_ttl_sec: int = 900
 
+    # low-pressure experiment runner guardrails
+    experiment_cycle_delay_sec: float = 0.35
+    experiment_abort_on_model_offline: bool = True
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12

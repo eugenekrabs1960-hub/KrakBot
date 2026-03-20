@@ -14,7 +14,7 @@ class ExperimentSpec(BaseModel):
     name: str = Field(min_length=3, max_length=120)
     change_path: str
     change_value: object
-    cycles: int = 40
+    cycles: int = 20
     include_control_rerun: bool = False
 
 

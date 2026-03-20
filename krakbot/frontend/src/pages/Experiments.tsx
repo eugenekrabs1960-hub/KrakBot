@@ -5,7 +5,7 @@ export default function Experiments({ runs, onRun, onRefresh }: any) {
   const [name, setName] = useState('exp-v1-risk-notional');
   const [path, setPath] = useState('risk.max_notional_per_trade');
   const [value, setValue] = useState('60');
-  const [cycles, setCycles] = useState(40);
+  const [cycles, setCycles] = useState(20);
   const [control, setControl] = useState(false);
 
   return (

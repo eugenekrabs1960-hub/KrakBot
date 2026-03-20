@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import uuid
 from collections import Counter
 
+import requests
 from sqlalchemy.orm import Session
 
 from app.api import models as api_models
@@ -41,7 +42,18 @@ def _bucket_conf(c: float) -> str:
     return '0.80-1.00'
 
 
-def _run_window(db: Session, cycles: int, label: str) -> dict:
+def _model_online() -> bool:
+    try:
+        headers = {}
+        if settings.local_model_api_key:
+            headers['Authorization'] = f"Bearer {settings.local_model_api_key}"
+        r = requests.get(f"{settings.local_model_base_url.rstrip('/')}/v1/models", headers=headers, timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _run_window(db: Session, cycles: int, label: str, cycle_delay_sec: float) -> dict:
     policy = Counter()
     by_coin = Counter()
     by_side = Counter()
@@ -53,7 +65,15 @@ def _run_window(db: Session, cycles: int, label: str) -> dict:
     lats = []
 
     started_at = datetime.now(timezone.utc)
+    aborted = False
+    abort_reason = None
+
     for _ in range(cycles):
+        if settings.experiment_abort_on_model_offline and not _model_online():
+            aborted = True
+            abort_reason = 'model_offline'
+            break
+
         t0 = time.time()
         out = run_decision_cycle(db)
         lats.append((time.time() - t0) * 1000)
@@ -72,6 +92,9 @@ def _run_window(db: Session, cycles: int, label: str) -> dict:
             if e.get('status') == 'filled':
                 fills += 1
                 fees += float(e.get('fee_usd') or 0.0)
+
+        time.sleep(max(0.05, float(cycle_delay_sec)))
+
     ended_at = datetime.now(timezone.utc)
 
     exec_rows = [r.payload for r in db.query(ExecutionRecordDB).filter(ExecutionRecordDB.mode == 'paper').all()]
@@ -80,6 +103,8 @@ def _run_window(db: Session, cycles: int, label: str) -> dict:
     return {
         'label': label,
         'cycles': cycles,
+        'aborted': aborted,
+        'abort_reason': abort_reason,
         'market_time_window': {
             'started_at_utc': started_at.isoformat(),
             'ended_at_utc': ended_at.isoformat(),
@@ -113,10 +138,11 @@ def _total_equity(metrics: dict) -> float:
 
 
 def _classify(base: dict, var: dict, control: dict | None) -> str:
+    if base.get('aborted') or var.get('aborted') or (control and control.get('aborted')):
+        return 'inconclusive'
     b = _total_equity(base)
     v = _total_equity(var)
     c = _total_equity(control) if control else b
-    # keep only when variant outperforms both baseline and control by margin
     if (v - max(b, c)) > 5:
         return 'keep'
     if (v - min(b, c)) < -5:
@@ -124,7 +150,7 @@ def _classify(base: dict, var: dict, control: dict | None) -> str:
     return 'inconclusive'
 
 
-def run_experiment(db: Session, *, name: str, change_path: str, change_value, cycles: int = 40, include_control_rerun: bool = False) -> dict:
+def run_experiment(db: Session, *, name: str, change_path: str, change_value, cycles: int = 20, include_control_rerun: bool = False) -> dict:
     if api_models.runtime_settings.mode.execution_mode != 'paper':
         raise ValueError('paper_only_experiments')
     if cycles < 5 or cycles > 200:
@@ -133,52 +159,83 @@ def run_experiment(db: Session, *, name: str, change_path: str, change_value, cy
     run_id = f"exp_{uuid.uuid4().hex[:10]}"
     settings_before = copy.deepcopy(api_models.runtime_settings)
 
-    baseline_reset = reset_paper_state(db)
-    baseline = _run_window(db, cycles, 'baseline')
+    # dedicated low-pressure experiment mode (restored after run)
+    prev_candidate_cap = api_models.runtime_settings.universe.max_candidates_per_cycle
+    prev_llm_safe = settings.llm_safe_mode
+    prev_llm_cap = settings.llm_safe_mode_max_candidates
+    prev_repair_disabled = settings.llm_disable_repair
+    prev_concurrency = settings.llm_max_concurrent_requests
 
-    reset_paper_state(db)
-    old_value = _get_nested(api_models.runtime_settings, change_path)
-    _set_nested(api_models.runtime_settings, change_path, change_value)
-    variant = _run_window(db, cycles, 'variant')
+    api_models.runtime_settings.universe.max_candidates_per_cycle = 1
+    settings.llm_safe_mode = True
+    settings.llm_safe_mode_max_candidates = 1
+    settings.llm_disable_repair = True
+    settings.llm_max_concurrent_requests = 1
 
-    _set_nested(api_models.runtime_settings, change_path, old_value)
+    cycle_delay = float(settings.experiment_cycle_delay_sec)
 
-    control = None
-    if include_control_rerun:
+    try:
+        baseline_reset = reset_paper_state(db)
+        baseline = _run_window(db, cycles, 'baseline', cycle_delay)
+
         reset_paper_state(db)
-        control = _run_window(db, cycles, 'control_rerun')
+        old_value = _get_nested(api_models.runtime_settings, change_path)
+        _set_nested(api_models.runtime_settings, change_path, change_value)
+        variant = _run_window(db, cycles, 'variant', cycle_delay)
 
-    result = {
-        'run_id': run_id,
-        'name': name,
-        'methodology': {
-            'paper_only': True,
-            'one_change_at_a_time': True,
-            'sequential_windows_in_live_market_time': True,
-            'workflow': ['baseline', 'variant'] + (['control_rerun'] if include_control_rerun else []),
-            'interpretation_warning': 'baseline/variant are sequential windows in changing market conditions; treat small deltas as inconclusive',
-        },
-        'spec': {
-            'paper_only': True,
-            'one_change': {'path': change_path, 'old': old_value, 'new': change_value},
-            'cycles': cycles,
-            'include_control_rerun': include_control_rerun,
-            'baseline_starting_equity_usd': settings.paper_starting_equity_usd,
-        },
-        'settings_snapshot_before': settings_before.model_dump(),
-        'baseline_reset': baseline_reset,
-        'baseline_metrics': baseline,
-        'variant_metrics': variant,
-        'control_rerun_metrics': control,
-        'classification': _classify(baseline, variant, control),
-    }
+        _set_nested(api_models.runtime_settings, change_path, old_value)
 
-    db.add(ExperimentRunDB(
-        run_id=run_id,
-        name=name,
-        status='completed',
-        created_at=datetime.now(timezone.utc),
-        payload=result,
-    ))
-    db.commit()
-    return result
+        control = None
+        if include_control_rerun:
+            reset_paper_state(db)
+            control = _run_window(db, cycles, 'control_rerun', cycle_delay)
+
+        result = {
+            'run_id': run_id,
+            'name': name,
+            'methodology': {
+                'paper_only': True,
+                'one_change_at_a_time': True,
+                'sequential_windows_in_live_market_time': True,
+                'workflow': ['baseline', 'variant'] + (['control_rerun'] if include_control_rerun else []),
+                'interpretation_warning': 'baseline/variant are sequential windows in changing market conditions; treat small deltas as inconclusive',
+                'low_pressure_guardrails': {
+                    'cycles_default': 20,
+                    'include_control_rerun_default': False,
+                    'candidate_cap': 1,
+                    'repair_disabled': True,
+                    'llm_concurrency': 1,
+                    'cycle_delay_sec': cycle_delay,
+                    'abort_on_model_offline': bool(settings.experiment_abort_on_model_offline),
+                },
+            },
+            'spec': {
+                'paper_only': True,
+                'one_change': {'path': change_path, 'old': old_value, 'new': change_value},
+                'cycles': cycles,
+                'include_control_rerun': include_control_rerun,
+                'baseline_starting_equity_usd': settings.paper_starting_equity_usd,
+            },
+            'settings_snapshot_before': settings_before.model_dump(),
+            'baseline_reset': baseline_reset,
+            'baseline_metrics': baseline,
+            'variant_metrics': variant,
+            'control_rerun_metrics': control,
+            'classification': _classify(baseline, variant, control),
+        }
+
+        db.add(ExperimentRunDB(
+            run_id=run_id,
+            name=name,
+            status='completed',
+            created_at=datetime.now(timezone.utc),
+            payload=result,
+        ))
+        db.commit()
+        return result
+    finally:
+        api_models.runtime_settings.universe.max_candidates_per_cycle = prev_candidate_cap
+        settings.llm_safe_mode = prev_llm_safe
+        settings.llm_safe_mode_max_candidates = prev_llm_cap
+        settings.llm_disable_repair = prev_repair_disabled
+        settings.llm_max_concurrent_requests = prev_concurrency
