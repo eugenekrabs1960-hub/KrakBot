@@ -121,6 +121,7 @@ def _paper_positions_from_exec(exec_rows: list[dict], decision_by_packet: dict[s
             'mode': 'paper',
             'opened_at': st.get('opened_at'),
             'setup_type': setup,
+            'leverage': 1.0,
         })
     return out
 
@@ -168,6 +169,7 @@ def positions(db: Session = Depends(get_db)):
                 'mode': mode,
                 'opened_at': None,
                 'setup_type': None,
+                'leverage': float(p.get('leverage') or 1.0),
             })
 
     return {'items': items, 'mode': mode}

@@ -19,6 +19,7 @@ export default function Positions({ data }: any) {
                 <th>Side</th>
                 <th className="num">Size</th>
                 <th className="num">Notional</th>
+                <th className="num">Leverage</th>
                 <th className="num">Entry</th>
                 <th className="num">Mark</th>
                 <th className="num">Unrealized PnL</th>
@@ -33,6 +34,7 @@ export default function Positions({ data }: any) {
                   <td><span className={`badge ${x.side === 'long' ? 'good' : 'bad'}`}>{x.side}</span></td>
                   <td className="num">{fmtNum(x.qty, 3)}</td>
                   <td className="num">{fmtUsd(x.notional_usd)}</td>
+                  <td className="num">{fmtNum(x.leverage ?? 1.0, 1)}x</td>
                   <td className="num">{fmtUsd(x.entry_px)}</td>
                   <td className="num">{fmtUsd(x.mark_px)}</td>
                   <td className={`num value ${pnlClass(x.unrealized_pnl)}`}>{fmtUsd(x.unrealized_pnl)}</td>

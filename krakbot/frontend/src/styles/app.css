@@ -280,3 +280,30 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.info2 { background: rgba(139,92,246,0.2); color: #d9c9ff; }
 
 .section-sub { color: var(--muted); margin-top: -8px; margin-bottom: 12px; }
+
+.top-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.top-tab {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  padding: 8px 13px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background .15s ease, border-color .15s ease, transform .12s ease;
+}
+.top-tab:hover {
+  border-color: #5d45a5;
+  background: rgba(139,92,246,0.14);
+}
+.top-tab.active {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(139,92,246,.30), rgba(139,92,246,.18));
+  color: #efe9ff;
+  box-shadow: 0 0 0 1px rgba(139,92,246,.3) inset;
+}
