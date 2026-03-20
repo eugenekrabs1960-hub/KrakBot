@@ -79,12 +79,20 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     reasons = []
     block_reason = None
 
+
+    fs = getattr(packet.optional_signals, 'feature_engine_status', None) or {}
+    realtime_feature_degraded = bool(fs.get('degraded'))
+
     if decision.action == 'no_trade':
         final_action = 'downgrade_to_watch'
         reasons.append('model_no_trade')
     elif not mode_settings.trading_enabled or (mode_settings.execution_mode == 'live_hyperliquid' and not mode_settings.live_armed):
         final_action = 'block_mode_disabled'
         block_reason = 'trading disabled or live not armed'
+    elif mode_settings.execution_mode == 'paper' and realtime_feature_degraded:
+        final_action = 'block_market_conditions'
+        block_reason = 'realtime_feature_prerequisites_missing'
+        reasons.append('feature_engine_degraded')
     elif not all([checks['freshness_ok'], checks['liquidity_ok'], checks['volatility_ok']]):
         final_action = 'block_market_conditions'
         block_reason = 'market_quality'

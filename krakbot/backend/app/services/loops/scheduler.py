@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import requests
 import logging
 from datetime import datetime, timezone
 
 from app.api.models import runtime_settings
+from app.core.config import settings as cfg
 from app.core.database import SessionLocal
 from app.services.decision_engine import run_decision_cycle
 from app.services.ingest.hyperliquid_market import fetch_market_snapshot
@@ -74,6 +76,17 @@ class LoopScheduler:
         while self._running:
             started = datetime.now(timezone.utc)
             try:
+                if not _model_online():
+                    self.last_error = 'decision_loop:model_offline'
+                    try:
+                        with SessionLocal() as db:
+                            run_id = start_loop_run(db, 'decision')
+                            finish_loop_run(db, run_id, 'error', started, 'model_offline')
+                    except Exception:
+                        pass
+                    await asyncio.sleep(max(30, runtime_settings.loop.decision_cycle_seconds))
+                    continue
+
                 with SessionLocal() as db:
                     run_id = start_loop_run(db, 'decision')
                     run_decision_cycle(db)
@@ -89,6 +102,19 @@ class LoopScheduler:
                 except Exception:
                     pass
             await asyncio.sleep(max(30, runtime_settings.loop.decision_cycle_seconds))
+
+
+
+
+def _model_online() -> bool:
+    try:
+        headers = {}
+        if cfg.local_model_api_key:
+            headers['Authorization'] = f"Bearer {cfg.local_model_api_key}"
+        r = requests.get(f"{cfg.local_model_base_url.rstrip('/')}/v1/models", headers=headers, timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
 
 
 loop_scheduler = LoopScheduler()

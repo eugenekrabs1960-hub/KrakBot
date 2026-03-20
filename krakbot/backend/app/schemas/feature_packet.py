@@ -123,6 +123,7 @@ class OptionalSignals(BaseModel):
     news_summary: dict | None = None
     social_summary: dict | None = None
     community_summary: dict | None = None
+    feature_engine_status: dict | None = None
 
 
 class PolicyContext(BaseModel):

@@ -40,6 +40,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const paperAccount = data?.paper_account || {};
   const newsSignals = data?.latest_news_signals || {};
   const communitySignals = data?.latest_community_signals || {};
+  const featureStatus = data?.latest_feature_status || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
 
@@ -53,6 +54,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <span className={`badge ${mode.execution_mode === 'paper' ? 'good' : (mode.live_armed ? 'warn' : 'bad')}`}>{safety}</span>
         <span className={`badge ${mode.trading_enabled ? 'good' : 'bad'}`}>{mode.trading_enabled ? 'Trading Enabled' : 'Trading Disabled'}</span>
         <span className={`badge ${modelHealth?.ok ? 'good' : 'bad'}`}>Model {modelHealth?.ok ? 'Online' : 'Offline'}</span>
+        <span className={`badge ${loopsStatus?.running ? 'good' : 'warn'}`}>Loop {loopsStatus?.running ? 'Running' : 'Stopped'}</span>
         <button className="btn" onClick={onRun}>Run Paper Cycle</button>
       </div>
 
@@ -69,6 +71,31 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <KeyStat label="Paper Equity" value={fmtUsd(paperAccount.total_equity_usd || 0)} cls={pnlClass((paperAccount.total_equity_usd || 0) - 10000)} />
         <KeyStat label="Cumulative Fees" value={fmtUsd(paperAccount.cumulative_fees_usd || 0)} className="neutral" />
       </div>
+
+
+      <Card title="Market Data / Feature Engine Health">
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Coin</th><th>Market Source</th><th className="num">Completeness</th><th className="num">Source Health</th><th>Status</th><th>Reason</th></tr></thead>
+            <tbody>
+              {Object.keys(featureStatus).length === 0 ? (
+                <tr><td colSpan={6} className="muted">No feature status yet.</td></tr>
+              ) : (
+                Object.entries(featureStatus).map(([coin, fs]: any) => (
+                  <tr key={coin}>
+                    <td>{coin}</td>
+                    <td>{fs?.market_source || '-'}</td>
+                    <td className="num">{fmtNum(fs?.data_completeness_score, 3)}</td>
+                    <td className="num">{fmtNum(fs?.source_health_score, 3)}</td>
+                    <td><span className={`badge ${fs?.degraded ? 'block' : 'allow'}`}>{fs?.degraded ? 'Degraded' : 'Healthy'}</span></td>
+                    <td>{fs?.reason || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       <Card title="Top Candidate Watchlist">
         <div className="table-wrap">

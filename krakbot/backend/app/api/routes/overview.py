@@ -185,16 +185,20 @@ def overview(db: Session = Depends(get_db)):
     fp_rows = db.query(FeaturePacketDB).order_by(desc(FeaturePacketDB.generated_at)).limit(200).all()
     latest_news = {}
     latest_community = {}
+    latest_feature_status = {}
     for r in fp_rows:
         p = r.payload or {}
         coin = p.get('coin')
         opt = p.get('optional_signals') or {}
         ns = opt.get('news_summary')
         cs = opt.get('community_summary')
+        fs = opt.get('feature_engine_status')
         if coin and ns and coin not in latest_news:
             latest_news[coin] = ns
         if coin and cs and coin not in latest_community:
             latest_community[coin] = cs
+        if coin and fs and coin not in latest_feature_status:
+            latest_feature_status[coin] = fs
 
     allowed = [r.payload for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade'][:20]
     blocked = [r.payload for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_')][:20]
@@ -292,6 +296,7 @@ def overview(db: Session = Depends(get_db)):
     blocked_count = sum(1 for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_'))
 
     top_candidates = _top_candidates_snapshot(db, runtime_settings.universe.tracked_coins)
+    degraded = [c for c in latest_feature_status.values() if c.get('degraded')]
 
     return {
         'mode': runtime_settings.mode.model_dump(),
@@ -306,9 +311,11 @@ def overview(db: Session = Depends(get_db)):
         'recent_execution': recent_exec[:50],
         'recent_trade_fills': trades_panel,
         'top_candidates': top_candidates,
+        'feature_degraded_count': len(degraded),
         'wallet_summaries': wallet_items,
         'latest_news_signals': latest_news,
         'latest_community_signals': latest_community,
+        'latest_feature_status': latest_feature_status,
         'last_decision_cycle_at': (policy_rows[0].payload or {}).get('evaluated_at') if policy_rows else None,
         'performance_summary': {
             'realized_pnl': paper_account.get('realized_pnl_usd', realized_pnl) if runtime_settings.mode.execution_mode=='paper' else realized_pnl,

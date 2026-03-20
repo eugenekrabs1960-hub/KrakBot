@@ -43,6 +43,14 @@ def run_decision_cycle(db: Session) -> dict:
             community_summary = get_community_summary(coin)
             f = compute_market_features(m)
             s = compute_ml_scores(f)
+
+            feature_status = {
+                'market_source': m.get('source'),
+                'data_completeness_score': f.get('quality', {}).get('data_completeness_score'),
+                'source_health_score': f.get('quality', {}).get('source_health_score'),
+                'degraded': bool((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.75)),
+                'reason': 'realtime_feature_prerequisites_missing' if ((m.get('source') != 'hyperliquid_public') or (float(f.get('quality', {}).get('data_completeness_score') or 0.0) < 0.75)) else None,
+            }
             # community signal influences attention ranking only (never direct trade trigger)
             comm_attention_boost = 0.0
             comm_crowding_penalty = 0.0
@@ -52,7 +60,7 @@ def run_decision_cycle(db: Session) -> dict:
 
             rank = 0.45 * s['attention_score'] + 0.35 * s['opportunity_score'] + 0.2 * s['tradability_score']
             rank = rank + comm_attention_boost - comm_crowding_penalty
-            cands.append((rank, coin, m, f, s, wallet_summary, news_summary, community_summary))
+            cands.append((rank, coin, m, f, s, wallet_summary, news_summary, community_summary, feature_status))
         cands.sort(key=lambda x: x[0], reverse=True)
 
         outputs = []
@@ -61,7 +69,7 @@ def run_decision_cycle(db: Session) -> dict:
         if cfg.llm_safe_mode:
             top_n = min(top_n, max(1, cfg.llm_safe_mode_max_candidates))
 
-        for rank, coin, m, f, s, wallet_summary, news_summary, community_summary in cands[:top_n]:
+        for rank, coin, m, f, s, wallet_summary, news_summary, community_summary, feature_status in cands[:top_n]:
             packet = build_feature_packet(
                 coin=coin,
                 mode=mode,
@@ -78,6 +86,7 @@ def run_decision_cycle(db: Session) -> dict:
                 wallet_summary=wallet_summary,
                 news_summary=news_summary,
                 community_summary=community_summary,
+                feature_engine_status=feature_status,
             )
             decision = analyst_runner.run(packet)
             policy = evaluate_policy(packet, decision, runtime_settings.mode, risk_profile, cfg)
