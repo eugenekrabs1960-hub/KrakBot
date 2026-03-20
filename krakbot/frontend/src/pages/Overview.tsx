@@ -55,12 +55,15 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <span className={`badge ${mode.trading_enabled ? 'good' : 'bad'}`}>{mode.trading_enabled ? 'Trading Enabled' : 'Trading Disabled'}</span>
         <span className={`badge ${modelHealth?.ok ? 'good' : 'bad'}`}>Model {modelHealth?.ok ? 'Online' : 'Offline'}</span>
         <span className={`badge ${loopsStatus?.running ? 'good' : 'warn'}`}>Loop {loopsStatus?.running ? 'Running' : 'Stopped'}</span>
+        <span className={`badge ${loopsStatus?.model_backoff_active ? 'block' : 'neutral'}`}>Backoff {loopsStatus?.model_backoff_active ? 'Active' : 'Idle'}</span>
         <button className="btn" onClick={onRun}>Run Paper Cycle</button>
       </div>
 
       <div className="grid kpi">
         <KeyStat label="Last Decision Cycle" value={fmtTsLA(data?.last_decision_cycle_at || loopsStatus?.last_decision_run_at)} />
         <KeyStat label="Last Feature Loop" value={fmtTsLA(loopsStatus?.last_feature_run_at)} />
+        <KeyStat label="Model Cooldown Until" value={fmtTsLA(loopsStatus?.model_cooldown_until)} />
+        <KeyStat label="Offline Events" value={loopsStatus?.model_offline_events ?? 0} />
         <KeyStat label="Open Positions" value={perf.total_open_positions ?? 0} sub="Current paper positions" />
         <KeyStat label="Allowed Trades" value={perf.allowed_trade_count ?? 0} />
         <KeyStat label="Blocked Trades" value={perf.blocked_trade_count ?? 0} />

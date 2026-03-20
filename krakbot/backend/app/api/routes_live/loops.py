@@ -18,6 +18,12 @@ def loops_status():
         "last_feature_run_at": loop_scheduler.last_feature_run_at,
         "last_decision_run_at": loop_scheduler.last_decision_run_at,
         "last_error": loop_scheduler.last_error,
+        "model_backoff_active": loop_scheduler.model_backoff_active,
+        "model_cooldown_until": loop_scheduler.model_cooldown_until,
+        "model_offline_events": loop_scheduler.model_offline_events,
+        "model_consecutive_offline": loop_scheduler.model_consecutive_offline,
+        "model_last_offline_at": loop_scheduler.model_last_offline_at,
+        "model_last_recovered_at": loop_scheduler.model_last_recovered_at,
     }
 
 

@@ -26,6 +26,12 @@ class LoopScheduler:
         self.last_error: str | None = None
         self.last_feature_run_at: str | None = None
         self.last_decision_run_at: str | None = None
+        self.model_backoff_active: bool = False
+        self.model_cooldown_until: str | None = None
+        self.model_offline_events: int = 0
+        self.model_consecutive_offline: int = 0
+        self.model_last_offline_at: str | None = None
+        self.model_last_recovered_at: str | None = None
 
     async def start(self):
         if self._running:
@@ -78,14 +84,29 @@ class LoopScheduler:
             try:
                 if not _model_online():
                     self.last_error = 'decision_loop:model_offline'
+                    self.model_offline_events += 1
+                    self.model_consecutive_offline += 1
+                    self.model_backoff_active = True
+                    self.model_last_offline_at = datetime.now(timezone.utc).isoformat()
+                    base = max(10, int(cfg.model_offline_cooldown_sec))
+                    maxb = max(base, int(cfg.model_offline_backoff_max_sec))
+                    cooldown = min(maxb, int(base * (2 ** max(0, self.model_consecutive_offline - 1))))
+                    until = datetime.now(timezone.utc).timestamp() + cooldown
+                    self.model_cooldown_until = datetime.fromtimestamp(until, tz=timezone.utc).isoformat()
                     try:
                         with SessionLocal() as db:
                             run_id = start_loop_run(db, 'decision')
-                            finish_loop_run(db, run_id, 'error', started, 'model_offline')
+                            finish_loop_run(db, run_id, 'error', started, f'model_offline_backoff_{cooldown}s')
                     except Exception:
                         pass
-                    await asyncio.sleep(max(30, runtime_settings.loop.decision_cycle_seconds))
+                    await asyncio.sleep(cooldown)
                     continue
+
+                if self.model_backoff_active:
+                    self.model_backoff_active = False
+                    self.model_cooldown_until = None
+                    self.model_consecutive_offline = 0
+                    self.model_last_recovered_at = datetime.now(timezone.utc).isoformat()
 
                 with SessionLocal() as db:
                     run_id = start_loop_run(db, 'decision')

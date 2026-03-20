@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     experiment_cycle_delay_sec: float = 0.35
     experiment_abort_on_model_offline: bool = True
 
+    # trading loop model-offline backoff/cooldown
+    model_offline_cooldown_sec: int = 60
+    model_offline_backoff_max_sec: int = 300
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12

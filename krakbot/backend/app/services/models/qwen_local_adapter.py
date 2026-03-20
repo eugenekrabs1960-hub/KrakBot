@@ -27,6 +27,7 @@ class QwenLocalAdapter(LocalModelAdapter):
     _active_lock = threading.Lock()
     _total_calls = 0
     _fallback_calls = 0
+    _max_active_seen = 0
 
     @classmethod
     def metrics_snapshot(cls) -> dict:
@@ -37,6 +38,7 @@ class QwenLocalAdapter(LocalModelAdapter):
                 'fallback_calls': cls._fallback_calls,
                 'max_concurrent_config': settings.llm_max_concurrent_requests,
                 'timeout_sec': settings.llm_request_timeout_sec,
+                'max_active_seen': cls._max_active_seen,
             }
 
     def _model_available(self) -> bool:
@@ -208,6 +210,7 @@ class QwenLocalAdapter(LocalModelAdapter):
 
         with self._active_lock:
             self.__class__._active_requests += 1
+            self.__class__._max_active_seen = max(self.__class__._max_active_seen, self.__class__._active_requests)
 
         started = time.perf_counter()
         try:
