@@ -1,4 +1,13 @@
 import React, { useMemo, useState } from 'react';
+import { fmtNum, fmtTsLA } from '../utils/format';
+
+const policyBadge = (s: string) => {
+  if (!s) return 'badge neutral';
+  if (s === 'allow_trade') return 'badge allow';
+  if (s.includes('block')) return 'badge block';
+  if (s.includes('watch') || s.includes('downgrade')) return 'badge watch';
+  return 'badge neutral';
+};
 
 export default function Decisions({ data }: any) {
   const decisions = data?.decisions || [];
@@ -21,17 +30,18 @@ export default function Decisions({ data }: any) {
 
   return (
     <div>
-      <h2>Decision Trace</h2>
+      <h2>Decision Timeline</h2>
+      <div className="section-sub">Model decision, policy gate, and execution outcome in one place</div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Timestamp</th>
+              <th>Time (PT)</th>
               <th>Coin</th>
               <th>Model Action</th>
               <th>Setup</th>
-              <th>Confidence</th>
-              <th>Policy Result</th>
+              <th className="num">Confidence</th>
+              <th>Policy</th>
               <th>Execution</th>
               <th>Reason Summary</th>
               <th>Inspect</th>
@@ -45,13 +55,13 @@ export default function Decisions({ data }: any) {
               return (
                 <React.Fragment key={key}>
                   <tr>
-                    <td>{d.generated_at || '-'}</td>
+                    <td>{fmtTsLA(d.generated_at)}</td>
                     <td>{d.coin || d.symbol}</td>
                     <td>{d.action}</td>
                     <td>{d.setup_type}</td>
-                    <td>{Number(d.confidence || 0).toFixed(3)}</td>
-                    <td>{p.final_action || '-'}</td>
-                    <td>{e.status || '-'}</td>
+                    <td className="num">{fmtNum(d.confidence, 3)}</td>
+                    <td><span className={policyBadge(p.final_action)}>{p.final_action || '-'}</span></td>
+                    <td><span className={`badge ${e.status === 'filled' ? 'good' : e.status === 'rejected' ? 'bad' : 'neutral'}`}>{e.status || '-'}</span></td>
                     <td>{(d.reasons || []).slice(0, 2).map((r: any) => r.label).join(', ') || '-'}</td>
                     <td><button className="btn" onClick={() => setOpen(open === key ? null : key)}>{open === key ? 'Hide' : 'View'}</button></td>
                   </tr>
@@ -71,7 +81,7 @@ export default function Decisions({ data }: any) {
                             }, null, 2)}</pre>
                           </div>
                           <div>
-                            <h4>Policy Checks</h4>
+                            <h4>Policy Gate</h4>
                             <pre>{JSON.stringify({
                               final_action: p.final_action,
                               requested_action: p.requested_action,

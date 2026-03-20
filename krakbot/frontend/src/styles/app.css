@@ -260,3 +260,23 @@ input, select { background: #10101b; color: var(--text); border: 1px solid var(-
   .toolbar input, .toolbar select { width: 100%; }
   .quick-controls-row { position: sticky; top: 72px; }
 }
+
+/* polish pass */
+h1, h2, h3 { letter-spacing: 0.01em; }
+h2 { margin: 8px 0 14px; }
+.table-wrap { border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,0.02); }
+thead th { color: #cdc6e6; font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: .03em; }
+tbody tr:hover { background: rgba(139,92,246,0.08); }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.value.pos { color: var(--good); font-weight: 700; }
+.value.neg { color: var(--bad); font-weight: 700; }
+.value.neutral { color: #cfc9e5; }
+
+.badge.neutral { background: rgba(145,158,171,0.18); color: #b9c2cb; }
+.badge.watch { background: rgba(245,196,81,0.16); color: #f5c451; }
+.badge.block { background: rgba(239,83,80,0.18); color: #ef5350; }
+.badge.allow { background: rgba(34,197,94,0.18); color: #22c55e; }
+.badge.info2 { background: rgba(139,92,246,0.2); color: #d9c9ff; }
+
+.section-sub { color: var(--muted); margin-top: -8px; margin-bottom: 12px; }
