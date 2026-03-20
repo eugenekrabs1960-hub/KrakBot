@@ -72,6 +72,9 @@ def run_decision_cycle(db: Session) -> dict:
             if policy.final_action == 'allow_trade' and decision.action in {'long', 'short'}:
                 side = 'buy' if decision.action == 'long' else 'sell'
                 er = broker.place_order(packet.symbol, side, policy.position_sizing.notional_usd or 0.0)
+                filled_notional = er.get('notional_usd', policy.position_sizing.notional_usd or 0.0)
+                fee_bps = cfg.paper_taker_fee_bps if mode == 'paper' else 0.0
+                fee_usd = float(filled_notional or 0.0) * (float(fee_bps) / 10000.0)
                 execution_record = {
                     'execution_id': f"exe_{uuid.uuid4().hex[:12]}",
                     'packet_id': packet.packet_id,
@@ -82,7 +85,10 @@ def run_decision_cycle(db: Session) -> dict:
                     'notional_usd': policy.position_sizing.notional_usd or 0.0,
                     'status': 'filled' if er.get('accepted') else 'rejected',
                     'fill_price': er.get('fill_price'),
-                    'filled_notional_usd': er.get('notional_usd', policy.position_sizing.notional_usd or 0.0),
+                    'filled_notional_usd': filled_notional,
+                    'fee_type': 'taker' if mode == 'paper' else None,
+                    'fee_bps': fee_bps,
+                    'fee_usd': fee_usd,
                     'broker_order_id': er.get('order_id'),
                     'reason': er.get('reason'),
                     'created_at': datetime.now(timezone.utc),

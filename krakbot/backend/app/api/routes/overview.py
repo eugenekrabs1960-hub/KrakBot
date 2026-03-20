@@ -14,6 +14,7 @@ from app.services.execution.broker_router import get_broker
 from app.services.ingest.hyperliquid_market import fetch_market_snapshot
 from app.services.features.market_features import compute_market_features
 from app.services.features.ml_scores import compute_ml_scores
+from app.services.paper_account import compute_paper_account_from_exec
 
 router = APIRouter(tags=['overview'])
 
@@ -210,6 +211,8 @@ def overview(db: Session = Depends(get_db)):
         })
     recent_exec = [r.payload for r in exec_rows_db]
 
+    paper_account = compute_paper_account_from_exec(recent_exec)
+
     # positions + unrealized
     dec_rows = db.query(DecisionOutputDB).order_by(desc(DecisionOutputDB.generated_at)).all()
     latest_decision_by_symbol = {}
@@ -290,8 +293,8 @@ def overview(db: Session = Depends(get_db)):
         'wallet_summaries': wallet_items,
         'last_decision_cycle_at': (policy_rows[0].payload or {}).get('evaluated_at') if policy_rows else None,
         'performance_summary': {
-            'realized_pnl': realized_pnl,
-            'unrealized_pnl': unrealized_total,
+            'realized_pnl': paper_account.get('realized_pnl_usd', realized_pnl) if runtime_settings.mode.execution_mode=='paper' else realized_pnl,
+            'unrealized_pnl': paper_account.get('unrealized_pnl_usd', unrealized_total) if runtime_settings.mode.execution_mode=='paper' else unrealized_total,
             'total_open_positions': len(open_positions),
             'recent_trade_count': len(trades_panel),
             'allowed_trade_count': allowed_count,
@@ -300,4 +303,5 @@ def overview(db: Session = Depends(get_db)):
             'avg_pnl_per_trade': avg_pnl,
         },
         'recent_pnl_summary': {'realized_pnl_usd': realized_pnl, 'unrealized_pnl_usd': unrealized_total},
+        'paper_account': paper_account,
     }

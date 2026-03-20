@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import requests
+from app.core.config import settings
 
 
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
@@ -18,6 +19,8 @@ def fetch_market_snapshot(coin: str) -> dict:
     Falls back to synthetic values only if public endpoint errors.
     """
     try:
+        if not settings.external_api_enabled:
+            raise RuntimeError("external_api_disabled")
         meta_ctx = _post_info({"type": "metaAndAssetCtxs"})
         universe = meta_ctx[0]["universe"]
         ctxs = meta_ctx[1]

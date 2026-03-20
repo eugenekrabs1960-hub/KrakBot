@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     local_model_api_key: str = Field(default="", validation_alias="QWEN_LOCAL_API_KEY")
     local_model_timeout_sec: int = 15
 
+    # paper account ops
+    paper_starting_equity_usd: float = 10000.0
+    paper_maker_fee_bps: float = 2.0
+    paper_taker_fee_bps: float = 5.0
+
+    # lockdown controls
+    external_api_enabled: bool = False
+    auto_loops_enabled: bool = False
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12

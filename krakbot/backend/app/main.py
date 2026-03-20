@@ -8,6 +8,7 @@ from app.models import db_models  # noqa: F401
 from app.api.routes import health, overview, candidates, decisions, positions, trades, settings, execution, profiles, wallets, model_runtime
 from app.api.routes_live import loops, reconciliation, relay_stub
 from app.services.loops.scheduler import loop_scheduler
+from app.core.config import settings as app_settings
 
 setup_logging()
 Base.metadata.create_all(bind=engine)
@@ -15,11 +16,13 @@ Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await loop_scheduler.start()
+    if app_settings.auto_loops_enabled:
+        await loop_scheduler.start()
     try:
         yield
     finally:
-        await loop_scheduler.stop()
+        if app_settings.auto_loops_enabled:
+            await loop_scheduler.stop()
 
 
 app = FastAPI(title="KrakBot AI Trading Lab", lifespan=lifespan)

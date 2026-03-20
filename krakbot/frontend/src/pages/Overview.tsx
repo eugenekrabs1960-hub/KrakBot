@@ -28,6 +28,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const recentFills = data?.recent_trade_fills || [];
   const recentDecisions = data?.recent_decision_trace || [];
   const blocked = data?.recent_blocked_trades || [];
+  const paperAccount = data?.paper_account || {};
 
   const safety = mode.execution_mode === 'paper' ? 'PAPER SAFE' : (mode.live_armed ? 'LIVE ARMED' : 'LIVE DISARMED');
 
@@ -52,6 +53,9 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <KeyStat label="Recent Trades" value={perf.recent_trade_count ?? 0} />
         <KeyStat label="Realized PnL" value={Number(perf.realized_pnl || 0).toFixed(2)} />
         <KeyStat label="Unrealized PnL" value={Number(perf.unrealized_pnl || 0).toFixed(2)} />
+        <KeyStat label="Paper Cash" value={Number(paperAccount.cash_usd || 0).toFixed(2)} />
+        <KeyStat label="Paper Equity" value={Number(paperAccount.total_equity_usd || 0).toFixed(2)} />
+        <KeyStat label="Cumulative Fees" value={Number(paperAccount.cumulative_fees_usd || 0).toFixed(2)} />
       </div>
 
       <Card title="Candidate Watch">

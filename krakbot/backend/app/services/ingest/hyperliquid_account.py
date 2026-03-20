@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import requests
+from app.core.config import settings
 
 
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
@@ -19,6 +20,8 @@ def fetch_account_snapshot(account_address: str | None = None) -> dict:
             "source": "local_default",
         }
     try:
+        if not settings.external_api_enabled:
+            raise RuntimeError("external_api_disabled")
         r = requests.post(HL_INFO_URL, json={"type": "clearinghouseState", "user": account_address}, timeout=10)
         r.raise_for_status()
         body = r.json()
