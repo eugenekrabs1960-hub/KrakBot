@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     local_model_name: str = "Qwen3.5-9B-Q4_K_M.gguf"
     local_model_context_limit: int = 32000
     local_model_max_tokens: int = 1200
-    local_model_temperature: float = 0.2
+    local_model_temperature: float = 0.21
     prompt_version: str = "local_analyst_v1"
     repair_enabled: bool = True
 

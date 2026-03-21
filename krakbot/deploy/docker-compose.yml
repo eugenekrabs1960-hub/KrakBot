@@ -33,7 +33,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       EXTERNAL_API_ENABLED: ${EXTERNAL_API_ENABLED:-false}
-      AUTO_LOOPS_ENABLED: ${AUTO_LOOPS_ENABLED:-false}
+      AUTO_LOOPS_ENABLED: ${AUTO_LOOPS_ENABLED:-true}
       HYPERLIQUID_MARKET_COLLECTOR_ENABLED: ${HYPERLIQUID_MARKET_COLLECTOR_ENABLED:-false}
       HYPERLIQUID_MARKET_COLLECTOR_INTERVAL_SEC: ${HYPERLIQUID_MARKET_COLLECTOR_INTERVAL_SEC:-60}
       HYPERLIQUID_MARKET_COLLECTOR_SYMBOLS_LIMIT: ${HYPERLIQUID_MARKET_COLLECTOR_SYMBOLS_LIMIT:-400}
@@ -58,3 +58,21 @@ services:
       - '5173:5173'
     depends_on:
       - backend
+
+
+  watchdog:
+    image: alpine:3.20
+    working_dir: /watchdog
+    command: sh -lc "apk add --no-cache curl docker-cli >/dev/null && /watchdog/backend_watchdog.sh"
+    environment:
+      WATCHDOG_TARGET_URL: http://backend:8010
+      WATCHDOG_BACKEND_CONTAINER: deploy-backend-1
+      WATCHDOG_INTERVAL_SEC: 20
+      WATCHDOG_FAILS_BEFORE_RESTART: 2
+      WATCHDOG_RESTART_COOLDOWN_SEC: 20
+    volumes:
+      - ./backend_watchdog.sh:/watchdog/backend_watchdog.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - backend
+    restart: unless-stopped
