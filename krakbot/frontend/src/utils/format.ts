@@ -18,7 +18,14 @@ export const fmtPct = (v: any) => {
 
 export const fmtTsLA = (v: any) => {
   if (!v) return '-';
-  const d = new Date(v);
+
+  // Backend may emit timezone-naive ISO strings (e.g. "2026-03-21T21:32:19.375974").
+  // Treat naive timestamps as UTC to avoid local-time misinterpretation + LA reformat drift.
+  const raw = String(v).trim();
+  const isNaiveIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw);
+  const normalized = isNaiveIso ? `${raw}Z` : raw;
+
+  const d = new Date(normalized);
   if (Number.isNaN(d.getTime())) return String(v);
   return new Intl.DateTimeFormat('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
