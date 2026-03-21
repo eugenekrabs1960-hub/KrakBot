@@ -94,6 +94,53 @@ class QwenLocalAdapter(LocalModelAdapter):
             return json.loads(text[l : r + 1])
         raise ValueError("no_json_object_found")
 
+
+    def _safe_float(self, v, default: float = 0.5, lo: float = 0.0, hi: float = 1.0) -> float:
+        try:
+            x = float(v)
+        except Exception:
+            x = default
+        return max(lo, min(hi, x))
+
+    def _sanitize_reasons(self, reasons, packet: FeaturePacket) -> list[dict]:
+        out = []
+        if isinstance(reasons, list):
+            for r in reasons:
+                if not isinstance(r, dict):
+                    continue
+                label = str(r.get('label') or 'model_reason').strip()[:64] or 'model_reason'
+                strength = self._safe_float(r.get('strength'), default=0.5, lo=0.0, hi=1.0)
+                explanation = str(r.get('explanation') or 'model_evidence').strip()[:240] or 'model_evidence'
+                out.append({'label': label, 'strength': strength, 'explanation': explanation})
+                if len(out) >= 4:
+                    break
+        if len(out) < 2:
+            out = [
+                {"label": "momentum_alignment", "strength": min(1.0, abs(packet.features.returns.momentum_score)), "explanation": f"momentum_score={packet.features.returns.momentum_score:.2f}"},
+                {"label": "execution_quality", "strength": packet.ml_scores.tradability_score, "explanation": f"tradability_score={packet.ml_scores.tradability_score:.2f}"},
+            ]
+        return out
+
+    def _sanitize_risks(self, risks, packet: FeaturePacket) -> list[dict]:
+        out = []
+        if isinstance(risks, list):
+            for r in risks:
+                if not isinstance(r, dict):
+                    continue
+                label = str(r.get('label') or 'model_risk').strip()[:64] or 'model_risk'
+                severity = self._safe_float(r.get('severity'), default=0.5, lo=0.0, hi=1.0)
+                explanation = str(r.get('explanation') or 'model_risk_signal').strip()[:240] or 'model_risk_signal'
+                out.append({'label': label, 'severity': severity, 'explanation': explanation})
+                if len(out) >= 4:
+                    break
+        if len(out) < 1:
+            out = [{
+                "label": "regime_contradiction",
+                "severity": min(1.0, packet.ml_scores.contradiction_score),
+                "explanation": f"contradiction_score={packet.ml_scores.contradiction_score:.2f}",
+            }]
+        return out
+
     def _normalize(self, packet: FeaturePacket, raw: dict) -> DecisionOutput:
         action = raw.get("action")
         if action not in ("long", "short", "no_trade"):
@@ -114,38 +161,56 @@ class QwenLocalAdapter(LocalModelAdapter):
 
         thesis = raw.get("thesis_summary") or raw.get("reasoning") or "model_output_normalized"
 
-        reasons = raw.get("reasons")
-        if not isinstance(reasons, list) or len(reasons) < 2:
-            reasons = [
-                {"label": "momentum_alignment", "strength": min(1.0, abs(packet.features.returns.momentum_score)), "explanation": f"momentum_score={packet.features.returns.momentum_score:.2f}"},
-                {"label": "execution_quality", "strength": packet.ml_scores.tradability_score, "explanation": f"tradability_score={packet.ml_scores.tradability_score:.2f}"},
-            ]
+        reasons = self._sanitize_reasons(raw.get("reasons"), packet)
 
-        risks = raw.get("risks")
-        if not isinstance(risks, list) or len(risks) < 1:
-            risks = [
-                {
-                    "label": "regime_contradiction",
-                    "severity": min(1.0, packet.ml_scores.contradiction_score),
-                    "explanation": f"contradiction_score={packet.ml_scores.contradiction_score:.2f}",
-                }
-            ]
+        risks = self._sanitize_risks(raw.get("risks"), packet)
 
         invalidation = raw.get("invalidation")
         if action in ("long", "short") and not invalidation:
             invalidation = {"type": "thesis_failure", "value": None, "reason": "model_thesis_invalidated"}
 
-        targets = raw.get("targets") or {"take_profit_hint": None, "expected_move_magnitude": "small" if action != "no_trade" else "null"}
+        targets = raw.get("targets") or {}
+        if not isinstance(targets, dict):
+            targets = {}
+        tpm = targets.get('take_profit_hint')
+        try:
+            tpm = None if tpm is None else float(tpm)
+        except Exception:
+            tpm = None
+        emm = str(targets.get('expected_move_magnitude') or ('small' if action != 'no_trade' else 'null'))
+        if emm not in {'small','medium','large','null'}:
+            emm = 'small' if action != 'no_trade' else 'null'
+        targets = {'take_profit_hint': tpm, 'expected_move_magnitude': emm}
 
         evidence_used = raw.get("evidence_used")
         if not isinstance(evidence_used, list) or not evidence_used:
             evidence_used = ["features.returns.momentum_score", "ml_scores.tradability_score"]
 
         alternatives = raw.get("alternatives_considered")
-        if not isinstance(alternatives, list) or not alternatives:
-            alternatives = [{"action": "no_trade", "reason": "normalization_default"}]
+        alt_out = []
+        if isinstance(alternatives, list):
+            for a in alternatives:
+                if not isinstance(a, dict):
+                    continue
+                aa = str(a.get('action') or 'no_trade')
+                if aa not in {'long','short','no_trade'}:
+                    aa = 'no_trade'
+                rr = str(a.get('reason') or 'model_alternative').strip()[:160] or 'model_alternative'
+                alt_out.append({'action': aa, 'reason': rr})
+                if len(alt_out) >= 3:
+                    break
+        alternatives = alt_out or [{"action": "no_trade", "reason": "normalization_default"}]
 
-        exec_pref = raw.get("execution_preference") or {"urgency": "normal" if action != "no_trade" else "low", "entry_style_hint": "market_or_aggressive_limit" if action != "no_trade" else "none"}
+        exec_pref = raw.get("execution_preference") or {}
+        if not isinstance(exec_pref, dict):
+            exec_pref = {}
+        urg = str(exec_pref.get('urgency') or ('normal' if action != 'no_trade' else 'low'))
+        if urg not in {'low','normal','high'}:
+            urg = 'normal' if action != 'no_trade' else 'low'
+        style = str(exec_pref.get('entry_style_hint') or ('market_or_aggressive_limit' if action != 'no_trade' else 'none'))
+        if style not in {'market','limit','market_or_aggressive_limit','passive_limit','none'}:
+            style = 'market_or_aggressive_limit' if action != 'no_trade' else 'none'
+        exec_pref = {'urgency': urg, 'entry_style_hint': style}
 
         out = {
             "decision_version": "1.0",
