@@ -1,6 +1,8 @@
 def check_market_quality(packet, settings, execution_mode: str = "paper"):
-    # freshness threshold currently unified across modes; paper-only experiments are run as temporary branches/tests
-    freshness_threshold = settings.min_freshness_score
+    # modest paper-only relaxation to reduce freshness-only blocking while keeping degraded-source blocks in place
+    freshness_threshold = float(settings.min_freshness_score)
+    if execution_mode == "paper":
+        freshness_threshold = max(0.0, freshness_threshold - 0.05)
 
     return {
         "freshness_ok": packet.features.quality.freshness_score >= freshness_threshold,
