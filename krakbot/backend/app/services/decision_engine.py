@@ -39,7 +39,14 @@ def run_decision_cycle(db: Session) -> dict:
         cands = []
         universe_state = resolve_active_universe(db, runtime_settings)
         active_coins = universe_state.get('active_coins', runtime_settings.universe.tracked_coins)
-        for coin in active_coins:
+
+        broker = get_broker(mode)
+        open_positions = [p for p in broker.get_positions() if abs(float(p.get('qty', 0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)]
+        open_coins = {str(p.get('symbol', '')).replace('-PERP','') for p in open_positions if p.get('symbol')}
+
+        scan_coins = list(dict.fromkeys(list(active_coins) + list(open_coins)))
+
+        for coin in scan_coins:
             m = fetch_market_snapshot(coin)
             ingest_wallet_events_for_coin(db, coin=coin, market_snapshot=m)
             wallet_summary = generate_wallet_summary_for_coin(db, coin=coin)
@@ -71,12 +78,16 @@ def run_decision_cycle(db: Session) -> dict:
         cands.sort(key=lambda x: x[0], reverse=True)
 
         outputs = []
-        broker = get_broker(mode)
-        top_n = max(2, min(runtime_settings.universe.max_candidates_per_cycle, 3))
+        new_entry_limit = max(1, min(runtime_settings.universe.max_candidates_per_cycle, 3))
         if cfg.llm_safe_mode:
-            top_n = min(top_n, max(1, cfg.llm_safe_mode_max_candidates))
+            new_entry_limit = min(new_entry_limit, max(1, cfg.llm_safe_mode_max_candidates))
 
-        for rank, coin, m, f, s, wallet_summary, news_summary, community_summary, feature_status in cands[:top_n]:
+        # always evaluate existing open-position coins for management
+        management = [x for x in cands if x[1] in open_coins]
+        ranked_new = [x for x in cands if x[1] not in open_coins]
+        eval_list = management + ranked_new[:new_entry_limit]
+
+        for rank, coin, m, f, s, wallet_summary, news_summary, community_summary, feature_status in eval_list:
             packet = build_feature_packet(
                 coin=coin,
                 mode=mode,
@@ -135,6 +146,6 @@ def run_decision_cycle(db: Session) -> dict:
                 'execution': execution_record,
                 'account': account,
             })
-        return {'items': outputs, 'status': 'ok', 'top_n': top_n, 'universe': universe_state}
+        return {'items': outputs, 'status': 'ok', 'new_entry_limit': new_entry_limit, 'management_coins': sorted(list(open_coins)), 'evaluated_coins': [x[1] for x in eval_list], 'universe': universe_state}
     finally:
         _cycle_lock.release()
