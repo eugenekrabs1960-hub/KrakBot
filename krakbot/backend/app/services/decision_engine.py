@@ -103,14 +103,29 @@ def run_decision_cycle(db: Session) -> dict:
         cands.sort(key=lambda x: x[0], reverse=True)
 
         outputs = []
-        new_entry_limit = max(1, min(runtime_settings.universe.max_candidates_per_cycle, 3))
-        if cfg.llm_safe_mode:
-            new_entry_limit = min(new_entry_limit, max(1, cfg.llm_safe_mode_max_candidates))
 
         # always evaluate existing open-position coins for management
         management = [x for x in cands if x[1] in open_coins]
-        ranked_new = [x for x in cands if x[1] not in open_coins]
-        eval_list = management + ranked_new[:new_entry_limit]
+
+        # split-lane new-entry selection (conservative deterministic)
+        core_set = set(universe_state.get('core_coins', ['BTC', 'ETH', 'SOL']))
+        wildcard_set = set([w.get('coin') for w in universe_state.get('wildcards', []) if w.get('coin')])
+
+        ranked_new_core = [x for x in cands if x[1] not in open_coins and x[1] in core_set]
+        ranked_new_wild = [x for x in cands if x[1] not in open_coins and x[1] in wildcard_set]
+
+        core_pick = ranked_new_core[:1]
+        wild_pick = ranked_new_wild[:1]
+
+        # dedupe while preserving order
+        eval_list = []
+        seen = set()
+        for x in (management + core_pick + wild_pick):
+            coin = x[1]
+            if coin in seen:
+                continue
+            seen.add(coin)
+            eval_list.append(x)
 
         for rank, coin, m, f, s, wallet_summary, news_summary, community_summary, feature_status in eval_list:
             packet = build_feature_packet(
@@ -171,6 +186,6 @@ def run_decision_cycle(db: Session) -> dict:
                 'execution': execution_record,
                 'account': account,
             })
-        return {'items': outputs, 'status': 'ok', 'new_entry_limit': new_entry_limit, 'management_coins': sorted(list(open_coins)), 'evaluated_coins': [x[1] for x in eval_list], 'universe': universe_state}
+        return {'items': outputs, 'status': 'ok', 'entry_lanes': {'core': [x[1] for x in core_pick], 'wildcard': [x[1] for x in wild_pick]}, 'management_coins': sorted(list(open_coins)), 'evaluated_coins': [x[1] for x in eval_list], 'universe': universe_state}
     finally:
         _cycle_lock.release()
