@@ -41,10 +41,14 @@ def apply_rollback(db: Session, promotion_id: str, *, trigger_reason: str = 'man
         hyp.status = 'rolled_back'
 
     emit_event(db, entity_type='rollback', entity_id=rb.rollback_id, event_type='applied', payload={
+        'promotion_id': promotion_id,
         'change_path': change_path,
         'old_value': new_value,
         'new_value': 'reverted_to_pre_snapshot',
+        'trigger_reason': trigger_reason,
         'reason_code': trigger_reason,
         'target_mode': pro.target_mode,
+        'baseline_window_summary': None,
+        'observed_window_summary': None,
     })
     return rb

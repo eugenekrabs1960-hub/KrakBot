@@ -247,3 +247,11 @@ class AutonomyEventDB(Base):
     event_type: Mapped[str] = mapped_column(String)
     severity: Mapped[str] = mapped_column(String)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class AutonomyCooldownDB(Base):
+    __tablename__ = "autonomy_cooldowns"
+    change_path: Mapped[str] = mapped_column(String, primary_key=True)
+    cooldown_until: Mapped[datetime] = mapped_column(DateTime, index=True)
+    reason: Mapped[str] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)

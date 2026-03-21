@@ -14,6 +14,9 @@ from app.services.autonomy.rollback_controller import apply_rollback
 from app.services.autonomy.orchestrator import run_once as orchestrator_run_once
 from app.services.autonomy.auto_apply import auto_apply_tick
 from app.services.autonomy.auto_apply_worker import autonomy_auto_apply_worker
+from app.services.autonomy.rollback_monitor import rollback_tick
+from app.services.autonomy.rollback_worker import autonomy_rollback_worker
+from app.models.db_models import AutonomyCooldownDB
 from app.core.config import settings
 from app.models.db_models import AutonomyRunDB
 
@@ -230,3 +233,38 @@ async def autonomy_core_auto_apply_start():
 async def autonomy_core_auto_apply_stop():
     await autonomy_auto_apply_worker.stop()
     return {'ok': True, 'worker_running': False, 'enabled_config': bool(settings.autonomy_auto_apply_enabled)}
+
+
+@router.post('/autonomy/core/rollback/tick')
+def autonomy_core_rollback_tick(db: Session = Depends(get_db)):
+    out = rollback_tick(db)
+    db.commit()
+    return out
+
+
+@router.get('/autonomy/core/rollback/status')
+def autonomy_core_rollback_status(db: Session = Depends(get_db)):
+    applied = db.query(AutonomyPromotionDB).filter(AutonomyPromotionDB.status == 'applied', AutonomyPromotionDB.target_mode == 'paper').count()
+    cds = db.query(AutonomyCooldownDB).count()
+    return {
+        'enabled_config': bool(settings.autonomy_rollback_enabled),
+        'worker_running': bool(getattr(autonomy_rollback_worker, '_running', False)),
+        'interval_sec': int(settings.autonomy_rollback_interval_sec),
+        'equity_delta_usd': float(settings.autonomy_rollback_equity_delta_usd),
+        'fee_drag_bps': float(settings.autonomy_rollback_fee_drag_bps),
+        'min_observation_fills': int(settings.autonomy_rollback_min_observation_fills),
+        'applied_paper_promotions': int(applied),
+        'cooldown_rows': int(cds),
+    }
+
+
+@router.post('/autonomy/core/rollback/start')
+async def autonomy_core_rollback_start():
+    await autonomy_rollback_worker.start()
+    return {'ok': True, 'worker_running': True, 'enabled_config': bool(settings.autonomy_rollback_enabled)}
+
+
+@router.post('/autonomy/core/rollback/stop')
+async def autonomy_core_rollback_stop():
+    await autonomy_rollback_worker.stop()
+    return {'ok': True, 'worker_running': False, 'enabled_config': bool(settings.autonomy_rollback_enabled)}

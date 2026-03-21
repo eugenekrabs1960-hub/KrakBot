@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     autonomy_auto_apply_max_per_tick: int = 1
     autonomy_promotion_max_age_sec: int = 1800
 
+    autonomy_rollback_enabled: bool = False
+    autonomy_rollback_interval_sec: int = 120
+    autonomy_rollback_equity_delta_usd: float = 15.0
+    autonomy_rollback_fee_drag_bps: float = 8.0
+    autonomy_rollback_min_observation_fills: int = 5
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""

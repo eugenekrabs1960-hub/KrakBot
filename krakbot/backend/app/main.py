@@ -9,6 +9,7 @@ from app.api.routes import health, overview, candidates, decisions, positions, t
 from app.api.routes_live import loops, reconciliation, relay_stub
 from app.services.loops.scheduler import loop_scheduler
 from app.services.autonomy.auto_apply_worker import autonomy_auto_apply_worker
+from app.services.autonomy.rollback_worker import autonomy_rollback_worker
 from app.core.config import settings as app_settings
 
 setup_logging()
@@ -21,6 +22,8 @@ async def lifespan(app: FastAPI):
         await loop_scheduler.start()
     if app_settings.autonomy_auto_apply_enabled:
         await autonomy_auto_apply_worker.start()
+    if app_settings.autonomy_rollback_enabled:
+        await autonomy_rollback_worker.start()
     try:
         yield
     finally:
@@ -28,6 +31,8 @@ async def lifespan(app: FastAPI):
             await loop_scheduler.stop()
         if app_settings.autonomy_auto_apply_enabled:
             await autonomy_auto_apply_worker.stop()
+        if app_settings.autonomy_rollback_enabled:
+            await autonomy_rollback_worker.stop()
 
 
 app = FastAPI(title="KrakBot AI Trading Lab", lifespan=lifespan)
