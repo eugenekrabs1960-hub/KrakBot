@@ -30,6 +30,7 @@ const policyBadge = (s: string) => {
 };
 
 export default function Overview({ data, modelHealth, loopsStatus, loopsHistory, reconHistory, relayHistory, walletSummary, onRun }: any) {
+  const dataLoaded = !!data;
   const mode = data?.mode || {};
   const perf = data?.performance_summary || {};
   const topCandidates = data?.top_candidates || [];
@@ -46,6 +47,8 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const liveSourceStatus = tradingUniverseStatus?.live_source_status || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
+  const modelChecked = typeof modelHealth?.ok === 'boolean';
+  const loopChecked = typeof loopsStatus?.running === 'boolean';
 
   return (
     <div>
@@ -56,21 +59,27 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <ModeBadge mode={mode.execution_mode || 'paper'} armed={!!mode.live_armed} />
         <span className={`badge ${mode.execution_mode === 'paper' ? 'good' : (mode.live_armed ? 'warn' : 'bad')}`}>{safety}</span>
         <span className={`badge ${mode.trading_enabled ? 'good' : 'bad'}`}>{mode.trading_enabled ? 'Trading Enabled' : 'Trading Disabled'}</span>
-        <span className={`badge ${modelHealth?.ok ? 'good' : 'bad'}`}>Model {modelHealth?.ok ? 'Online' : 'Offline'}</span>
-        <span className={`badge ${loopsStatus?.running ? 'good' : 'warn'}`}>Loop {loopsStatus?.running ? 'Running' : 'Stopped'}</span>
+        <span className={`badge ${!modelChecked ? 'neutral' : (modelHealth?.ok ? 'good' : 'bad')}`}>Model {!modelChecked ? 'Checking…' : (modelHealth?.ok ? 'Online' : 'Offline')}</span>
+        <span className={`badge ${!loopChecked ? 'neutral' : (loopsStatus?.running ? 'good' : 'warn')}`}>Loop {!loopChecked ? 'Checking…' : (loopsStatus?.running ? 'Running' : 'Stopped')}</span>
         <span className={`badge ${loopsStatus?.model_backoff_active ? 'block' : 'neutral'}`}>Backoff {loopsStatus?.model_backoff_active ? 'Active' : 'Idle'}</span>
         <button className="btn" onClick={onRun}>Run Paper Cycle</button>
       </div>
+
+      {!dataLoaded ? (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <span className="muted">Checking live trading telemetry…</span>
+        </div>
+      ) : null}
 
       <div className="grid kpi">
         <KeyStat label="Last Decision Cycle" value={fmtTsLA(data?.last_decision_cycle_at || loopsStatus?.last_decision_run_at)} />
         <KeyStat label="Last Feature Loop" value={fmtTsLA(loopsStatus?.last_feature_run_at)} />
         <KeyStat label="Model Cooldown Until" value={fmtTsLA(loopsStatus?.model_cooldown_until)} />
         <KeyStat label="Offline Events" value={loopsStatus?.model_offline_events ?? 0} />
-        <KeyStat label="Open Positions" value={perf.total_open_positions ?? 0} sub="Current paper positions" />
-        <KeyStat label="Allowed Trades" value={perf.allowed_trade_count ?? 0} />
-        <KeyStat label="Blocked Trades" value={perf.blocked_trade_count ?? 0} />
-        <KeyStat label="Recent Trades" value={perf.recent_trade_count ?? 0} />
+        <KeyStat label="Open Positions" value={dataLoaded ? (perf.total_open_positions ?? 0) : 'Checking…'} sub="Current paper positions" />
+        <KeyStat label="Allowed Trades" value={dataLoaded ? (perf.allowed_trade_count ?? 0) : 'Checking…'} />
+        <KeyStat label="Blocked Trades" value={dataLoaded ? (perf.blocked_trade_count ?? 0) : 'Checking…'} />
+        <KeyStat label="Recent Trades" value={dataLoaded ? (perf.recent_trade_count ?? 0) : 'Checking…'} />
         <KeyStat label="Realized PnL" value={fmtUsd(perf.realized_pnl || 0)} cls={pnlClass(perf.realized_pnl || 0)} />
         <KeyStat label="Unrealized PnL" value={fmtUsd(perf.unrealized_pnl || 0)} cls={pnlClass(perf.unrealized_pnl || 0)} />
         <KeyStat label="Paper Cash" value={fmtUsd(paperAccount.cash_usd || 0)} />
@@ -85,7 +94,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
             <thead><tr><th>Coin</th><th>Market Source</th><th className="num">Completeness</th><th className="num">Source Health</th><th>Status</th><th>Reason</th></tr></thead>
             <tbody>
               {Object.keys(featureStatus).length === 0 ? (
-                <tr><td colSpan={6} className="muted">No feature status yet.</td></tr>
+                <tr><td colSpan={6} className="muted">{dataLoaded ? 'No feature status yet.' : 'Checking market/feature engine status…'}</td></tr>
               ) : (
                 Object.entries(featureStatus).map(([coin, fs]: any) => (
                   <tr key={coin}>
@@ -185,7 +194,11 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
       </Card>
 
       <Card title="Open Paper Positions">
-        {openPositions.length === 0 ? <div className="muted">No open paper positions right now.</div> : (
+        {!dataLoaded ? (
+          <div className="muted">Checking open positions…</div>
+        ) : openPositions.length === 0 ? (
+          <div className="muted">No open paper positions right now.</div>
+        ) : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Coin</th><th>Side</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Unrealized PnL</th><th>Opened</th><th>Setup</th><th className="num">Confidence</th></tr></thead>
@@ -209,7 +222,11 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
       </Card>
 
       <Card title="Recent Closed Trades">
-        {recentFills.length === 0 ? <div className="muted">No closed paper trades yet.</div> : (
+        {!dataLoaded ? (
+          <div className="muted">Checking recent trades…</div>
+        ) : recentFills.length === 0 ? (
+          <div className="muted">No closed paper trades yet.</div>
+        ) : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Coin</th><th>Side</th><th className="num">Entry</th><th className="num">Exit</th><th className="num">PnL</th><th>Opened</th><th>Closed</th><th>Setup</th></tr></thead>
