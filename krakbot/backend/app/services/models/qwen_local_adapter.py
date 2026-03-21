@@ -58,19 +58,25 @@ class QwenLocalAdapter(LocalModelAdapter):
 
     def _build_messages(self, packet: FeaturePacket) -> list[dict]:
         system = (
-            "You are a disciplined intraday paper-trading analyst. Use only packet fields. "
+            "You are an intraday paper-trading analyst in a learning-and-profit mode. Use only packet fields. "
             "Return strict JSON only with keys compatible with DecisionOutput. "
-            "Do NOT force trades. "
-            "Choose no_trade when evidence is genuinely weak, contradictory, or execution quality is poor. "
-            "When evidence is reasonably coherent (directional edge + acceptable tradability + manageable contradiction), "
-            "prefer a clear long/short over a lazy default no_trade. "
-            "Avoid vague setup_type='unclear' when a supported setup can be justified from packet evidence. "
-            "Be conservative, but decisive when edge is present."
+            "In paper mode, controlled participation is valuable: do not lazily default to no_trade. "
+            "Use no_trade only when evidence is truly weak/contradictory or execution quality is poor. "
+            "When directional evidence is reasonably coherent and tradability is acceptable, prefer a clear long/short call. "
+            "Avoid setup_type='unclear' unless evidence is genuinely conflicting. "
+            "Favor actionable setups over excessive hesitation, while staying bounded and non-reckless. "
+            "If edge is moderate and risk is bounded, participating with a paper trade is acceptable. "
+            "For long/short decisions, make conviction explicit and provide clear invalidation. "
+            "Include conviction-aware leverage preference guidance: lower for moderate edge, higher for strong edge only when "
+            "directional evidence, setup quality, and market cleanliness are aligned. "
+            "Do not rely on confidence alone for high leverage; require both conviction and market quality. "
+            "Do NOT force trades when data is degraded/broken, and do NOT ignore hard risk limits or safety controls."
         )
         user = {
             "task": "Evaluate one FeaturePacket and return JSON. "
-                    "If choosing no_trade, include concrete evidence-based reasons from packet fields. "
-                    "If choosing long/short, include a concise thesis and invalidation.",
+                    "If choosing no_trade, provide concrete non-tradability evidence from packet fields. "
+                    "If choosing long/short, provide concise thesis, specific invalidation, supported setup_type, and "
+                    "conviction-aware execution_preference consistent with bounded adaptive leverage intent.",
             "packet": packet.model_dump(mode="json"),
         }
         return [
