@@ -37,13 +37,22 @@ def _pick_candidate(db: Session) -> dict:
     outcomes = Counter([(p.payload or {}).get('final_action', 'unknown') for p in pol])
     allow = outcomes.get('allow_trade', 0)
     block = sum(v for k, v in outcomes.items() if str(k).startswith('block_'))
+    watch = outcomes.get('downgrade_to_watch', 0)
+
+    evidence = {
+        'recent_decisions': int(sum(setups.values())),
+        'mean_reversion_share': round(float(mr_share), 4),
+        'policy_counts': {'allow': int(allow), 'watch': int(watch), 'block': int(block)},
+    }
 
     # heuristic bounded choice
     if mr_share > 0.70:
         cur = float(api_models.runtime_settings.risk.mean_reversion_min_confidence)
         proposed = _clamp('risk.mean_reversion_min_confidence', cur + 0.02)
         return {
-            'reason': f'mean_reversion_dominance_detected share={mr_share:.2f}',
+            'weak_spot': 'mean_reversion_dominance',
+            'explanation': f"Mean-reversion dominates recent decisions ({mr_share:.0%}), suggesting selectivity tightening.",
+            'telemetry_evidence': evidence,
             'change_path': 'risk.mean_reversion_min_confidence',
             'change_value': proposed,
         }
@@ -52,7 +61,9 @@ def _pick_candidate(db: Session) -> dict:
         cur = int(api_models.runtime_settings.universe.max_candidates_per_cycle)
         proposed = _clamp('universe.max_candidates_per_cycle', max(1, cur))
         return {
-            'reason': 'keep conservative candidate breadth',
+            'weak_spot': 'throughput_vs_risk_balance',
+            'explanation': 'Allow rate exceeds block rate; keep candidate breadth conservative.',
+            'telemetry_evidence': evidence,
             'change_path': 'universe.max_candidates_per_cycle',
             'change_value': proposed,
         }
@@ -60,7 +71,9 @@ def _pick_candidate(db: Session) -> dict:
     cur = float(api_models.runtime_settings.model.temperature)
     proposed = _clamp('model.temperature', cur - 0.02)
     return {
-        'reason': 'reduce decision noise under weak throughput',
+        'weak_spot': 'decision_noise_under_low_allow',
+        'explanation': 'Low net throughput/edge signal; reduce model temperature to lower action noise.',
+        'telemetry_evidence': evidence,
         'change_path': 'model.temperature',
         'change_value': proposed,
     }
@@ -83,6 +96,7 @@ def run_once(db: Session, cycles: int = 8) -> dict:
         'created_at': datetime.now(timezone.utc).isoformat(),
         'status': exp.get('classification', 'inconclusive'),
         'candidate': candidate,
+        'summary_text': f"{candidate['weak_spot']}: {candidate['change_path']} -> {candidate['change_value']}",
         'experiment': {
             'run_id': exp.get('run_id'),
             'classification': exp.get('classification'),
