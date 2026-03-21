@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -190,6 +190,8 @@ def overview(db: Session = Depends(get_db)):
     latest_news = {}
     latest_community = {}
     latest_feature_status = {}
+    packet_feature_status = {}
+    now_utc = datetime.now(timezone.utc)
     for r in fp_rows:
         p = r.payload or {}
         coin = p.get('coin')
@@ -203,23 +205,79 @@ def overview(db: Session = Depends(get_db)):
             latest_community[coin] = cs
         if coin and fs and coin not in latest_feature_status:
             latest_feature_status[coin] = fs
+            packet_feature_status[coin] = {
+                'packet_generated_at': r.generated_at,
+                'packet_source': fs.get('market_source'),
+                'packet_degraded': bool(fs.get('degraded')),
+                'packet_reason': fs.get('reason'),
+                'packet_source_health_score': fs.get('source_health_score'),
+                'packet_data_completeness_score': fs.get('data_completeness_score'),
+            }
 
-
-    # live refresh of feature status for active universe coins (prevents stale packet-only health display)
+    live_source_status = {}
+    # live refresh of feature status for active universe coins + explicit packet-vs-live separation
     for coin in active_coins:
+        pkt = packet_feature_status.get(coin, {})
+        pkt_ts = pkt.get('packet_generated_at')
+        pkt_age_sec = None
+        if pkt_ts:
+            try:
+                pkt_age_sec = max(0.0, (now_utc - pkt_ts.astimezone(timezone.utc)).total_seconds())
+            except Exception:
+                pkt_age_sec = None
         try:
             m_live = fetch_market_snapshot(coin)
             f_live = compute_market_features(m_live)
+            live_ts = datetime.now(timezone.utc)
+            live_age_sec = max(0.0, (now_utc - live_ts).total_seconds())
+
+            source_now = m_live.get('source')
+            degraded_now = bool((source_now != 'hyperliquid_public') or (float(f_live.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80))
+            reason_now = ('realtime_feature_prerequisites_missing_or_warmup' if degraded_now else None)
+
+            # stale-but-real: brief live hiccup while recent packet source is still real
+            if source_now != 'hyperliquid_public' and pkt.get('packet_source') == 'hyperliquid_public' and (pkt_age_sec is not None and pkt_age_sec <= 180):
+                source_now = 'stale_but_real'
+                degraded_now = True
+                reason_now = 'live_hiccup_using_recent_real_packet'
+
             latest_feature_status[coin] = {
-                'market_source': m_live.get('source'),
+                'market_source': source_now,
                 'data_completeness_score': f_live.get('quality', {}).get('data_completeness_score'),
                 'source_health_score': f_live.get('quality', {}).get('source_health_score'),
-                'degraded': bool((m_live.get('source') != 'hyperliquid_public') or (float(f_live.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)),
-                'reason': ('realtime_feature_prerequisites_missing_or_warmup' if ((m_live.get('source') != 'hyperliquid_public') or (float(f_live.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)) else None),
+                'degraded': degraded_now,
+                'reason': reason_now,
                 'source_detail': m_live.get('source_detail'),
             }
-        except Exception:
-            pass
+            live_source_status[coin] = {
+                'coin': coin,
+                'live_source_now': source_now,
+                'live_snapshot_at': live_ts,
+                'live_snapshot_age_sec': round(live_age_sec, 3),
+                'live_degraded': degraded_now,
+                'live_reason': reason_now,
+                'live_source_detail': m_live.get('source_detail'),
+                'packet_source': pkt.get('packet_source'),
+                'packet_generated_at': pkt_ts,
+                'packet_age_sec': round(pkt_age_sec, 3) if pkt_age_sec is not None else None,
+                'packet_degraded': pkt.get('packet_degraded'),
+                'packet_reason': pkt.get('packet_reason'),
+            }
+        except Exception as e:
+            live_source_status[coin] = {
+                'coin': coin,
+                'live_source_now': 'unavailable',
+                'live_snapshot_at': None,
+                'live_snapshot_age_sec': None,
+                'live_degraded': True,
+                'live_reason': f'live_snapshot_error:{type(e).__name__}',
+                'live_source_detail': str(e),
+                'packet_source': pkt.get('packet_source'),
+                'packet_generated_at': pkt_ts,
+                'packet_age_sec': round(pkt_age_sec, 3) if pkt_age_sec is not None else None,
+                'packet_degraded': pkt.get('packet_degraded'),
+                'packet_reason': pkt.get('packet_reason'),
+            }
 
     allowed = [r.payload for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade'][:20]
     blocked = [r.payload for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_')][:20]
@@ -337,6 +395,13 @@ def overview(db: Session = Depends(get_db)):
         'top_candidates': top_candidates,
         'feature_degraded_count': len(degraded),
         'active_universe': universe_state,
+        'trading_universe_status': {
+            'core_coins': universe_state.get('core_coins', []),
+            'wildcards': universe_state.get('wildcards', []),
+            'next_reeval_at': universe_state.get('next_reeval_at'),
+            'pinned_open_position_coins': sorted(list({p.get('coin') for p in open_positions if p.get('coin')})),
+            'live_source_status': live_source_status,
+        },
         'wallet_summaries': wallet_items,
         'latest_news_signals': latest_news,
         'latest_community_signals': latest_community,

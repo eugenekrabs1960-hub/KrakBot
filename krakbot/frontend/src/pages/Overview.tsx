@@ -42,6 +42,8 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const communitySignals = data?.latest_community_signals || {};
   const featureStatus = data?.latest_feature_status || {};
   const activeUniverse = data?.active_universe || {};
+  const tradingUniverseStatus = data?.trading_universe_status || {};
+  const liveSourceStatus = tradingUniverseStatus?.live_source_status || {};
 
   const safety = mode.execution_mode === 'paper' ? 'Paper Safe' : (mode.live_armed ? 'Live Armed' : 'Live Disarmed');
 
@@ -125,6 +127,37 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
                   <td className="num">{fmtNum(w.reason?.penalty_crowding,3)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card title="Trading Universe Source/Freshness Status">
+        <div style={{ marginBottom: 8 }}>
+          <span className="badge info2">Core: {(tradingUniverseStatus.core_coins || []).join(', ') || '-'}</span>{' '}
+          <span className="badge info2">Wildcard: {((tradingUniverseStatus.wildcards || []).map((w:any)=>w.coin).join(', ')) || '-'}</span>{' '}
+          <span className="badge neutral">Next Re-eval: {fmtTsLA(tradingUniverseStatus.next_reeval_at)}</span>{' '}
+          <span className="badge watch">Pinned Open Positions: {(tradingUniverseStatus.pinned_open_position_coins || []).join(', ') || 'none'}</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Coin</th><th>Live Source Now</th><th>Live Snapshot Age (s)</th><th>Last Packet Source</th><th>Packet Age (s)</th><th>Status</th><th>Reason</th></tr></thead>
+            <tbody>
+              {Object.keys(liveSourceStatus).length === 0 ? (
+                <tr><td colSpan={7} className="muted">No source status yet.</td></tr>
+              ) : (
+                Object.entries(liveSourceStatus).map(([coin, st]: any) => (
+                  <tr key={coin}>
+                    <td>{coin}</td>
+                    <td>{st?.live_source_now || '-'}</td>
+                    <td>{fmtNum(st?.live_snapshot_age_sec, 2)}</td>
+                    <td>{st?.packet_source || '-'}</td>
+                    <td>{fmtNum(st?.packet_age_sec, 2)}</td>
+                    <td><span className={`badge ${st?.live_degraded ? 'block' : 'allow'}`}>{st?.live_degraded ? 'Degraded' : 'Healthy'}</span></td>
+                    <td>{st?.live_reason || '-'}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
