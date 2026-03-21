@@ -93,7 +93,7 @@ MODE_CONFIGS = {
     "btc_15m_conservative_inverse_v1": {
         "label": "BTC/USD 15m conservative inverse v1 (experimental)",
         "interval": 15,
-        "rr_min": 1.5,
+        "rr_min": 0.5,
         "aggressive": False,
         "fee_bps_entry": 40.0,
         "fee_bps_exit": 40.0,
@@ -477,6 +477,13 @@ def invert_conservative_decision(d: dict[str, Any], rr_min: float) -> dict[str, 
 
     if (inv_side == "BUY" and not (inv_stop < entry < inv_tp)) or (inv_side == "SELL" and not (inv_tp < entry < inv_stop)):
         return normalize_decision({"status": "WAIT", "regime_label": "inverse_invalid_structure", "reason": "Inverse mode blocked: inverted stop/take-profit structure is invalid."}, rr_min)
+
+    if inv_rr < rr_min:
+        return normalize_decision({
+            "status": "WAIT",
+            "regime_label": "inverse_rr_below_min",
+            "reason": f"Inverse mode blocked: risk_reward_ratio {round2(inv_rr)} below inverse rr_min {rr_min}.",
+        }, rr_min)
 
     return normalize_decision({
         **d,
