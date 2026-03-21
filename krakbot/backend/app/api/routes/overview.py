@@ -204,6 +204,23 @@ def overview(db: Session = Depends(get_db)):
         if coin and fs and coin not in latest_feature_status:
             latest_feature_status[coin] = fs
 
+
+    # live refresh of feature status for active universe coins (prevents stale packet-only health display)
+    for coin in active_coins:
+        try:
+            m_live = fetch_market_snapshot(coin)
+            f_live = compute_market_features(m_live)
+            latest_feature_status[coin] = {
+                'market_source': m_live.get('source'),
+                'data_completeness_score': f_live.get('quality', {}).get('data_completeness_score'),
+                'source_health_score': f_live.get('quality', {}).get('source_health_score'),
+                'degraded': bool((m_live.get('source') != 'hyperliquid_public') or (float(f_live.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)),
+                'reason': ('realtime_feature_prerequisites_missing_or_warmup' if ((m_live.get('source') != 'hyperliquid_public') or (float(f_live.get('quality', {}).get('data_completeness_score') or 0.0) < 0.80)) else None),
+                'source_detail': m_live.get('source_detail'),
+            }
+        except Exception:
+            pass
+
     allowed = [r.payload for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade'][:20]
     blocked = [r.payload for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_')][:20]
     block_reasons = {}
