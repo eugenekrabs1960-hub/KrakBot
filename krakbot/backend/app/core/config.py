@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     model_offline_cooldown_sec: int = 60
     model_offline_backoff_max_sec: int = 300
 
+    # trading-mode 1m history seeding (official Hyperliquid candle snapshot)
+    trading_history_seed_lookback_minutes: int = 360
+    trading_history_seed_min_points: int = 90
+
     # LLM runtime safeguards
     llm_max_concurrent_requests: int = 1
     llm_request_timeout_sec: int = 12

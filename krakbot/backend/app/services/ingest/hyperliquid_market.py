@@ -54,19 +54,19 @@ def fetch_market_snapshot(coin: str) -> dict:
             "funding_rate": funding,
             "source": "hyperliquid_public",
         }
-    except Exception:
-        # safe fallback for continuity in local dev
-        px = 1000.0
+    except Exception as e:
+        # Trading-mode policy: no synthetic filler. Mark unavailable explicitly.
         return {
             "coin": coin,
             "symbol": f"{coin}-PERP",
-            "last_price": px,
-            "mark_price": px,
-            "index_price": px,
-            "spread_bps": 8.0,
-            "volume_5m_usd": 500000.0,
-            "volume_1h_usd": 8000000.0,
-            "open_interest_usd": 60000000.0,
+            "last_price": 0.0,
+            "mark_price": 0.0,
+            "index_price": 0.0,
+            "spread_bps": 0.0,
+            "volume_5m_usd": 0.0,
+            "volume_1h_usd": 0.0,
+            "open_interest_usd": 0.0,
             "funding_rate": 0.0,
-            "source": "fallback",
+            "source": "hyperliquid_unavailable",
+            "source_detail": f"{type(e).__name__}: {e}",
         }

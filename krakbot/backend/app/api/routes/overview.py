@@ -16,6 +16,7 @@ from app.services.ingest.hyperliquid_market import fetch_market_snapshot
 from app.services.features.market_features import compute_market_features
 from app.services.features.ml_scores import compute_ml_scores
 from app.services.paper_account import compute_paper_account_from_exec
+from app.services.features.market_series import get_seed_state
 
 router = APIRouter(tags=['overview'])
 
@@ -301,6 +302,8 @@ def overview(db: Session = Depends(get_db)):
     top_candidates = _top_candidates_snapshot(db, active_coins)
     degraded = [c for c in latest_feature_status.values() if c.get('degraded')]
 
+    history_seed_status = {coin: get_seed_state(coin) for coin in active_coins}
+
     return {
         'mode': runtime_settings.mode.model_dump(),
         'tracked_universe': runtime_settings.universe.model_dump(),
@@ -308,6 +311,7 @@ def overview(db: Session = Depends(get_db)):
         'open_positions_count': len(open_positions),
         'recent_decisions': decisions,
         'recent_decision_trace': recent_decision_trace,
+        'history_seed_status': history_seed_status,
         'recent_allowed_trades': allowed,
         'recent_blocked_trades': blocked,
         'dominant_block_reasons': block_reasons,
