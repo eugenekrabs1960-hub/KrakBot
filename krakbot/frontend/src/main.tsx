@@ -46,7 +46,7 @@ function App() {
   const [autonomyRecent, setAutonomyRecent] = useState<any>(null);
 
   const refresh = async () => {
-    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh, exr, ar] = await Promise.all([
+    const [o, c, p, d, t, s, ls, lh, rh, relh, ws, mh, exr, ar] = await Promise.all([
       getOverview(),
       getCandidates(),
       getPositions(),

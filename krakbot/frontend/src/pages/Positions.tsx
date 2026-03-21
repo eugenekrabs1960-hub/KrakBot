@@ -1,13 +1,32 @@
 import React from 'react';
 import { fmtNum, fmtUsd, fmtTsLA, pnlClass } from '../utils/format';
 
-export default function Positions({ data }: any) {
+export default function Positions({ data, tradesData }: any) {
   const items = data?.items || [];
+  const trades = tradesData?.items || [];
+
+  const closed = trades
+    .filter((t: any) => (t?.status || '').toLowerCase() === 'filled')
+    .slice(0, 20)
+    .map((t: any) => {
+      const pnl = Number(t?.pnl_usd ?? t?.realized_pnl_usd ?? 0);
+      return {
+        symbol: t?.symbol || '-',
+        coin: (t?.symbol || '').replace('-PERP', ''),
+        action: t?.action || '-',
+        notional: t?.filled_notional_usd ?? t?.notional_usd,
+        fee: t?.fee_usd,
+        pnl,
+        ts: t?.created_at || t?.closed_at || t?.ts,
+      };
+    });
+
   return (
     <div>
       <h2>Open Positions</h2>
       <div className="section-sub">Live view of currently open paper positions</div>
       <div style={{ marginBottom: 10 }}>Mode: <span className="badge info2">{data?.mode || '-'}</span></div>
+
       {items.length === 0 ? (
         <div className="card">No open positions right now.</div>
       ) : (
@@ -46,6 +65,41 @@ export default function Positions({ data }: any) {
           </table>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3 style={{ marginTop: 0 }}>Recent Closed Trades</h3>
+        <div className="section-sub" style={{ marginTop: 0 }}>Most recent filled paper trades</div>
+        {closed.length === 0 ? (
+          <div className="muted">No recent closed trades.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Coin</th>
+                  <th>Action</th>
+                  <th className="num">Notional</th>
+                  <th className="num">Fee</th>
+                  <th className="num">PnL</th>
+                  <th>Closed (PT)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {closed.map((t: any, i: number) => (
+                  <tr key={`${t.symbol}-${i}`}>
+                    <td>{t.coin || t.symbol}</td>
+                    <td><span className={`badge ${t.action === 'long' ? 'good' : t.action === 'short' ? 'bad' : 'neutral'}`}>{t.action}</span></td>
+                    <td className="num">{fmtUsd(t.notional)}</td>
+                    <td className="num">{fmtUsd(t.fee)}</td>
+                    <td className={`num value ${pnlClass(t.pnl)}`}>{fmtUsd(t.pnl)}</td>
+                    <td>{fmtTsLA(t.ts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
