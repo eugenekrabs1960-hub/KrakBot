@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     wildcard_replace_threshold_default: float = 0.08
     feature_refresh_seconds: int = 60
     decision_cycle_seconds: int = 300
+    decision_cycle_hard_timeout_sec: int = 40
     top_candidates_per_cycle: int = 3
 
     execution_mode_default: str = "paper"

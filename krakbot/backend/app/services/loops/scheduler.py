@@ -110,9 +110,19 @@ class LoopScheduler:
 
                 with SessionLocal() as db:
                     run_id = start_loop_run(db, 'decision')
-                    run_decision_cycle(db)
+
+                timeout_s = max(5, int(getattr(cfg, 'decision_cycle_hard_timeout_sec', 40) or 40))
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(_run_decision_cycle_once), timeout=timeout_s)
                     self.last_decision_run_at = datetime.now(timezone.utc).isoformat()
-                    finish_loop_run(db, run_id, 'ok', started)
+                    with SessionLocal() as db:
+                        finish_loop_run(db, run_id, 'ok', started)
+                except asyncio.TimeoutError:
+                    self.last_error = f"decision_loop:timeout_{timeout_s}s"
+                    logger.warning("decision loop timeout after %ss; skipping cycle", timeout_s)
+                    with SessionLocal() as db:
+                        finish_loop_run(db, run_id, 'error', started, f'decision_cycle_timeout_{timeout_s}s')
+                    continue
             except Exception as e:
                 self.last_error = f"decision_loop:{e}"
                 logger.warning("decision loop error: %s", e)
@@ -136,6 +146,11 @@ def _model_online() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+def _run_decision_cycle_once() -> None:
+    with SessionLocal() as db:
+        run_decision_cycle(db)
 
 
 loop_scheduler = LoopScheduler()
