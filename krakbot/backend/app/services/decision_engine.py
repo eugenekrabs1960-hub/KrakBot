@@ -5,6 +5,7 @@ import threading
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.api.models import runtime_settings
 from app.core.config import settings as cfg
@@ -27,6 +28,27 @@ from app.services.wildcard_universe import resolve_active_universe
 _cycle_lock = threading.Lock()
 
 
+
+def _paper_open_coins_from_execution_records(db: Session) -> set[str]:
+    rows = db.execute(text("""
+      SELECT (payload->>'symbol') as symbol,
+             SUM(CASE WHEN payload->>'status'='filled' THEN
+                  CASE WHEN payload->>'action'='short' THEN -COALESCE((payload->>'filled_notional_usd')::float, (payload->>'notional_usd')::float,0)/NULLIF(COALESCE((payload->>'fill_price')::float,1),0)
+                       WHEN payload->>'action'='long'  THEN  COALESCE((payload->>'filled_notional_usd')::float, (payload->>'notional_usd')::float,0)/NULLIF(COALESCE((payload->>'fill_price')::float,1),0)
+                       ELSE 0 END
+                  ELSE 0 END) as net_qty
+      FROM execution_records
+      WHERE mode='paper'
+      GROUP BY 1
+    """)).mappings().all()
+    out=set()
+    for r in rows:
+        sym = r.get('symbol')
+        if sym and abs(float(r.get('net_qty') or 0.0)) > 1e-9:
+            out.add(str(sym).replace('-PERP',''))
+    return out
+
+
 def run_decision_cycle(db: Session) -> dict:
     if not _cycle_lock.acquire(blocking=False):
         return {'items': [], 'status': 'skipped_overlapping_cycle'}
@@ -41,8 +63,11 @@ def run_decision_cycle(db: Session) -> dict:
         active_coins = universe_state.get('active_coins', runtime_settings.universe.tracked_coins)
 
         broker = get_broker(mode)
-        open_positions = [p for p in broker.get_positions() if abs(float(p.get('qty', 0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)]
-        open_coins = {str(p.get('symbol', '')).replace('-PERP','') for p in open_positions if p.get('symbol')}
+        if mode == 'paper':
+            open_coins = _paper_open_coins_from_execution_records(db)
+        else:
+            open_positions = [p for p in broker.get_positions() if abs(float(p.get('qty', 0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)]
+            open_coins = {str(p.get('symbol', '')).replace('-PERP','') for p in open_positions if p.get('symbol')}
 
         scan_coins = list(dict.fromkeys(list(active_coins) + list(open_coins)))
 
