@@ -23,6 +23,8 @@ import {
   getModelHealth,
   runExperiment,
   getExperimentRuns,
+  runAutonomyStage1,
+  getAutonomyStage1Recent,
 } from './api/client';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -41,9 +43,10 @@ function App() {
   const [walletSummary, setWalletSummary] = useState<any>(null);
   const [modelHealth, setModelHealth] = useState<any>(null);
   const [experimentRuns, setExperimentRuns] = useState<any>(null);
+  const [autonomyRecent, setAutonomyRecent] = useState<any>(null);
 
   const refresh = async () => {
-    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh, exr] = await Promise.all([
+    const [o, c, p, d, s, ls, lh, rh, relh, ws, mh, exr, ar] = await Promise.all([
       getOverview(),
       getCandidates(),
       getPositions(),
@@ -56,6 +59,7 @@ function App() {
       getWalletSummary(),
       getModelHealth(),
       getExperimentRuns(20),
+      getAutonomyStage1Recent(5),
     ]);
     setOverview(o);
     setCandidates(c);
@@ -69,6 +73,7 @@ function App() {
     setWalletSummary(ws);
     setModelHealth(mh);
     setExperimentRuns(exr);
+    setAutonomyRecent(ar);
   };
 
   useEffect(() => {
@@ -101,7 +106,12 @@ function App() {
       {page === 'Experiments' && (
         <Experiments
           runs={experimentRuns}
+          autonomyRecent={autonomyRecent}
           onRefresh={refresh}
+          onAutoRun={async (cycles: number) => {
+            await runAutonomyStage1(cycles);
+            await refresh();
+          }}
           onRun={async (spec: any) => {
             await runExperiment(spec);
             await refresh();

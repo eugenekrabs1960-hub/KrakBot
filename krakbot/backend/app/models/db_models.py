@@ -168,3 +168,11 @@ class MarketSnapshot1mDB(Base):
     volume_5m_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     volume_1h_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String, default='unknown')
+
+
+class AutonomyRecommendationDB(Base):
+    __tablename__ = "autonomy_recommendations"
+    recommendation_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    payload: Mapped[dict] = mapped_column(JSON)

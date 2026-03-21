@@ -25,3 +25,6 @@ export const getModelHealth = () => fetch(`${API}/model/health`).then(r => r.jso
 
 export const runExperiment = (body: any) => fetch(`${API}/experiments/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
 export const getExperimentRuns = (limit = 20) => fetch(`${API}/experiments/runs?limit=${limit}`).then(r => r.json());
+
+export const runAutonomyStage1 = (cycles = 8) => fetch(`${API}/autonomy/stage1/run-once?cycles=${cycles}`, { method: 'POST' }).then(r => r.json());
+export const getAutonomyStage1Recent = (limit = 10) => fetch(`${API}/autonomy/stage1/recent?limit=${limit}`).then(r => r.json());

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { fmtTsLA, fmtUsd } from '../utils/format';
+import { fmtTsLA } from '../utils/format';
 
-export default function Experiments({ runs, onRun, onRefresh }: any) {
+export default function Experiments({ runs, autonomyRecent, onRun, onAutoRun, onRefresh }: any) {
   const [name, setName] = useState('exp-v1-risk-notional');
   const [path, setPath] = useState('risk.max_notional_per_trade');
   const [value, setValue] = useState('60');
@@ -19,9 +19,10 @@ export default function Experiments({ runs, onRun, onRefresh }: any) {
           <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="change_path" />
           <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="change_value" />
           <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={control} onChange={(e)=>setControl(e.target.checked)} /> Control rerun</label>
-          <input type="number" value={cycles} onChange={(e) => setCycles(Number(e.target.value || 40))} min={5} max={200} />
+          <input type="number" value={cycles} onChange={(e) => setCycles(Number(e.target.value || 20))} min={5} max={200} />
           <button className="btn" onClick={() => onRun({ name, change_path: path, change_value: Number.isFinite(Number(value)) ? Number(value) : value, cycles, include_control_rerun: control })}>Run</button>
           <button className="btn" onClick={onRefresh}>Refresh</button>
+          <button className="btn" onClick={() => onAutoRun(8)}>Auto Run (Stage 1)</button>
         </div>
       </div>
 
@@ -38,13 +39,23 @@ export default function Experiments({ runs, onRun, onRefresh }: any) {
                   <td>{fmtTsLA(r.created_at)}</td>
                   <td><span className={`badge ${r.status === 'completed' ? 'good' : 'warn'}`}>{r.status}</span></td>
                   <td><span className={`badge ${r.classification === 'keep' ? 'good' : r.classification === 'reject' ? 'bad' : 'watch'}`}>{r.classification || '-'}</span></td>
-                  <td>{(r.methodology?.workflow || ['baseline','variant']).join(' → ')}</td><td>{r.spec?.one_change ? `${r.spec.one_change.path}: ${String(r.spec.one_change.new)}` : '-'}</td>
+                  <td>{(r.methodology?.workflow || ['baseline','variant']).join(' → ')}</td>
+                  <td>{r.spec?.one_change ? `${r.spec.one_change.path}: ${String(r.spec.one_change.new)}` : '-'}</td>
                   <td className="num">{r.spec?.cycles ?? '-'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Autonomous Recommendation (latest)</h3>
+        {!(autonomyRecent?.items || []).length ? (
+          <div className="muted">No autonomous recommendation yet.</div>
+        ) : (
+          <pre>{JSON.stringify((autonomyRecent.items || [])[0], null, 2)}</pre>
+        )}
       </div>
     </div>
   );
