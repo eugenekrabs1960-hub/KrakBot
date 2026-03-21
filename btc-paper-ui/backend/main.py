@@ -47,6 +47,14 @@ CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE = 2.20
 # Safety/conservation mode: Kraken scan path can run without LLM calls.
 KRAKEN_USE_LLM_SCAN = False
 
+# Read-only comparator thresholds (no execution impact)
+BASELINE_MODE_KEY = "btc_15m_conservative"
+COMPARATOR_MIN_SAMPLE_OVERALL = 30
+COMPARATOR_MIN_SAMPLE_REGIME = 10
+COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_KEEP = 1.25
+COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_PROMOTE = 1.15
+COMPARATOR_MAX_FEE_DRAG_WORSE_KEEP = 10.0
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {
         "label": "BTC/USD 15m conservative (frozen baseline)",
@@ -1104,6 +1112,146 @@ def mode_stats(bucket, mode_cfg: dict[str, Any] | None = None):
     }
 
 
+def compare_mode_vs_baseline(mode_key: str, baseline_key: str = BASELINE_MODE_KEY) -> dict[str, Any]:
+    if mode_key == baseline_key:
+        return {
+            "baseline_mode": baseline_key,
+            "mode": mode_key,
+            "verdict": "BASELINE_REFERENCE",
+            "decision_label": "BASELINE_REFERENCE",
+            "recommended_action": "keep",
+            "reasons": ["Frozen baseline reference mode."],
+            "thresholds": {
+                "min_sample_overall": COMPARATOR_MIN_SAMPLE_OVERALL,
+                "min_sample_per_regime": COMPARATOR_MIN_SAMPLE_REGIME,
+            },
+        }
+
+    baseline_bucket = store.get("modes", {}).get(baseline_key, {}) or {}
+    candidate_bucket = store.get("modes", {}).get(mode_key, {}) or {}
+    base = baseline_bucket.get("strategy_metrics") or strategy_metrics_bucket()
+    cand = candidate_bucket.get("strategy_metrics") or strategy_metrics_bucket()
+
+    base_sample = int(base.get("sample_size", 0) or 0)
+    cand_sample = int(cand.get("sample_size", 0) or 0)
+
+    delta_expectancy = round2(float(cand.get("expectancy", 0.0)) - float(base.get("expectancy", 0.0)))
+    delta_net_total_pnl = round2(
+        (float(cand.get("realized_pnl", 0.0)) + float(cand.get("unrealized_pnl", 0.0)))
+        - (float(base.get("realized_pnl", 0.0)) + float(base.get("unrealized_pnl", 0.0)))
+    )
+    delta_fee_drag_pct = round2(float(cand.get("fee_drag_pct", 0.0)) - float(base.get("fee_drag_pct", 0.0)))
+    delta_max_drawdown = round2(abs(float(cand.get("max_drawdown", 0.0))) - abs(float(base.get("max_drawdown", 0.0))))
+    delta_win_rate = round2(float(cand.get("win_rate", 0.0)) - float(base.get("win_rate", 0.0)))
+
+    regime_cmp: dict[str, Any] = {}
+    cand_reg = candidate_bucket.get("performance_by_regime") or regime_metrics_bucket()
+    base_reg = baseline_bucket.get("performance_by_regime") or regime_metrics_bucket()
+    for rg in REGIME_TYPES:
+        c = cand_reg.get(rg) or strategy_metrics_bucket()
+        b = base_reg.get(rg) or strategy_metrics_bucket()
+        cs = int(c.get("sample_size", 0) or 0)
+        bs = int(b.get("sample_size", 0) or 0)
+        insufficient = cs < COMPARATOR_MIN_SAMPLE_REGIME or bs < COMPARATOR_MIN_SAMPLE_REGIME
+        regime_cmp[rg] = {
+            "candidate_sample": cs,
+            "baseline_sample": bs,
+            "verdict": "INSUFFICIENT_DATA" if insufficient else ("BETTER" if float(c.get("expectancy", 0.0)) > float(b.get("expectancy", 0.0)) else "WORSE_OR_EQUAL"),
+            "delta_expectancy": round2(float(c.get("expectancy", 0.0)) - float(b.get("expectancy", 0.0))),
+            "delta_win_rate": round2(float(c.get("win_rate", 0.0)) - float(b.get("win_rate", 0.0))),
+            "delta_fee_drag_pct": round2(float(c.get("fee_drag_pct", 0.0)) - float(b.get("fee_drag_pct", 0.0))),
+            "delta_max_drawdown": round2(abs(float(c.get("max_drawdown", 0.0))) - abs(float(b.get("max_drawdown", 0.0)))),
+        }
+
+    reasons: list[str] = []
+    secondary_worse = 0
+
+    if delta_fee_drag_pct > 0:
+        secondary_worse += 1
+        reasons.append(f"Fee drag worse vs baseline by {delta_fee_drag_pct}%.")
+
+    base_abs_dd = abs(float(base.get("max_drawdown", 0.0)))
+    cand_abs_dd = abs(float(cand.get("max_drawdown", 0.0)))
+    dd_ratio = (cand_abs_dd / base_abs_dd) if base_abs_dd > 0 else (1.0 if cand_abs_dd == 0 else 9999.0)
+    if dd_ratio > 1.0:
+        secondary_worse += 1
+        reasons.append(f"Drawdown worse vs baseline (ratio {round2(dd_ratio)}x).")
+
+    if delta_win_rate < 0:
+        secondary_worse += 1
+        reasons.append(f"Win rate below baseline by {abs(delta_win_rate)} pts.")
+
+    if cand_sample < COMPARATOR_MIN_SAMPLE_OVERALL or base_sample < COMPARATOR_MIN_SAMPLE_OVERALL:
+        verdict = "INSUFFICIENT_DATA"
+        decision_label = "INSUFFICIENT_DATA"
+        recommended_action = "keep"
+        reasons = [
+            f"Overall sample shortfall (candidate={cand_sample}, baseline={base_sample}, min={COMPARATOR_MIN_SAMPLE_OVERALL})."
+        ]
+    else:
+        strict_promote = (
+            delta_expectancy > 0
+            and delta_fee_drag_pct <= 0
+            and dd_ratio <= COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_PROMOTE
+        )
+        keep_testing_soft = (
+            delta_expectancy > 0
+            and secondary_worse <= 1
+            and dd_ratio <= COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_KEEP
+            and delta_fee_drag_pct <= COMPARATOR_MAX_FEE_DRAG_WORSE_KEEP
+        )
+
+        if strict_promote:
+            verdict = "PROMOTE_CANDIDATE"
+            decision_label = "PROMOTE_CANDIDATE"
+            recommended_action = "promote_candidate"
+            reasons = ["Expectancy beats baseline with acceptable fee drag and drawdown."]
+        elif keep_testing_soft:
+            verdict = "KEEP_TESTING"
+            decision_label = "KEEP_TESTING"
+            recommended_action = "keep"
+            reasons = [
+                "Expectancy beats baseline; one secondary metric can be slightly worse within keep-testing tolerance."
+            ] + reasons[:1]
+        elif delta_expectancy <= 0:
+            verdict = "PROBATION"
+            decision_label = "PROBATION"
+            recommended_action = "probation"
+            reasons = ["Expectancy does not beat baseline."] + reasons
+        else:
+            verdict = "DISCARD_CANDIDATE"
+            decision_label = "DISCARD_CANDIDATE"
+            recommended_action = "pause_candidate"
+            reasons = ["Secondary metrics degraded beyond comparator tolerance."] + reasons
+
+    return {
+        "baseline_mode": baseline_key,
+        "mode": mode_key,
+        "verdict": verdict,
+        "decision_label": decision_label,
+        "recommended_action": recommended_action,
+        "reasons": reasons,
+        "thresholds": {
+            "min_sample_overall": COMPARATOR_MIN_SAMPLE_OVERALL,
+            "min_sample_per_regime": COMPARATOR_MIN_SAMPLE_REGIME,
+            "max_drawdown_degrade_factor_promote": COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_PROMOTE,
+            "max_drawdown_degrade_factor_keep_testing": COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_KEEP,
+            "max_fee_drag_worse_keep_testing_pct": COMPARATOR_MAX_FEE_DRAG_WORSE_KEEP,
+        },
+        "overall": {
+            "candidate_sample": cand_sample,
+            "baseline_sample": base_sample,
+            "delta_expectancy": delta_expectancy,
+            "delta_net_total_pnl": delta_net_total_pnl,
+            "delta_fee_drag_pct": delta_fee_drag_pct,
+            "delta_max_drawdown": delta_max_drawdown,
+            "delta_win_rate": delta_win_rate,
+            "drawdown_ratio_vs_baseline": round2(dd_ratio if dd_ratio < 9999 else 9999),
+        },
+        "regime_comparison": regime_cmp,
+    }
+
+
 async def execute_mode_scan(mode: str):
     cfg = MODE_CONFIGS[mode]
     bucket = store["modes"][mode]
@@ -1285,6 +1433,7 @@ async def execute_mode_scan(mode: str):
     stats = mode_stats(bucket, cfg)
     shadow_routing = shadow_route_snapshot(current_regime)
     strategy_status = strategy_status_for_display(bucket["strategy_registry_entry"] or {}, bucket["strategy_metrics"], shadow_routing)
+    baseline_comparison = compare_mode_vs_baseline(mode)
     latest = {
         **payload,
         "mode": mode,
@@ -1328,6 +1477,9 @@ async def execute_mode_scan(mode: str):
         "strategy_metrics": bucket["strategy_metrics"],
         "performance_by_regime": bucket["performance_by_regime"],
         "learning_summary": stats.get("learning_summary"),
+        "comparison_vs_baseline": baseline_comparison,
+        "comparator_verdict": baseline_comparison.get("verdict"),
+        "comparator_decision_label": baseline_comparison.get("decision_label"),
         "shadow_routing": shadow_routing,
         "runtime_info": {
             "agent_runtime_model": "openai-codex/gpt-5.4",
@@ -1370,6 +1522,8 @@ async def get_state():
         "available_modes": MODE_CONFIGS,
         "strategy_registry": STRATEGY_REGISTRY,
         "regime_types": REGIME_TYPES,
+        "baseline_mode": BASELINE_MODE_KEY,
+        "baseline_comparisons": {m: compare_mode_vs_baseline(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
         "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {
