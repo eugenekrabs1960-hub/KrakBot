@@ -58,11 +58,19 @@ class QwenLocalAdapter(LocalModelAdapter):
 
     def _build_messages(self, packet: FeaturePacket) -> list[dict]:
         system = (
-            "You are a disciplined local trading analyst. Use only packet fields. "
-            "Return strict JSON only with keys compatible with DecisionOutput."
+            "You are a disciplined intraday paper-trading analyst. Use only packet fields. "
+            "Return strict JSON only with keys compatible with DecisionOutput. "
+            "Do NOT force trades. "
+            "Choose no_trade when evidence is genuinely weak, contradictory, or execution quality is poor. "
+            "When evidence is reasonably coherent (directional edge + acceptable tradability + manageable contradiction), "
+            "prefer a clear long/short over a lazy default no_trade. "
+            "Avoid vague setup_type='unclear' when a supported setup can be justified from packet evidence. "
+            "Be conservative, but decisive when edge is present."
         )
         user = {
-            "task": "Evaluate one FeaturePacket and return JSON.",
+            "task": "Evaluate one FeaturePacket and return JSON. "
+                    "If choosing no_trade, include concrete evidence-based reasons from packet fields. "
+                    "If choosing long/short, include a concise thesis and invalidation.",
             "packet": packet.model_dump(mode="json"),
         }
         return [
