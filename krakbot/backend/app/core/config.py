@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     autonomy_orchestrator_interval_sec: int = 300
     autonomy_max_runs_per_hour: int = 6
 
+    autonomy_auto_apply_enabled: bool = False
+    autonomy_auto_apply_interval_sec: int = 90
+    autonomy_auto_apply_max_per_tick: int = 1
+    autonomy_promotion_max_age_sec: int = 1800
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""

@@ -12,6 +12,9 @@ from app.models.db_models import (
 from app.services.autonomy.promotion_manager import create_hypothesis_from_recommendation, create_promotion, apply_promotion
 from app.services.autonomy.rollback_controller import apply_rollback
 from app.services.autonomy.orchestrator import run_once as orchestrator_run_once
+from app.services.autonomy.auto_apply import auto_apply_tick
+from app.services.autonomy.auto_apply_worker import autonomy_auto_apply_worker
+from app.core.config import settings
 from app.models.db_models import AutonomyRunDB
 
 router = APIRouter(tags=['autonomy-core'])
@@ -195,3 +198,35 @@ def autonomy_core_snapshot(snapshot_id: str, db: Session = Depends(get_db)):
         'hash': r.hash,
         'settings': r.settings_json,
     }
+
+
+@router.post('/autonomy/core/auto-apply/tick')
+def autonomy_core_auto_apply_tick(db: Session = Depends(get_db)):
+    out = auto_apply_tick(db)
+    db.commit()
+    return out
+
+
+@router.get('/autonomy/core/auto-apply/status')
+def autonomy_core_auto_apply_status(db: Session = Depends(get_db)):
+    pending = db.query(AutonomyPromotionDB).filter(AutonomyPromotionDB.status == 'pending').count()
+    return {
+        'enabled_config': bool(settings.autonomy_auto_apply_enabled),
+        'worker_running': bool(getattr(autonomy_auto_apply_worker, '_running', False)),
+        'interval_sec': int(settings.autonomy_auto_apply_interval_sec),
+        'max_per_tick': int(settings.autonomy_auto_apply_max_per_tick),
+        'promotion_max_age_sec': int(settings.autonomy_promotion_max_age_sec),
+        'pending_count': int(pending),
+    }
+
+
+@router.post('/autonomy/core/auto-apply/start')
+async def autonomy_core_auto_apply_start():
+    await autonomy_auto_apply_worker.start()
+    return {'ok': True, 'worker_running': True, 'enabled_config': bool(settings.autonomy_auto_apply_enabled)}
+
+
+@router.post('/autonomy/core/auto-apply/stop')
+async def autonomy_core_auto_apply_stop():
+    await autonomy_auto_apply_worker.stop()
+    return {'ok': True, 'worker_running': False, 'enabled_config': bool(settings.autonomy_auto_apply_enabled)}
