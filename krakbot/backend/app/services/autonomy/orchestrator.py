@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.models.db_models import AutonomyRunDB, AutonomyRecommendationDB, AutonomyPromotionDB
+from app.core.config import settings
 from app.services.autonomy.detector import detect_weakness_and_propose
 from app.services.experiments import run_experiment
 from app.services.autonomy.evaluator import summarize_experiment
@@ -19,14 +20,67 @@ def _active_run_exists(db: Session) -> bool:
     return r is not None
 
 
+
+
+def _finalize_stale_active_runs(db: Session, *, stale_after_sec: int = 600) -> list[str]:
+    """Finalize stuck running rows so they cannot block autonomy forever.
+
+    This is intentionally scoped to run-lifecycle reliability only: we mark stale
+    rows as timed_out and emit an audit event.
+    """
+    now = datetime.now(timezone.utc)
+    timeout_sec = max(60, int(stale_after_sec))
+    cutoff = now - timedelta(seconds=timeout_sec)
+    rows = (
+        db.query(AutonomyRunDB)
+        .filter(AutonomyRunDB.status == 'running', AutonomyRunDB.started_at < cutoff)
+        .order_by(AutonomyRunDB.started_at.asc())
+        .all()
+    )
+    finalized: list[str] = []
+    for row in rows:
+        payload = dict(row.payload or {})
+        payload['recovery'] = {
+            **(payload.get('recovery') or {}),
+            'stale_timeout_sec': timeout_sec,
+            'timed_out_at': now.isoformat(),
+            'reason': 'stale_active_run_recovered',
+        }
+        row.status = 'timed_out'
+        row.finished_at = now
+        row.phase = row.phase or 'unknown'
+        row.payload = payload
+        emit_event(
+            db,
+            entity_type='run',
+            entity_id=row.run_id,
+            event_type='timed_out',
+            severity='warn',
+            payload={
+                'change_path': None,
+                'old_value': None,
+                'new_value': None,
+                'reason_code': 'stale_active_run_recovered',
+                'target_mode': 'paper',
+                'stale_timeout_sec': timeout_sec,
+            },
+            run_id=row.run_id,
+        )
+        finalized.append(row.run_id)
+    return finalized
+
 def _pending_promotion_exists(db: Session) -> bool:
     r = db.query(AutonomyPromotionDB).filter(AutonomyPromotionDB.status == 'pending').order_by(desc(AutonomyPromotionDB.created_at)).first()
     return r is not None
 
 
 def run_once(db: Session, *, trigger: str = 'manual', cycles: int = 8) -> dict:
+    stale_finalized = _finalize_stale_active_runs(db, stale_after_sec=int(settings.autonomy_run_stale_timeout_sec or 600))
+    if stale_finalized:
+        db.flush()
+
     if _active_run_exists(db):
-        return {'ok': False, 'status': 'skipped', 'reason': 'active_run_exists'}
+        return {'ok': False, 'status': 'skipped', 'reason': 'active_run_exists', 'stale_finalized': stale_finalized}
     if _pending_promotion_exists(db):
         return {'ok': False, 'status': 'skipped', 'reason': 'pending_promotion_exists'}
 

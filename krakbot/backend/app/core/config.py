@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     autonomy_orchestrator_enabled: bool = False
     autonomy_orchestrator_interval_sec: int = 300
     autonomy_max_runs_per_hour: int = 6
+    autonomy_run_stale_timeout_sec: int = 600
 
     autonomy_auto_apply_enabled: bool = False
     autonomy_auto_apply_interval_sec: int = 90
