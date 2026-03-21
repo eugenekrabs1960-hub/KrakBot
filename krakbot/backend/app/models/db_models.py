@@ -176,3 +176,74 @@ class AutonomyRecommendationDB(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     status: Mapped[str] = mapped_column(String, index=True)
     payload: Mapped[dict] = mapped_column(JSON)
+
+class AutonomyRunDB(Base):
+    __tablename__ = "autonomy_runs"
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    phase: Mapped[str] = mapped_column(String)
+    trigger: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class AutonomyHypothesisDB(Base):
+    __tablename__ = "autonomy_hypotheses"
+    hypothesis_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    weak_spot: Mapped[str] = mapped_column(String)
+    rationale: Mapped[str] = mapped_column(Text)
+    change_path: Mapped[str] = mapped_column(String)
+    change_value: Mapped[str] = mapped_column(String)
+    source_run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class AutonomyPromotionDB(Base):
+    __tablename__ = "autonomy_promotions"
+    promotion_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    hypothesis_id: Mapped[str] = mapped_column(String, index=True)
+    target_mode: Mapped[str] = mapped_column(String)
+    target_scope: Mapped[str] = mapped_column(String)
+    pre_snapshot_id: Mapped[str] = mapped_column(String)
+    post_snapshot_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class RuntimeConfigSnapshotDB(Base):
+    __tablename__ = "runtime_config_snapshots"
+    snapshot_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    source: Mapped[str] = mapped_column(String)
+    mode: Mapped[str] = mapped_column(String)
+    settings_json: Mapped[dict] = mapped_column(JSON)
+    hash: Mapped[str] = mapped_column(String)
+
+
+class AutonomyRollbackDB(Base):
+    __tablename__ = "autonomy_rollbacks"
+    rollback_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String, index=True)
+    promotion_id: Mapped[str] = mapped_column(String, index=True)
+    from_snapshot_id: Mapped[str] = mapped_column(String)
+    to_snapshot_id: Mapped[str] = mapped_column(String)
+    trigger_reason: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class AutonomyEventDB(Base):
+    __tablename__ = "autonomy_events"
+    event_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    entity_type: Mapped[str] = mapped_column(String, index=True)
+    entity_id: Mapped[str] = mapped_column(String, index=True)
+    event_type: Mapped[str] = mapped_column(String)
+    severity: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON)

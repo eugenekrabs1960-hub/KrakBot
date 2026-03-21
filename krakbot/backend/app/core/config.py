@@ -101,6 +101,13 @@ class Settings(BaseSettings):
     jason_loop_interval_sec: int = 60
     jason_agent_model: str = "gpt-5.4"
 
+    # autonomy core chunk-1 controls
+    autonomy_core_enabled: bool = False
+    autonomy_promotion_monitor_enabled: bool = False
+    autonomy_promotion_monitor_interval_sec: int = 120
+    autonomy_one_change_lock_ttl_sec: int = 900
+    autonomy_rollback_cooldown_sec: int = 1800
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""
