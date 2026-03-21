@@ -386,6 +386,16 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
 
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
+  const isBaselineMode = modeKey === 'btc_15m_conservative'
+  const comparatorVerdict = m?.comparator_verdict || m?.comparison_vs_baseline?.verdict || '-'
+  const modeReview = m?.mode_review_recommendation?.recommended_status || '-'
+  const policy = m?.mode_regime_policy_summary || {}
+  const policyConfidence = policy?.policy_confidence || '-'
+  const preferredRegimes = Array.isArray(policy?.preferred_regimes) ? policy.preferred_regimes : []
+  const cautionRegimes = Array.isArray(policy?.caution_regimes) ? policy.caution_regimes : []
+  const avoidRegimes = Array.isArray(policy?.avoid_regimes) ? policy.avoid_regimes : []
+  const inconclusiveRegimes = Array.isArray(policy?.inconclusive_regimes) ? policy.inconclusive_regimes : []
+  const formatRegimes = (arr) => (arr.length ? arr.join(', ') : '-')
   const openPos = (m?.open_positions || [])[0]
   const latestClosed = (m?.closed_trades || []).slice(-1)[0]
   const tradeAge = openPos?.open_time ? Math.max(0, Math.floor((Date.now() - new Date(openPos.open_time).getTime()) / 60000)) : null
@@ -467,6 +477,23 @@ function ModePanel({ modeKey, m, onAck }) {
           <div><strong>Unrealized</strong><div style={{ color: pnlColor(unrealized) }}>{fmt2(unrealized)}</div></div>
           <div><strong>Expectancy</strong><div style={{ color: pnlColor(expectancy) }}>{fmt2(expectancy)}</div></div>
         </div>
+      </div>
+
+      <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+        <strong>Evaluation summary</strong>
+        {isBaselineMode ? (
+          <div style={{ marginTop: 6, opacity: 0.85 }}>Baseline reference mode (comparator target).</div>
+        ) : (
+          <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div><strong>Comparator verdict</strong><div>{comparatorVerdict}</div></div>
+            <div><strong>Mode review</strong><div>{modeReview}</div></div>
+            <div><strong>Policy confidence</strong><div>{policyConfidence}</div></div>
+            <div><strong>Preferred regimes</strong><div>{formatRegimes(preferredRegimes)}</div></div>
+            <div><strong>Caution regimes</strong><div>{formatRegimes(cautionRegimes)}</div></div>
+            <div><strong>Avoid regimes</strong><div>{formatRegimes(avoidRegimes)}</div></div>
+            <div style={{ gridColumn: '1 / span 2' }}><strong>Inconclusive regimes</strong><div>{formatRegimes(inconclusiveRegimes)}</div></div>
+          </div>
+        )}
       </div>
 
       <details style={{ marginTop: 8 }}>
