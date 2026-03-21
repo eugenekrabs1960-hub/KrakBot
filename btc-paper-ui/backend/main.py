@@ -61,6 +61,10 @@ REGIME_RECO_FEE_WORSE_CAUTION = 10.0
 REGIME_RECO_DD_GOOD = 1.10
 REGIME_RECO_DD_BAD = 1.35
 
+# Read-only mode review thresholds (advisory only)
+MODE_REVIEW_MIN_REGIMES_WITH_DATA = 2
+MODE_REVIEW_STRONG_EVIDENCE_REGIMES = 3
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {
         "label": "BTC/USD 15m conservative (frozen baseline)",
@@ -1413,6 +1417,116 @@ def build_regime_recommendations(mode_key: str, baseline_key: str = BASELINE_MOD
     }
 
 
+def build_mode_review_recommendation(mode_key: str, baseline_key: str = BASELINE_MODE_KEY) -> dict[str, Any]:
+    cmp = compare_mode_vs_baseline(mode_key, baseline_key=baseline_key)
+    reg = build_regime_recommendations(mode_key, baseline_key=baseline_key)
+
+    verdict = str(cmp.get("verdict", "INSUFFICIENT_DATA"))
+    by_regime = reg.get("by_regime", {}) if isinstance(reg.get("by_regime", {}), dict) else {}
+
+    counts = {
+        "favor": 0,
+        "neutral": 0,
+        "caution": 0,
+        "avoid": 0,
+        "insufficient_data": 0,
+    }
+    for rg in REGIME_TYPES:
+        action = str((by_regime.get(rg) or {}).get("recommended_action", "insufficient_data"))
+        if action not in counts:
+            action = "insufficient_data"
+        counts[action] += 1
+
+    regimes_with_data = len(REGIME_TYPES) - counts["insufficient_data"]
+    guardrails_applied: list[str] = []
+    reasons: list[str] = []
+
+    if mode_key == baseline_key:
+        return {
+            "mode": mode_key,
+            "baseline_mode": baseline_key,
+            "recommended_status": "keep_active",
+            "source_overall_verdict": "BASELINE_REFERENCE",
+            "regime_action_counts": counts,
+            "regimes_with_sufficient_data": regimes_with_data,
+            "guardrails_applied": ["baseline_reference"],
+            "reasons": ["Frozen baseline reference."],
+            "advisory_only": True,
+            "thresholds": {
+                "min_regimes_with_data": MODE_REVIEW_MIN_REGIMES_WITH_DATA,
+                "strong_evidence_regimes": MODE_REVIEW_STRONG_EVIDENCE_REGIMES,
+            },
+        }
+
+    if verdict == "INSUFFICIENT_DATA":
+        status = "insufficient_data"
+        reasons.append("Comparator overall verdict is INSUFFICIENT_DATA.")
+        guardrails_applied.append("overall_insufficient_data")
+    elif verdict == "PROMOTE_CANDIDATE":
+        status = "keep_active"
+        reasons.append("Comparator verdict PROMOTE_CANDIDATE.")
+    elif verdict == "KEEP_TESTING":
+        status = "keep_testing"
+        reasons.append("Comparator verdict KEEP_TESTING.")
+    elif verdict == "PROBATION":
+        status = "probation"
+        reasons.append("Comparator verdict PROBATION.")
+    else:
+        status = "pause_candidate"
+        reasons.append("Comparator verdict DISCARD_CANDIDATE.")
+
+    if regimes_with_data < MODE_REVIEW_MIN_REGIMES_WITH_DATA:
+        status = "insufficient_data"
+        reasons.append(
+            f"Too few regimes with sufficient data ({regimes_with_data} < {MODE_REVIEW_MIN_REGIMES_WITH_DATA})."
+        )
+        guardrails_applied.append("regime_data_shortfall")
+
+    strong_regime_evidence = regimes_with_data >= MODE_REVIEW_STRONG_EVIDENCE_REGIMES
+
+    if status in {"keep_active", "keep_testing"} and counts["avoid"] >= 2:
+        status = "probation"
+        reasons.append("Two or more regimes are marked avoid.")
+        guardrails_applied.append("multi_regime_avoid_downgrade")
+
+    # Pause candidate requires stronger evidence than sparse regime data.
+    if verdict == "DISCARD_CANDIDATE":
+        if strong_regime_evidence and (counts["avoid"] >= 2 and counts["favor"] == 0):
+            status = "pause_candidate"
+            reasons.append("Strong multi-regime avoid evidence with no favor regimes.")
+            guardrails_applied.append("strong_evidence_pause_candidate")
+        else:
+            status = "probation"
+            reasons.append("Discard verdict present but regime evidence not yet strong enough for pause_candidate.")
+            guardrails_applied.append("pause_requires_stronger_regime_evidence")
+
+    if status == "keep_active" and not (counts["favor"] >= 2 and counts["avoid"] == 0):
+        status = "keep_testing"
+        reasons.append("Promote-level comparator retained, but regime mix is not clean enough for keep_active.")
+        guardrails_applied.append("keep_active_requires_clean_regimes")
+
+    if status == "keep_testing" and counts["caution"] >= 3 and counts["favor"] == 0:
+        status = "probation"
+        reasons.append("Regime profile heavily caution without favor support.")
+        guardrails_applied.append("heavy_caution_downgrade")
+
+    return {
+        "mode": mode_key,
+        "baseline_mode": baseline_key,
+        "recommended_status": status,
+        "source_overall_verdict": verdict,
+        "regime_action_counts": counts,
+        "regimes_with_sufficient_data": regimes_with_data,
+        "guardrails_applied": guardrails_applied,
+        "reasons": reasons,
+        "advisory_only": True,
+        "thresholds": {
+            "min_regimes_with_data": MODE_REVIEW_MIN_REGIMES_WITH_DATA,
+            "strong_evidence_regimes": MODE_REVIEW_STRONG_EVIDENCE_REGIMES,
+        },
+    }
+
+
 async def execute_mode_scan(mode: str):
     cfg = MODE_CONFIGS[mode]
     bucket = store["modes"][mode]
@@ -1596,6 +1710,7 @@ async def execute_mode_scan(mode: str):
     strategy_status = strategy_status_for_display(bucket["strategy_registry_entry"] or {}, bucket["strategy_metrics"], shadow_routing)
     baseline_comparison = compare_mode_vs_baseline(mode)
     regime_recommendations = build_regime_recommendations(mode)
+    mode_review_recommendation = build_mode_review_recommendation(mode)
     latest = {
         **payload,
         "mode": mode,
@@ -1643,6 +1758,7 @@ async def execute_mode_scan(mode: str):
         "comparator_verdict": baseline_comparison.get("verdict"),
         "comparator_decision_label": baseline_comparison.get("decision_label"),
         "regime_recommendations": regime_recommendations,
+        "mode_review_recommendation": mode_review_recommendation,
         "shadow_routing": shadow_routing,
         "runtime_info": {
             "agent_runtime_model": "openai-codex/gpt-5.4",
@@ -1688,6 +1804,7 @@ async def get_state():
         "baseline_mode": BASELINE_MODE_KEY,
         "baseline_comparisons": {m: compare_mode_vs_baseline(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "regime_recommendations_by_mode": {m: build_regime_recommendations(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
+        "mode_review_recommendations_by_mode": {m: build_mode_review_recommendation(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
         "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {
