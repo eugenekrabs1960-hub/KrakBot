@@ -1527,6 +1527,130 @@ def build_mode_review_recommendation(mode_key: str, baseline_key: str = BASELINE
     }
 
 
+def _policy_bucket_downgrade_once(bucket: str) -> str:
+    if bucket == "preferred":
+        return "acceptable"
+    if bucket == "acceptable":
+        return "caution"
+    if bucket == "caution":
+        return "avoid"
+    return bucket
+
+
+def build_mode_regime_policy_summary(mode_key: str, baseline_key: str = BASELINE_MODE_KEY) -> dict[str, Any]:
+    cmp = compare_mode_vs_baseline(mode_key, baseline_key=baseline_key)
+    reg = build_regime_recommendations(mode_key, baseline_key=baseline_key)
+    review = build_mode_review_recommendation(mode_key, baseline_key=baseline_key)
+
+    comparator_verdict = str(cmp.get("verdict", "INSUFFICIENT_DATA"))
+    mode_status = str(review.get("recommended_status", "insufficient_data"))
+    by_regime = reg.get("by_regime", {}) if isinstance(reg.get("by_regime", {}), dict) else {}
+
+    preferred: list[str] = []
+    acceptable: list[str] = []
+    caution: list[str] = []
+    avoid: list[str] = []
+    inconclusive: list[str] = []
+    details: dict[str, Any] = {}
+    notes: list[str] = []
+
+    for rg in REGIME_TYPES:
+        r = by_regime.get(rg) or {}
+        input_action = str(r.get("recommended_action", "insufficient_data"))
+        reason_codes = list(r.get("reason_codes", []) or [])
+
+        if input_action == "favor":
+            bucket = "preferred"
+            severity = "positive"
+        elif input_action == "neutral":
+            bucket = "acceptable"
+            severity = "balanced"
+        elif input_action == "caution":
+            bucket = "caution"
+            severity = "watch"
+        elif input_action == "avoid":
+            bucket = "avoid"
+            severity = "strong_avoid"
+        else:
+            bucket = "inconclusive"
+            severity = "insufficient"
+
+        # Mode-level overlay (downgrade-only behavior)
+        if mode_status == "insufficient_data":
+            if bucket != "inconclusive":
+                bucket = "inconclusive"
+                severity = "insufficient"
+                reason_codes = reason_codes + ["mode_review_insufficient_overlay"]
+        elif mode_status == "probation":
+            if bucket in {"preferred", "acceptable", "caution"}:
+                bucket = _policy_bucket_downgrade_once(bucket)
+                if bucket == "acceptable":
+                    severity = "balanced"
+                elif bucket == "caution":
+                    severity = "watch"
+                elif bucket == "avoid":
+                    severity = "strong_avoid"
+                reason_codes = reason_codes + ["mode_review_probation_overlay"]
+        elif mode_status == "pause_candidate":
+            if bucket in {"preferred", "acceptable", "caution"}:
+                bucket = "avoid"
+                severity = "strong_avoid"
+                reason_codes = reason_codes + ["mode_review_pause_overlay"]
+
+        if bucket == "preferred":
+            preferred.append(rg)
+        elif bucket == "acceptable":
+            acceptable.append(rg)
+        elif bucket == "caution":
+            caution.append(rg)
+        elif bucket == "avoid":
+            avoid.append(rg)
+        else:
+            inconclusive.append(rg)
+
+        details[rg] = {
+            "input_action": input_action,
+            "final_bucket": bucket,
+            "severity": severity,
+            "reason_codes": reason_codes,
+            "candidate_sample": r.get("candidate_sample", 0),
+            "baseline_sample": r.get("baseline_sample", 0),
+            "delta_expectancy": r.get("delta_expectancy", 0),
+            "delta_win_rate": r.get("delta_win_rate", 0),
+            "delta_fee_drag_pct": r.get("delta_fee_drag_pct", 0),
+            "drawdown_ratio_vs_baseline": r.get("drawdown_ratio_vs_baseline", 0),
+            "confidence": r.get("confidence", "insufficient"),
+        }
+
+    regimes_with_data = int(review.get("regimes_with_sufficient_data", 0) or 0)
+    if regimes_with_data >= 3 and mode_status in {"keep_active", "keep_testing"}:
+        policy_confidence = "high"
+    elif regimes_with_data >= 2:
+        policy_confidence = "medium"
+    else:
+        policy_confidence = "low"
+
+    notes.append("Read-only policy recommendation; no execution impact.")
+
+    return {
+        "mode": mode_key,
+        "baseline_mode": baseline_key,
+        "advisory_only": True,
+        "source": {
+            "comparator_verdict": comparator_verdict,
+            "mode_review_status": mode_status,
+        },
+        "policy_confidence": policy_confidence,
+        "preferred_regimes": preferred,
+        "acceptable_regimes": acceptable,
+        "caution_regimes": caution,
+        "avoid_regimes": avoid,
+        "inconclusive_regimes": inconclusive,
+        "regime_details": details,
+        "notes": notes,
+    }
+
+
 async def execute_mode_scan(mode: str):
     cfg = MODE_CONFIGS[mode]
     bucket = store["modes"][mode]
@@ -1711,6 +1835,7 @@ async def execute_mode_scan(mode: str):
     baseline_comparison = compare_mode_vs_baseline(mode)
     regime_recommendations = build_regime_recommendations(mode)
     mode_review_recommendation = build_mode_review_recommendation(mode)
+    mode_regime_policy_summary = build_mode_regime_policy_summary(mode)
     latest = {
         **payload,
         "mode": mode,
@@ -1759,6 +1884,7 @@ async def execute_mode_scan(mode: str):
         "comparator_decision_label": baseline_comparison.get("decision_label"),
         "regime_recommendations": regime_recommendations,
         "mode_review_recommendation": mode_review_recommendation,
+        "mode_regime_policy_summary": mode_regime_policy_summary,
         "shadow_routing": shadow_routing,
         "runtime_info": {
             "agent_runtime_model": "openai-codex/gpt-5.4",
@@ -1805,6 +1931,7 @@ async def get_state():
         "baseline_comparisons": {m: compare_mode_vs_baseline(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "regime_recommendations_by_mode": {m: build_regime_recommendations(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "mode_review_recommendations_by_mode": {m: build_mode_review_recommendation(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
+        "mode_regime_policy_summaries_by_mode": {m: build_mode_regime_policy_summary(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
         "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {
