@@ -5,3 +5,4 @@ __pycache__/
 btc-paper-ui/frontend/node_modules/
 btc-paper-ui/frontend/dist/
 btc-paper-ui/backend/data/
+btc-paper-ui/backend/hyperliquid_keepalive_loop.log
