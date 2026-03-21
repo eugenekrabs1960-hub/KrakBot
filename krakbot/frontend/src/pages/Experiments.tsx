@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmtTsLA } from '../utils/format';
+import { fmtNum, fmtTsLA, fmtUsd } from '../utils/format';
 
 export default function Experiments({ runs, autonomyRecent, onRun, onAutoRun, onRefresh }: any) {
   const [name, setName] = useState('exp-v1-risk-notional');
@@ -7,6 +7,10 @@ export default function Experiments({ runs, autonomyRecent, onRun, onAutoRun, on
   const [value, setValue] = useState('60');
   const [cycles, setCycles] = useState(20);
   const [control, setControl] = useState(false);
+
+  const latest = (autonomyRecent?.items || [])[0];
+  const rec = latest?.recommendation || {};
+  const exp = latest?.experiment || {};
 
   return (
     <div>
@@ -51,10 +55,18 @@ export default function Experiments({ runs, autonomyRecent, onRun, onAutoRun, on
 
       <div className="card" style={{ marginTop: 12 }}>
         <h3 style={{ marginTop: 0 }}>Autonomous Recommendation (latest)</h3>
-        {!(autonomyRecent?.items || []).length ? (
+        {!latest ? (
           <div className="muted">No autonomous recommendation yet.</div>
         ) : (
-          <pre>{JSON.stringify((autonomyRecent.items || [])[0], null, 2)}</pre>
+          <div className="grid" style={{ gap: 10 }}>
+            <div><b>Source:</b> {latest.source || '-'} &nbsp; <b>Scope:</b> {latest.scope || '-'}</div>
+            <div><b>Status:</b> <span className={`badge ${latest.status === 'keep' ? 'good' : latest.status === 'reject' ? 'bad' : 'watch'}`}>{latest.status || 'inconclusive'}</span></div>
+            <div><b>Recommendation:</b> {rec.change_path} → {String(rec.change_value)}</div>
+            <div><b>Rationale:</b> {rec.rationale || '-'}</div>
+            <div><b>Evidence summary:</b></div>
+            <pre style={{ margin: 0 }}>{JSON.stringify(latest.evidence_summary || {}, null, 2)}</pre>
+            <div><b>Experiment evidence:</b> run {exp.run_id || '-'}, baseline {fmtUsd(exp.baseline_total_equity_usd || 0)} vs variant {fmtUsd(exp.variant_total_equity_usd || 0)}; baseline fees {fmtNum(exp.baseline_fees_usd || 0, 2)} vs variant fees {fmtNum(exp.variant_fees_usd || 0, 2)}</div>
+          </div>
         )}
       </div>
     </div>

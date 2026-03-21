@@ -28,5 +28,6 @@ export const getExperimentRuns = (limit = 20) => fetch(`${API}/experiments/runs?
 
 export const runAutonomyStage1 = (cycles = 8) => fetch(`${API}/autonomy/stage1/run-once?cycles=${cycles}`, { method: 'POST' }).then(r => r.json());
 export const getAutonomyStage1Recent = (limit = 10) => fetch(`${API}/autonomy/stage1/recent?limit=${limit}`).then(r => r.json());
+export const getAutonomyStage1Latest = () => fetch(`${API}/autonomy/stage1/latest`).then(r => r.json());
 
 export const getTrades = (limit = 50) => fetch(`${API}/trades?limit=${limit}`).then(r => r.json());

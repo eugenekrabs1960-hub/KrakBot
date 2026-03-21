@@ -17,6 +17,15 @@ from app.services.paper_account import compute_paper_account_from_exec
 from app.services.paper_reset import reset_paper_state
 
 
+SAFE_EXPERIMENT_KNOBS = {
+    # strict paper-safe stage1 whitelist
+    'risk.mean_reversion_min_confidence': {'type': 'float', 'min': 0.60, 'max': 0.75},
+    'universe.max_candidates_per_cycle': {'type': 'int', 'min': 1, 'max': 2},
+    'model.temperature': {'type': 'float', 'min': 0.10, 'max': 0.25},
+    'risk.max_notional_per_trade': {'type': 'float', 'min': 40.0, 'max': 60.0},
+}
+
+
 def _set_nested(obj, path: str, value):
     parts = path.split('.')
     cur = obj
@@ -51,6 +60,30 @@ def _model_online() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+def _normalize_whitelisted_value(path: str, value):
+    cfg = SAFE_EXPERIMENT_KNOBS.get(path)
+    if not cfg:
+        raise ValueError('change_path_not_whitelisted')
+
+    lo, hi = cfg['min'], cfg['max']
+    if cfg['type'] == 'int':
+        try:
+            v = int(round(float(value)))
+        except Exception as exc:
+            raise ValueError('change_value_invalid') from exc
+        if v < int(lo) or v > int(hi):
+            raise ValueError('change_value_out_of_bounds')
+        return v
+
+    try:
+        v = float(value)
+    except Exception as exc:
+        raise ValueError('change_value_invalid') from exc
+    if v < float(lo) or v > float(hi):
+        raise ValueError('change_value_out_of_bounds')
+    return round(v, 4)
 
 
 def _run_window(db: Session, cycles: int, label: str, cycle_delay_sec: float) -> dict:
@@ -156,6 +189,9 @@ def run_experiment(db: Session, *, name: str, change_path: str, change_value, cy
     if cycles < 5 or cycles > 200:
         raise ValueError('cycles_out_of_bounds')
 
+    # stage1 safety gate: whitelist + hard bounds only
+    bounded_change_value = _normalize_whitelisted_value(change_path, change_value)
+
     run_id = f"exp_{uuid.uuid4().hex[:10]}"
     settings_before = copy.deepcopy(api_models.runtime_settings)
 
@@ -180,7 +216,7 @@ def run_experiment(db: Session, *, name: str, change_path: str, change_value, cy
 
         reset_paper_state(db)
         old_value = _get_nested(api_models.runtime_settings, change_path)
-        _set_nested(api_models.runtime_settings, change_path, change_value)
+        _set_nested(api_models.runtime_settings, change_path, bounded_change_value)
         variant = _run_window(db, cycles, 'variant', cycle_delay)
 
         _set_nested(api_models.runtime_settings, change_path, old_value)
@@ -195,10 +231,13 @@ def run_experiment(db: Session, *, name: str, change_path: str, change_value, cy
             'name': name,
             'methodology': {
                 'paper_only': True,
+                'research_mode': True,
                 'one_change_at_a_time': True,
                 'sequential_windows_in_live_market_time': True,
                 'workflow': ['baseline', 'variant'] + (['control_rerun'] if include_control_rerun else []),
                 'interpretation_warning': 'baseline/variant are sequential windows in changing market conditions; treat small deltas as inconclusive',
+                'safe_whitelist_applied': True,
+                'safe_whitelist': SAFE_EXPERIMENT_KNOBS,
                 'low_pressure_guardrails': {
                     'cycles_default': 20,
                     'include_control_rerun_default': False,
@@ -211,7 +250,7 @@ def run_experiment(db: Session, *, name: str, change_path: str, change_value, cy
             },
             'spec': {
                 'paper_only': True,
-                'one_change': {'path': change_path, 'old': old_value, 'new': change_value},
+                'one_change': {'path': change_path, 'old': old_value, 'new': bounded_change_value},
                 'cycles': cycles,
                 'include_control_rerun': include_control_rerun,
                 'baseline_starting_equity_usd': settings.paper_starting_equity_usd,
