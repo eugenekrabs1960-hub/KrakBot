@@ -1718,7 +1718,8 @@ async def execute_mode_scan(mode: str):
                 }
 
         if mirror_source:
-            d = invert_conservative_decision(mirror_source, cfg["rr_min"])
+            # True opposite mode: keep structural validation, but bypass rr_min proposal gating.
+            d = invert_conservative_decision(mirror_source, 0.0)
             d["inverse_of_mode"] = "btc_15m_conservative"
             d["inverse_of_signal_id"] = mirror_source.get("inverse_of_signal_id")
         else:
@@ -1739,7 +1740,7 @@ async def execute_mode_scan(mode: str):
             if fb["status"] == "PROPOSE_TRADE" or mode == "btc_15m_breakout_retest":
                 d = fb
 
-    if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1", "btc_15m_conservative_inverse_v1"} and d.get("status") == "PROPOSE_TRADE":
+    if mode in {"btc_15m_conservative", "btc_15m_conservative_netedge_v1"} and d.get("status") == "PROPOSE_TRADE":
         d = conservative_fee_efficiency_gate(d, mode)
 
     # Tightening applies ONLY to the 15m experiment mode; 15m baseline remains frozen.
@@ -1839,12 +1840,58 @@ async def execute_mode_scan(mode: str):
     # close checks
     candle = candles[-1]
     still = []
+    base_bucket_for_inverse = (store.get("modes", {}).get("btc_15m_conservative", {}) or {})
+    base_open_signal_ids = {p.get("signal_id") for p in (base_bucket_for_inverse.get("open_positions") or []) if p.get("status") == "PAPER_TRADE_OPEN"}
+    base_closed_signal_ids = {t.get("signal_id") for t in (base_bucket_for_inverse.get("closed_trades") or [])}
+
     for p in bucket["open_positions"]:
         if p.get("last_seen_candle_time") != candle["time"]:
             p["bars_open"] = int(p.get("bars_open", 0) or 0) + 1
             p["last_seen_candle_time"] = candle["time"]
         update_position_excursions(p, candle)
-        c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"], cfg)
+
+        c = None
+        # True opposite behavior: inverse closes in sync once mirrored conservative trade is closed.
+        if mode == "btc_15m_conservative_inverse_v1" and p.get("inverse_of_signal_id"):
+            linked = p.get("inverse_of_signal_id")
+            if linked in base_closed_signal_ids and linked not in base_open_signal_ids:
+                slip = payload["market_data"][0]["slippage_assumption_pct"]
+                if p.get("side") == "BUY":
+                    sync_price = candle["close"] * (1 - slip / 100)
+                    gross_realized = (sync_price - p["entry_fill_price"]) * p["qty"]
+                else:
+                    sync_price = candle["close"] * (1 + slip / 100)
+                    gross_realized = (p["entry_fill_price"] - sync_price) * p["qty"]
+
+                close_fill_price = round2(sync_price)
+                close_notional = close_fill_price * p["qty"]
+                close_fee_info = paper_exit_fee(cfg, close_notional)
+                close_fee = close_fee_info.get("fee", 0.0)
+                total_fees = p.get("entry_fee", 0.0) + close_fee
+                net_realized = gross_realized - total_fees
+                c = {
+                    **p,
+                    "status": "PAPER_TRADE_CLOSED",
+                    "close_reason": "MIRROR_SYNC_CLOSE",
+                    "close_fill_price": close_fill_price,
+                    "close_notional": round2(close_notional),
+                    "close_fee": round2(close_fee),
+                    "exit_fee": round2(close_fee),
+                    "close_fee_pct": close_fee_info.get("fee_pct"),
+                    "close_fee_bps": close_fee_info.get("fee_bps"),
+                    "close_liquidity": close_fee_info.get("liquidity"),
+                    "total_fees": round2(total_fees),
+                    "gross_realized_pnl": round2(gross_realized),
+                    "net_realized_pnl": round2(net_realized),
+                    "realized_pnl": round2(net_realized),
+                    "unrealized_pnl": 0,
+                    "gross_unrealized_pnl": 0,
+                    "net_unrealized_pnl": 0,
+                    "close_time": now_iso(),
+                }
+
+        if c is None:
+            c = maybe_close(p, candle, payload["market_data"][0]["slippage_assumption_pct"], cfg)
         if c:
             bucket["closed_trades"].append(c)
             bucket["paper_execution_log"].append({"timestamp": now_iso(), "mode": mode, "action": "PAPER_TRADE_CLOSED", "signal_id": c["signal_id"], "close_reason": c["close_reason"], "gross_realized_pnl": c["gross_realized_pnl"], "net_realized_pnl": c["net_realized_pnl"], "realized_pnl": c["realized_pnl"], "total_fees": c["total_fees"]})
