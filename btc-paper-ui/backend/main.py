@@ -55,6 +55,12 @@ COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_KEEP = 1.25
 COMPARATOR_MAX_DRAWDOWN_DEGRADE_FACTOR_PROMOTE = 1.15
 COMPARATOR_MAX_FEE_DRAG_WORSE_KEEP = 10.0
 
+# Read-only regime recommendation thresholds (advisory only)
+REGIME_RECO_MIN_SAMPLE = COMPARATOR_MIN_SAMPLE_REGIME
+REGIME_RECO_FEE_WORSE_CAUTION = 10.0
+REGIME_RECO_DD_GOOD = 1.10
+REGIME_RECO_DD_BAD = 1.35
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {
         "label": "BTC/USD 15m conservative (frozen baseline)",
@@ -1252,6 +1258,161 @@ def compare_mode_vs_baseline(mode_key: str, baseline_key: str = BASELINE_MODE_KE
     }
 
 
+def _regime_action_downgrade_once(action: str) -> str:
+    order = {
+        "favor": "neutral",
+        "neutral": "caution",
+        "caution": "avoid",
+        "avoid": "avoid",
+        "insufficient_data": "insufficient_data",
+    }
+    return order.get(action, "neutral")
+
+
+def build_regime_recommendations(mode_key: str, baseline_key: str = BASELINE_MODE_KEY) -> dict[str, Any]:
+    cmp = compare_mode_vs_baseline(mode_key, baseline_key=baseline_key)
+    if mode_key == baseline_key:
+        return {
+            "baseline_mode": baseline_key,
+            "mode": mode_key,
+            "overall_comparator_verdict": cmp.get("verdict"),
+            "advisory_only": True,
+            "thresholds": {
+                "min_sample_per_regime": REGIME_RECO_MIN_SAMPLE,
+                "fee_worse_caution_pct": REGIME_RECO_FEE_WORSE_CAUTION,
+                "drawdown_ratio_good": REGIME_RECO_DD_GOOD,
+                "drawdown_ratio_bad": REGIME_RECO_DD_BAD,
+            },
+            "by_regime": {rg: {"recommended_action": "neutral", "confidence": "n/a", "reason_codes": ["baseline_reference"]} for rg in REGIME_TYPES},
+        }
+
+    baseline_bucket = store.get("modes", {}).get(baseline_key, {}) or {}
+    candidate_bucket = store.get("modes", {}).get(mode_key, {}) or {}
+    base_reg = baseline_bucket.get("performance_by_regime") or regime_metrics_bucket()
+    cand_reg = candidate_bucket.get("performance_by_regime") or regime_metrics_bucket()
+
+    overall_verdict = cmp.get("verdict")
+    by_regime: dict[str, Any] = {}
+
+    for rg in REGIME_TYPES:
+        b = base_reg.get(rg) or strategy_metrics_bucket()
+        c = cand_reg.get(rg) or strategy_metrics_bucket()
+        bs = int(b.get("sample_size", 0) or 0)
+        cs = int(c.get("sample_size", 0) or 0)
+
+        delta_exp = round2(float(c.get("expectancy", 0.0)) - float(b.get("expectancy", 0.0)))
+        delta_wr = round2(float(c.get("win_rate", 0.0)) - float(b.get("win_rate", 0.0)))
+        delta_fee = round2(float(c.get("fee_drag_pct", 0.0)) - float(b.get("fee_drag_pct", 0.0)))
+
+        bdd = abs(float(b.get("max_drawdown", 0.0)))
+        cdd = abs(float(c.get("max_drawdown", 0.0)))
+        dd_ratio = (cdd / bdd) if bdd > 0 else (1.0 if cdd == 0 else 9999.0)
+
+        reason_codes: list[str] = []
+        notes: list[str] = []
+
+        if cs < REGIME_RECO_MIN_SAMPLE or bs < REGIME_RECO_MIN_SAMPLE:
+            action = "insufficient_data"
+            reason_codes.append("sample_shortfall")
+            notes.append(f"Sample shortfall candidate={cs}, baseline={bs}, min={REGIME_RECO_MIN_SAMPLE}.")
+        else:
+            score = 0
+            # Expectancy is the strongest signal.
+            if delta_exp > 0:
+                score += 3
+                reason_codes.append("expectancy_better")
+            elif delta_exp < 0:
+                score -= 3
+                reason_codes.append("expectancy_worse")
+            else:
+                reason_codes.append("expectancy_flat")
+
+            if delta_fee <= 0:
+                score += 1
+                reason_codes.append("fee_drag_not_worse")
+            elif delta_fee > REGIME_RECO_FEE_WORSE_CAUTION:
+                score -= 1
+                reason_codes.append("fee_drag_materially_worse")
+            else:
+                reason_codes.append("fee_drag_slightly_worse")
+
+            if dd_ratio <= REGIME_RECO_DD_GOOD:
+                score += 1
+                reason_codes.append("drawdown_within_good_band")
+            elif dd_ratio > REGIME_RECO_DD_BAD:
+                score -= 1
+                reason_codes.append("drawdown_too_worse")
+            else:
+                reason_codes.append("drawdown_mixed")
+
+            # Win rate remains secondary only.
+            if delta_wr > 0:
+                score += 0.5
+                reason_codes.append("win_rate_better")
+            elif delta_wr < 0:
+                score -= 0.5
+                reason_codes.append("win_rate_worse")
+            else:
+                reason_codes.append("win_rate_flat")
+
+            if score >= 3:
+                action = "favor"
+            elif score >= 1:
+                action = "neutral"
+            elif score >= -1:
+                action = "caution"
+            else:
+                action = "avoid"
+
+        if action != "insufficient_data":
+            if overall_verdict == "DISCARD_CANDIDATE":
+                action = "avoid"
+                reason_codes.append("overall_discard_guardrail")
+            elif overall_verdict == "PROBATION":
+                action = _regime_action_downgrade_once(action)
+                reason_codes.append("overall_probation_guardrail")
+            elif overall_verdict == "INSUFFICIENT_DATA" and action == "favor":
+                action = "neutral"
+                reason_codes.append("overall_insufficient_guardrail")
+
+        min_sample = min(cs, bs)
+        if min_sample >= 25:
+            confidence = "high"
+        elif min_sample >= 15:
+            confidence = "medium"
+        elif action == "insufficient_data":
+            confidence = "insufficient"
+        else:
+            confidence = "low"
+
+        by_regime[rg] = {
+            "recommended_action": action,
+            "confidence": confidence,
+            "candidate_sample": cs,
+            "baseline_sample": bs,
+            "delta_expectancy": delta_exp,
+            "delta_win_rate": delta_wr,
+            "delta_fee_drag_pct": delta_fee,
+            "drawdown_ratio_vs_baseline": round2(dd_ratio if dd_ratio < 9999 else 9999),
+            "reason_codes": reason_codes,
+            "notes": notes,
+        }
+
+    return {
+        "baseline_mode": baseline_key,
+        "mode": mode_key,
+        "overall_comparator_verdict": overall_verdict,
+        "advisory_only": True,
+        "thresholds": {
+            "min_sample_per_regime": REGIME_RECO_MIN_SAMPLE,
+            "fee_worse_caution_pct": REGIME_RECO_FEE_WORSE_CAUTION,
+            "drawdown_ratio_good": REGIME_RECO_DD_GOOD,
+            "drawdown_ratio_bad": REGIME_RECO_DD_BAD,
+        },
+        "by_regime": by_regime,
+    }
+
+
 async def execute_mode_scan(mode: str):
     cfg = MODE_CONFIGS[mode]
     bucket = store["modes"][mode]
@@ -1434,6 +1595,7 @@ async def execute_mode_scan(mode: str):
     shadow_routing = shadow_route_snapshot(current_regime)
     strategy_status = strategy_status_for_display(bucket["strategy_registry_entry"] or {}, bucket["strategy_metrics"], shadow_routing)
     baseline_comparison = compare_mode_vs_baseline(mode)
+    regime_recommendations = build_regime_recommendations(mode)
     latest = {
         **payload,
         "mode": mode,
@@ -1480,6 +1642,7 @@ async def execute_mode_scan(mode: str):
         "comparison_vs_baseline": baseline_comparison,
         "comparator_verdict": baseline_comparison.get("verdict"),
         "comparator_decision_label": baseline_comparison.get("decision_label"),
+        "regime_recommendations": regime_recommendations,
         "shadow_routing": shadow_routing,
         "runtime_info": {
             "agent_runtime_model": "openai-codex/gpt-5.4",
@@ -1524,6 +1687,7 @@ async def get_state():
         "regime_types": REGIME_TYPES,
         "baseline_mode": BASELINE_MODE_KEY,
         "baseline_comparisons": {m: compare_mode_vs_baseline(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
+        "regime_recommendations_by_mode": {m: build_regime_recommendations(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
         "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {
