@@ -11,9 +11,43 @@ from app.models.db_models import (
 )
 from app.services.autonomy.promotion_manager import create_hypothesis_from_recommendation, create_promotion, apply_promotion
 from app.services.autonomy.rollback_controller import apply_rollback
+from app.services.autonomy.orchestrator import run_once as orchestrator_run_once
+from app.models.db_models import AutonomyRunDB
 
 router = APIRouter(tags=['autonomy-core'])
 
+
+
+
+@router.post('/autonomy/core/run-once')
+def autonomy_core_run_once(cycles: int = 8, trigger: str = 'manual', db: Session = Depends(get_db)):
+    out = orchestrator_run_once(db, trigger=trigger, cycles=cycles)
+    db.commit()
+    return out
+
+
+@router.post('/autonomy/core/tick')
+def autonomy_core_tick(cycles: int = 8, db: Session = Depends(get_db)):
+    out = orchestrator_run_once(db, trigger='scheduler', cycles=cycles)
+    db.commit()
+    return out
+
+
+@router.get('/autonomy/core/runs')
+def autonomy_core_runs(limit: int = 50, db: Session = Depends(get_db)):
+    rows = db.query(AutonomyRunDB).order_by(desc(AutonomyRunDB.started_at)).limit(max(1, min(limit, 200))).all()
+    return {'items': [
+        {
+            'run_id': r.run_id,
+            'started_at': r.started_at,
+            'finished_at': r.finished_at,
+            'status': r.status,
+            'phase': r.phase,
+            'trigger': r.trigger,
+            'payload': r.payload,
+        }
+        for r in rows
+    ]}
 
 @router.post('/autonomy/core/hypotheses/from-recommendation/{recommendation_id}')
 def autonomy_core_hypothesis_from_recommendation(recommendation_id: str, db: Session = Depends(get_db)):

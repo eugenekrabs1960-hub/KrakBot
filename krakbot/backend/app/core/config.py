@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     autonomy_promotion_monitor_interval_sec: int = 120
     autonomy_one_change_lock_ttl_sec: int = 900
     autonomy_rollback_cooldown_sec: int = 1800
+    autonomy_orchestrator_enabled: bool = False
+    autonomy_orchestrator_interval_sec: int = 300
+    autonomy_max_runs_per_hour: int = 6
 
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
