@@ -1669,27 +1669,53 @@ async def execute_mode_scan(mode: str):
         "strategy_registry_entry": bucket["strategy_registry_entry"],
     }
     if mode == "btc_15m_conservative_inverse_v1":
-        # True mirror mode: only react to final executable conservative open events.
-        base_latest = (store.get("modes", {}).get("btc_15m_conservative", {}) or {}).get("latest") or {}
-        base_decision = base_latest.get("latest_decision") or {}
-        if base_decision.get("status") == "PAPER_TRADE_OPEN":
-            mirrored_source = {
+        # Mirror mode: prefer conservative's actual currently-open position state.
+        base_bucket = (store.get("modes", {}).get("btc_15m_conservative", {}) or {})
+        base_open_positions = [p for p in (base_bucket.get("open_positions") or []) if p.get("status") == "PAPER_TRADE_OPEN"]
+
+        mirror_source: dict[str, Any] | None = None
+
+        if base_open_positions:
+            # Use the most recently opened conservative position as mirror source.
+            base_open = sorted(base_open_positions, key=lambda p: p.get("open_time") or "", reverse=True)[0]
+            mirror_source = {
                 "status": "PROPOSE_TRADE",
-                "side": base_decision.get("side"),
-                "entry_price": base_decision.get("entry_fill_price") or base_decision.get("entry_price"),
-                "stop_loss": base_decision.get("stop_loss"),
-                "take_profit": base_decision.get("take_profit"),
-                "risk_reward_ratio": base_decision.get("risk_reward_ratio"),
-                "regime_label": base_decision.get("regime_label"),
-                "reason": "Mirroring final conservative paper open decision.",
-                "invalidation": base_decision.get("invalidation"),
-                "signal_id": f"{mode}|mirror|{base_decision.get('signal_id')}",
+                "side": base_open.get("side"),
+                "entry_price": base_open.get("entry_fill_price") or base_open.get("entry_price"),
+                "stop_loss": base_open.get("stop_loss"),
+                "take_profit": base_open.get("take_profit"),
+                "risk_reward_ratio": base_open.get("risk_reward_ratio"),
+                "regime_label": base_open.get("regime_label"),
+                "reason": "Mirroring current conservative open position state.",
+                "invalidation": base_open.get("invalidation"),
+                "signal_id": f"{mode}|mirror|{base_open.get('signal_id')}",
+                "inverse_of_signal_id": base_open.get("signal_id"),
             }
-            d = invert_conservative_decision(mirrored_source, cfg["rr_min"])
-            d["inverse_of_mode"] = "btc_15m_conservative"
-            d["inverse_of_signal_id"] = base_decision.get("signal_id")
         else:
-            d = normalize_decision({"status": "WAIT", "regime_label": "inverse_mirror_idle", "reason": "No final conservative open event to mirror on this scan."}, cfg["rr_min"])
+            # Fallback for scan-cycle timing: mirror from final conservative open decision if present.
+            base_latest = base_bucket.get("latest") or {}
+            base_decision = base_latest.get("latest_decision") or {}
+            if base_decision.get("status") == "PAPER_TRADE_OPEN":
+                mirror_source = {
+                    "status": "PROPOSE_TRADE",
+                    "side": base_decision.get("side"),
+                    "entry_price": base_decision.get("entry_fill_price") or base_decision.get("entry_price"),
+                    "stop_loss": base_decision.get("stop_loss"),
+                    "take_profit": base_decision.get("take_profit"),
+                    "risk_reward_ratio": base_decision.get("risk_reward_ratio"),
+                    "regime_label": base_decision.get("regime_label"),
+                    "reason": "Mirroring final conservative paper open decision.",
+                    "invalidation": base_decision.get("invalidation"),
+                    "signal_id": f"{mode}|mirror|{base_decision.get('signal_id')}",
+                    "inverse_of_signal_id": base_decision.get("signal_id"),
+                }
+
+        if mirror_source:
+            d = invert_conservative_decision(mirror_source, cfg["rr_min"])
+            d["inverse_of_mode"] = "btc_15m_conservative"
+            d["inverse_of_signal_id"] = mirror_source.get("inverse_of_signal_id")
+        else:
+            d = normalize_decision({"status": "WAIT", "regime_label": "inverse_mirror_idle", "reason": "No conservative open position/event available to mirror on this scan."}, cfg["rr_min"])
     else:
         if KRAKEN_USE_LLM_SCAN:
             d = await call_clawbot(payload, timeframe, cfg["rr_min"])
