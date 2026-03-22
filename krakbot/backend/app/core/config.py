@@ -123,6 +123,32 @@ class Settings(BaseSettings):
     autonomy_rollback_fee_drag_bps: float = 8.0
     autonomy_rollback_min_observation_fills: int = 5
 
+    # paper leverage bucketing (chunk-1 schema only; no enforcement yet)
+    paper_leverage_bucketing_enabled: bool = True
+    paper_leverage_bucket_version: str = "v1"
+    paper_leverage_active_buckets: str = "3,6,9"
+    paper_leverage_deferred_buckets: str = "18"
+
+    paper_bucket_3_min_conviction: float = 0.50
+    paper_bucket_3_min_market_quality: float = 0.50
+    paper_bucket_6_min_conviction: float = 0.62
+    paper_bucket_6_min_market_quality: float = 0.62
+    paper_bucket_9_min_conviction: float = 0.75
+    paper_bucket_9_min_market_quality: float = 0.75
+    paper_bucket_18_min_conviction: float = 0.88
+    paper_bucket_18_min_market_quality: float = 0.88
+
+    paper_bucket_9_max_contradiction: float = 0.30
+    paper_bucket_9_max_crowdedness: float = 0.35
+    paper_bucket_9_max_extension: float = 0.40
+    paper_bucket_9_max_fragility: float = 0.35
+
+    paper_bucket_18_unlock_min_bucket9_trades: int = 100
+    paper_bucket_18_unlock_min_days_observed: int = 7
+    paper_bucket_18_unlock_min_win_rate: float = 0.52
+    paper_bucket_18_unlock_min_profit_factor: float = 1.15
+    paper_bucket_18_unlock_max_drawdown_pct: float = 8.0
+
     hyperliquid_account_address: str = ""
     hyperliquid_order_relay_url: str = ""
     hyperliquid_order_relay_token: str = ""

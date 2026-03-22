@@ -48,3 +48,4 @@ class PolicyDecision(BaseModel):
     reasons: list[str]
     downgrade_or_block_reason: str | None
     risk_profile: RiskProfileSnapshot
+    leverage_bucket_audit: dict | None = None

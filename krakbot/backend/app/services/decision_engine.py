@@ -18,12 +18,14 @@ from app.services.features.ml_scores import compute_ml_scores
 from app.services.features.packet_builder import build_feature_packet
 from app.services.models.analyst_runner import analyst_runner
 from app.services.policy.gate import evaluate_policy
+from app.services.policy.leverage_bucketing import compute_bucket_audit
 from app.services.execution.broker_router import get_broker
 from app.services.journal.writer import write_cycle
 from app.services.wallet_signals import ingest_wallet_events_for_coin, generate_wallet_summary_for_coin
 from app.services.news_signals import get_news_summary
 from app.services.community_signals import get_community_summary
 from app.services.wildcard_universe import resolve_active_universe
+from app.services.autonomy.events import emit_event
 
 _cycle_lock = threading.Lock()
 
@@ -158,6 +160,33 @@ def run_decision_cycle(db: Session) -> dict:
             )
             decision = analyst_runner.run(packet)
             policy = evaluate_policy(packet, decision, runtime_settings.mode, risk_profile, cfg)
+            bucket_audit = compute_bucket_audit(packet, decision, policy)
+            policy = policy.model_copy(update={'leverage_bucket_audit': bucket_audit})
+
+            emit_event(
+                db,
+                entity_type='leverage_bucket',
+                entity_id=f"bucket:{packet.packet_id}",
+                event_type='decision',
+                payload={
+                    'change_path': 'risk.leverage_bucket',
+                    'old_value': None,
+                    'new_value': bucket_audit.get('candidate_bucket'),
+                    'reason_code': str(bucket_audit.get('bucket_reason_code') or 'bucket_decision'),
+                    'target_mode': mode,
+                    'packet_id': packet.packet_id,
+                    'policy_decision_id': policy.policy_decision_id,
+                    'requested_action': decision.action,
+                    'final_action': policy.final_action,
+                    'candidate_bucket': bucket_audit.get('candidate_bucket'),
+                    'assigned_leverage_current': bucket_audit.get('assigned_leverage_current'),
+                    'bucket_preview_leverage': bucket_audit.get('bucket_preview_leverage'),
+                    'conviction_score': bucket_audit.get('conviction_score'),
+                    'market_quality_score': bucket_audit.get('market_quality_score'),
+                    'caution_flags': bucket_audit.get('caution_flags'),
+                    'enforcement_applied': False,
+                },
+            )
 
             execution_record = None
             if policy.final_action == 'allow_trade' and decision.action in {'long', 'short'}:
@@ -185,6 +214,28 @@ def run_decision_cycle(db: Session) -> dict:
                     'broker_order_id': er.get('order_id'),
                     'reason': er.get('reason'),
                     'created_at': datetime.now(timezone.utc),
+                    'leverage_bucket': bucket_audit.get('candidate_bucket'),
+                    'bucket_reason_code': bucket_audit.get('bucket_reason_code'),
+                    'conviction_score': bucket_audit.get('conviction_score'),
+                    'market_quality_score': bucket_audit.get('market_quality_score'),
+                    'setup_type': decision.setup_type,
+                    'direction': decision.action,
+                    'allocation': {
+                        'notional_usd': policy.position_sizing.notional_usd or 0.0,
+                        'spending_power_used_usd': policy.position_sizing.notional_usd or 0.0,
+                        'allocation_policy': 'existing_notional_policy',
+                        'allocation_decoupled_from_bucket': True,
+                    },
+                    'outcomes': {
+                        'outcome_5m_bps': None,
+                        'outcome_15m_bps': None,
+                        'outcome_1h_bps': None,
+                        'realized_pnl_usd': None,
+                        'realized_pnl_after_fees_usd': None,
+                        'mfe_bps': None,
+                        'mae_bps': None,
+                        'exit_reason': None,
+                    },
                 }
 
             write_cycle(db, packet, decision, policy, execution_record)
