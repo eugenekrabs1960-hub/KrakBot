@@ -100,7 +100,7 @@ function App() {
         />
       )}
       {page === 'Candidates' && <Candidates data={candidates} />}
-      {page === 'Positions' && <Positions data={positions} />}
+      {page === 'Positions' && <Positions data={positions} tradesData={decisions} />}
       {page === 'Decisions' && <Decisions data={decisions} />}
 
       {page === 'Experiments' && (

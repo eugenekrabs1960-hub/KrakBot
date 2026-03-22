@@ -2,14 +2,15 @@ import React from 'react';
 import { fmtNum, fmtUsd, fmtTsLA, pnlClass } from '../utils/format';
 
 export default function Positions({ data, tradesData }: any) {
-  const items = data?.items || [];
-  const trades = tradesData?.items || [];
+  const summary = data?.summary_items || data?.items || [];
+  const openLegs = data?.open_legs || [];
+  const trades = tradesData?.execution || tradesData?.items || [];
 
   const closed = trades
     .filter((t: any) => (t?.status || '').toLowerCase() === 'filled')
     .slice(0, 20)
     .map((t: any) => {
-      const pnl = Number(t?.pnl_usd ?? t?.realized_pnl_usd ?? 0);
+      const pnl = Number(t?.pnl_usd ?? t?.realized_pnl_usd ?? t?.outcomes?.realized_pnl_usd ?? 0);
       return {
         symbol: t?.symbol || '-',
         coin: (t?.symbol || '').replace('-PERP', ''),
@@ -23,12 +24,12 @@ export default function Positions({ data, tradesData }: any) {
 
   return (
     <div>
-      <h2>Open Positions</h2>
-      <div className="section-sub">Live view of currently open paper positions</div>
+      <h2>Open Trade Legs</h2>
+      <div className="section-sub">Per-entry truth view (legs are not merged by symbol)</div>
       <div style={{ marginBottom: 10 }}>Mode: <span className="badge info2">{data?.mode || '-'}</span></div>
 
-      {items.length === 0 ? (
-        <div className="card">No open positions right now.</div>
+      {openLegs.length === 0 ? (
+        <div className="card">No open trade legs right now.</div>
       ) : (
         <div className="table-wrap">
           <table>
@@ -36,9 +37,10 @@ export default function Positions({ data, tradesData }: any) {
               <tr>
                 <th>Coin</th>
                 <th>Side</th>
-                <th className="num">Size</th>
-                <th className="num">Notional</th>
-                <th className="num">Leverage</th>
+                <th>Leg ID</th>
+                <th className="num">Qty</th>
+                <th className="num">Entry Notional</th>
+                <th className="num">Leverage (entry)</th>
                 <th className="num">Entry</th>
                 <th className="num">Mark</th>
                 <th className="num">Unrealized PnL</th>
@@ -47,12 +49,13 @@ export default function Positions({ data, tradesData }: any) {
               </tr>
             </thead>
             <tbody>
-              {items.map((x: any) => (
-                <tr key={x.symbol}>
+              {openLegs.map((x: any) => (
+                <tr key={x.leg_id || `${x.symbol}-${x.packet_id}`}>
                   <td>{x.coin}</td>
                   <td><span className={`badge ${x.side === 'long' ? 'good' : 'bad'}`}>{x.side}</span></td>
-                  <td className="num">{fmtNum(x.qty, 3)}</td>
-                  <td className="num">{fmtUsd(x.notional_usd)}</td>
+                  <td>{x.leg_id || '-'}</td>
+                  <td className="num">{fmtNum(x.remaining_qty ?? x.entry_qty, 4)}</td>
+                  <td className="num">{fmtUsd(x.entry_notional_usd)}</td>
                   <td className="num">{fmtNum(x.leverage ?? 1.0, 1)}x</td>
                   <td className="num">{fmtUsd(x.entry_px)}</td>
                   <td className="num">{fmtUsd(x.mark_px)}</td>
@@ -65,6 +68,50 @@ export default function Positions({ data, tradesData }: any) {
           </table>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3 style={{ marginTop: 0 }}>Aggregated Positions (Summary)</h3>
+        <div className="section-sub" style={{ marginTop: 0 }}>Symbol-level summary (merged), leverage is weighted/effective across open legs</div>
+
+        {summary.length === 0 ? (
+          <div className="muted">No aggregated open positions right now.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Coin</th>
+                  <th>Side</th>
+                  <th className="num">Net Size</th>
+                  <th className="num">Notional</th>
+                  <th className="num">Leverage (weighted)</th>
+                  <th className="num">Avg Entry</th>
+                  <th className="num">Mark</th>
+                  <th className="num">Unrealized PnL</th>
+                  <th>Setup</th>
+                  <th>Opened (PT)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.map((x: any) => (
+                  <tr key={x.symbol}>
+                    <td>{x.coin}</td>
+                    <td><span className={`badge ${x.side === 'long' ? 'good' : 'bad'}`}>{x.side}</span></td>
+                    <td className="num">{fmtNum(x.qty, 3)}</td>
+                    <td className="num">{fmtUsd(x.notional_usd)}</td>
+                    <td className="num">{fmtNum(x.leverage ?? 1.0, 2)}x</td>
+                    <td className="num">{fmtUsd(x.entry_px)}</td>
+                    <td className="num">{fmtUsd(x.mark_px)}</td>
+                    <td className={`num value ${pnlClass(x.unrealized_pnl)}`}>{fmtUsd(x.unrealized_pnl)}</td>
+                    <td>{x.setup_type || '-'}</td>
+                    <td>{fmtTsLA(x.opened_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ marginTop: 14 }}>
         <h3 style={{ marginTop: 0 }}>Recent Closed Trades</h3>
