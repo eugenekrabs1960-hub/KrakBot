@@ -117,7 +117,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
             reasons.append('cooldown_check_failed')
 
     lev_base, lev_reason = _assign_paper_leverage(packet, decision, checks, settings, final_action)
-    lev_base = min(max(1.0, float(lev_base)), float(settings.leverage_cap or 1.0)) if mode_settings.execution_mode == 'paper' else 1.0
+    lev_base = min(max(1.0, float(lev_base)), float(getattr(settings, 'paper_leverage_cap', settings.leverage_cap) or 1.0)) if mode_settings.execution_mode == 'paper' else 1.0
 
     # chunk-2: enforce paper leverage bucket assignment (3/6/9 active, 18 deferred)
     bucket_audit = enforce_paper_bucket(packet, decision, final_action=final_action, current_leverage=lev_base)

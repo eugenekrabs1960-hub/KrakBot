@@ -122,7 +122,7 @@ def enforce_paper_bucket(packet, decision, *, final_action: str, current_leverag
                 downgrade_reason_code = f'downgrade_due_to_caution:{"|".join(caution_flags)}'
 
         # hard cap clip
-        cap = float(settings.leverage_cap or 1.0)
+        cap = float(getattr(settings, 'paper_leverage_cap', settings.leverage_cap) or 1.0)
         if float(enforced_leverage or 1.0) > cap:
             clipped_leverage = cap
             cap_clip_reason_code = 'hard_leverage_cap'
