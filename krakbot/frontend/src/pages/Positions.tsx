@@ -24,12 +24,12 @@ export default function Positions({ data, tradesData }: any) {
 
   return (
     <div>
-      <h2>Open Trade Legs</h2>
-      <div className="section-sub">Per-entry truth view (legs are not merged by symbol)</div>
+      <h2>Aggregated Positions</h2>
+      <div className="section-sub">Symbol-level summary view</div>
       <div style={{ marginBottom: 10 }}>Mode: <span className="badge info2">{data?.mode || '-'}</span></div>
 
-      {openLegs.length === 0 ? (
-        <div className="card">No open trade legs right now.</div>
+      {summary.length === 0 ? (
+        <div className="card">No aggregated open positions right now.</div>
       ) : (
         <div className="table-wrap">
           <table>
@@ -37,35 +37,27 @@ export default function Positions({ data, tradesData }: any) {
               <tr>
                 <th>Coin</th>
                 <th>Side</th>
-                <th>Leg ID</th>
-                <th className="num">Qty</th>
-                <th className="num">Entry Notional</th>
-                <th className="num">Leverage (entry)</th>
-                <th className="num">Entry</th>
+                <th className="num">Net Size</th>
+                <th className="num">Notional</th>
+                <th className="num">Leverage (weighted)</th>
+                <th className="num">Avg Entry</th>
                 <th className="num">Mark</th>
                 <th className="num">Unrealized PnL</th>
-                <th className="num">Stop Loss</th>
-                <th className="num">Take Profit</th>
-                <th>Invalidation</th>
                 <th>Setup</th>
                 <th>Opened (PT)</th>
               </tr>
             </thead>
             <tbody>
-              {openLegs.map((x: any) => (
-                <tr key={x.leg_id || `${x.symbol}-${x.packet_id}`}>
+              {summary.map((x: any) => (
+                <tr key={x.symbol}>
                   <td>{x.coin}</td>
                   <td><span className={`badge ${x.side === 'long' ? 'good' : 'bad'}`}>{x.side}</span></td>
-                  <td>{x.leg_id || '-'}</td>
-                  <td className="num">{fmtNum(x.remaining_qty ?? x.entry_qty, 4)}</td>
-                  <td className="num">{fmtUsd(x.entry_notional_usd)}</td>
-                  <td className="num">{fmtNum(x.leverage ?? 1.0, 1)}x</td>
+                  <td className="num">{fmtNum(x.qty, 3)}</td>
+                  <td className="num">{fmtUsd(x.notional_usd)}</td>
+                  <td className="num">{fmtNum(x.leverage ?? 1.0, 2)}x</td>
                   <td className="num">{fmtUsd(x.entry_px)}</td>
                   <td className="num">{fmtUsd(x.mark_px)}</td>
                   <td className={`num value ${pnlClass(x.unrealized_pnl)}`}>{fmtUsd(x.unrealized_pnl)}</td>
-                  <td className="num">{x.stop_loss != null ? fmtUsd(x.stop_loss) : '-'}</td>
-                  <td className="num">{x.take_profit != null ? fmtUsd(x.take_profit) : '-'}</td>
-                  <td>{x.invalidation?.type || '-'}</td>
                   <td>{x.setup_type || '-'}</td>
                   <td>{fmtTsLA(x.opened_at)}</td>
                 </tr>
@@ -76,11 +68,11 @@ export default function Positions({ data, tradesData }: any) {
       )}
 
       <div className="card" style={{ marginTop: 14 }}>
-        <h3 style={{ marginTop: 0 }}>Aggregated Positions (Summary)</h3>
-        <div className="section-sub" style={{ marginTop: 0 }}>Symbol-level summary (merged), leverage is weighted/effective across open legs</div>
+        <h3 style={{ marginTop: 0 }}>Open Trades</h3>
+        <div className="section-sub" style={{ marginTop: 0 }}>Each open trade shown separately</div>
 
-        {summary.length === 0 ? (
-          <div className="muted">No aggregated open positions right now.</div>
+        {openLegs.length === 0 ? (
+          <div className="muted">No open trades right now.</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -88,27 +80,33 @@ export default function Positions({ data, tradesData }: any) {
                 <tr>
                   <th>Coin</th>
                   <th>Side</th>
-                  <th className="num">Net Size</th>
-                  <th className="num">Notional</th>
-                  <th className="num">Leverage (weighted)</th>
-                  <th className="num">Avg Entry</th>
+                  <th className="num">Qty</th>
+                  <th className="num">Entry Notional</th>
+                  <th className="num">Leverage (entry)</th>
+                  <th className="num">Entry</th>
                   <th className="num">Mark</th>
                   <th className="num">Unrealized PnL</th>
+                  <th className="num">Stop Loss</th>
+                  <th className="num">Take Profit</th>
+                  <th>Exit Trigger</th>
                   <th>Setup</th>
                   <th>Opened (PT)</th>
                 </tr>
               </thead>
               <tbody>
-                {summary.map((x: any) => (
-                  <tr key={x.symbol}>
+                {openLegs.map((x: any) => (
+                  <tr key={x.leg_id || `${x.symbol}-${x.packet_id}`}>
                     <td>{x.coin}</td>
                     <td><span className={`badge ${x.side === 'long' ? 'good' : 'bad'}`}>{x.side}</span></td>
-                    <td className="num">{fmtNum(x.qty, 3)}</td>
-                    <td className="num">{fmtUsd(x.notional_usd)}</td>
-                    <td className="num">{fmtNum(x.leverage ?? 1.0, 2)}x</td>
+                    <td className="num">{fmtNum(x.remaining_qty ?? x.entry_qty, 4)}</td>
+                    <td className="num">{fmtUsd(x.entry_notional_usd)}</td>
+                    <td className="num">{fmtNum(x.leverage ?? 1.0, 1)}x</td>
                     <td className="num">{fmtUsd(x.entry_px)}</td>
                     <td className="num">{fmtUsd(x.mark_px)}</td>
                     <td className={`num value ${pnlClass(x.unrealized_pnl)}`}>{fmtUsd(x.unrealized_pnl)}</td>
+                    <td className="num">{x.stop_loss != null ? fmtUsd(x.stop_loss) : 'Not set'}</td>
+                    <td className="num">{x.take_profit != null ? fmtUsd(x.take_profit) : 'Not set'}</td>
+                    <td>{x.invalidation?.type || 'Not set'}</td>
                     <td>{x.setup_type || '-'}</td>
                     <td>{fmtTsLA(x.opened_at)}</td>
                   </tr>
@@ -121,7 +119,7 @@ export default function Positions({ data, tradesData }: any) {
 
       <div className="card" style={{ marginTop: 14 }}>
         <h3 style={{ marginTop: 0 }}>Recent Closed Trades</h3>
-        <div className="section-sub" style={{ marginTop: 0 }}>Most recent filled paper trades</div>
+        <div className="section-sub" style={{ marginTop: 0 }}>Most recent filled paper executions (realized PnL may be unavailable)</div>
         {closed.length === 0 ? (
           <div className="muted">No recent closed trades.</div>
         ) : (
