@@ -70,10 +70,14 @@ class QwenLocalAdapter(LocalModelAdapter):
             "Include conviction-aware leverage preference guidance: lower for moderate edge, higher for strong edge only when "
             "directional evidence, setup quality, and market cleanliness are aligned. "
             "Do not rely on confidence alone for high leverage; require both conviction and market quality. "
+            "Decision cadence context: the trading loop evaluates roughly every 5 minutes (not continuously). "
+            "Prefer setups that remain actionable across this cadence window; avoid ultra-short scalp precision that is likely stale by the next cycle. "
+            "Frame thesis, invalidation, and conviction for the 5-minute loop cadence and realistic fee drag. "
             "Do NOT force trades when data is degraded/broken, and do NOT ignore hard risk limits or safety controls."
         )
         user = {
             "task": "Evaluate one FeaturePacket and return JSON. "
+                    "Decisions are made on an approximately 5-minute loop cadence, so optimize for setups that remain valid over that window. "
                     "If choosing no_trade, provide concrete non-tradability evidence from packet fields. "
                     "If choosing long/short, provide concise thesis, specific invalidation, supported setup_type, and "
                     "conviction-aware execution_preference consistent with bounded adaptive leverage intent.",
