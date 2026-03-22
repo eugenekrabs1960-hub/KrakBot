@@ -133,8 +133,8 @@ class Settings(BaseSettings):
     paper_bucket_3_min_market_quality: float = 0.50
     paper_bucket_6_min_conviction: float = 0.62
     paper_bucket_6_min_market_quality: float = 0.62
-    paper_bucket_9_min_conviction: float = 0.75
-    paper_bucket_9_min_market_quality: float = 0.75
+    paper_bucket_9_min_conviction: float = 0.82
+    paper_bucket_9_min_market_quality: float = 0.82
     paper_bucket_18_min_conviction: float = 0.88
     paper_bucket_18_min_market_quality: float = 0.88
 
