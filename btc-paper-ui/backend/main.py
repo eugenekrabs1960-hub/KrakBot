@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from hyperliquid_paper import HyperliquidFuturesPaperTrack
+from news_context import build_news_context
 
 app = FastAPI(title="BTC Paper Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -64,6 +65,24 @@ REGIME_RECO_DD_BAD = 1.35
 # Read-only mode review thresholds (advisory only)
 MODE_REVIEW_MIN_REGIMES_WITH_DATA = 2
 MODE_REVIEW_STRONG_EVIDENCE_REGIMES = 3
+
+RESEARCH_DIR = Path(__file__).resolve().parent / "research"
+EXPERIMENT_SURFACE_FILE = RESEARCH_DIR / "experiment_surface.json"
+EXPERIMENT_RUNS_FILE = RESEARCH_DIR / "experiment_runs.jsonl"
+
+EDITABLE_EXPERIMENT_MODES = {
+    "btc_15m_conservative_netedge_v1",
+    "btc_15m_conservative_inverse_v1",
+    "btc_15m_breakout_retest",
+}
+EDITABLE_EXPERIMENT_FIELDS = {
+    "rr_min",
+    "fee_bps_entry",
+    "fee_bps_exit",
+    "enable_time_exit",
+    "max_bars_open",
+    "max_minutes_open",
+}
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {
@@ -415,6 +434,42 @@ def load_store() -> None:
             bucket["latest"]["performance_by_regime"] = bucket["performance_by_regime"]
             bucket["latest"]["mode_stats"] = mode_stats(bucket, MODE_CONFIGS.get(mode, {}))
         store["modes"][mode] = bucket
+
+
+def _load_experiment_surface() -> dict[str, Any]:
+    try:
+        return json.loads(EXPERIMENT_SURFACE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "kraken_overrides": {}}
+
+
+def apply_experiment_surface_overrides() -> None:
+    surface = _load_experiment_surface()
+    overrides = surface.get("kraken_overrides", {}) if isinstance(surface, dict) else {}
+    if not isinstance(overrides, dict):
+        return
+
+    for mode, patch in overrides.items():
+        if mode not in EDITABLE_EXPERIMENT_MODES:
+            continue
+        if mode not in MODE_CONFIGS or not isinstance(patch, dict):
+            continue
+        for k, v in patch.items():
+            if k not in EDITABLE_EXPERIMENT_FIELDS:
+                continue
+            MODE_CONFIGS[mode][k] = v
+
+
+def run_experiment_cycle_once(apply: bool = False) -> dict[str, Any]:
+    try:
+        from research.experiment_runner import run_cycle  # lazy import to keep runtime startup simple
+
+        result = run_cycle(api_base="http://127.0.0.1:8000", apply=apply)
+        if apply:
+            apply_experiment_surface_overrides()
+        return {"ok": True, "result": result}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 async def fetch_market(interval: int):
@@ -2066,6 +2121,44 @@ async def hyperliquid_run_scan():
     return {"state": hyper_track.run_scan()}
 
 
+@app.get("/api/news/context")
+async def news_context(force_refresh: bool = False):
+    return await build_news_context(force_refresh=force_refresh)
+
+
+@app.get("/api/research/state")
+async def research_state():
+    surface = _load_experiment_surface()
+    last_run = None
+    try:
+        if EXPERIMENT_RUNS_FILE.exists():
+            lines = [ln for ln in EXPERIMENT_RUNS_FILE.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")]
+            if lines:
+                last_run = json.loads(lines[-1])
+    except Exception:
+        last_run = None
+    return {
+        "program_file": str((RESEARCH_DIR / "experiment_program.md")),
+        "surface_file": str(EXPERIMENT_SURFACE_FILE),
+        "runs_file": str(EXPERIMENT_RUNS_FILE),
+        "surface": surface,
+        "last_run": last_run,
+        "editable_modes": sorted(EDITABLE_EXPERIMENT_MODES),
+        "editable_fields": sorted(EDITABLE_EXPERIMENT_FIELDS),
+        "frozen_evaluator": [
+            "comparator",
+            "regime_recommendations",
+            "mode_review_recommendations",
+            "regime_policy_summaries",
+        ],
+    }
+
+
+@app.post("/api/research/run-cycle")
+async def research_run_cycle(apply: bool = False):
+    return run_experiment_cycle_once(apply=apply)
+
+
 @app.post("/api/hyperliquid/mock-open")
 async def hyperliquid_mock_open(side: str = "BUY", qty: float = 0.01, leverage: float = 2.0):
     # Explicit manual paper helper only. No exchange route is called.
@@ -2086,6 +2179,7 @@ async def frontend_index():
 
 @app.on_event("startup")
 async def start_auto_scanner():
+    apply_experiment_surface_overrides()
     load_store()
 
     async def loop():
