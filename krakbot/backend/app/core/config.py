@@ -24,8 +24,9 @@ class Settings(BaseSettings):
     live_armed_default: bool = False
 
     fixed_notional_usd: float = 50.0
-    no_pyramiding: bool = True
-    max_open_positions: int = 3
+    no_pyramiding: bool = False
+    max_open_positions: int = 8
+    max_open_legs: int = 12
     max_total_notional: float = 300.0
     paper_material_position_qty_threshold: float = 0.75
     leverage_cap: float = 3.0

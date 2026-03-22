@@ -36,13 +36,14 @@ class ModelSettings(BaseModel):
 
 
 class RiskSettings(BaseModel):
-    max_open_positions: int = 3
+    max_open_positions: int = 8
+    max_open_legs: int = 12
     max_notional_per_trade: float = 50.0
     max_total_notional: float = 300.0
     leverage_cap: float = 3.0
     allow_long: bool = True
     allow_short: bool = True
-    no_pyramiding: bool = True
+    no_pyramiding: bool = False
     mean_reversion_min_confidence: float = 0.0
 
 

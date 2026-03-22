@@ -74,6 +74,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
     direction_allowed = (decision.action != 'long' or settings.allow_long) and (decision.action != 'short' or settings.allow_short)
 
     current_open = int(packet.policy_context.current_open_positions)
+    current_open_legs = int(getattr(packet.policy_context, "current_open_legs", 0) or 0)
     symbol_open = bool(getattr(packet.policy_context, 'symbol_open_position', False))
     base_notional = float(fixed_small_notional(settings, risk_profile))
 
@@ -128,6 +129,8 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
 
     estimated_total_notional = current_open * base_notional
     max_positions_ok = current_open < risk_profile['max_open_positions']
+    max_open_legs = int(getattr(packet.policy_context, "max_open_legs", getattr(settings, "max_open_legs", 12)) or 12)
+    max_open_legs_ok = current_open_legs < max_open_legs
     max_total_ok = (estimated_total_notional + effective_notional) <= risk_profile['max_total_notional']
 
 
@@ -142,13 +145,15 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
 
     no_pyramiding_ok = (not settings.no_pyramiding) or (not symbol_open)
 
-    if final_action == 'allow_trade' and not all([max_positions_ok, max_total_ok, direction_allowed, no_pyramiding_ok]):
+    if final_action == 'allow_trade' and not all([max_positions_ok, max_total_ok, direction_allowed, no_pyramiding_ok, max_open_legs_ok]):
         final_action = 'block_risk'
         block_reason = 'portfolio_limits'
         if not max_positions_ok:
             reasons.append('max_open_positions_failed')
         if not max_total_ok:
             reasons.append('max_total_notional_failed')
+        if not max_open_legs_ok:
+            reasons.append('max_open_legs_failed')
         if not direction_allowed:
             reasons.append('direction_not_allowed')
         if not no_pyramiding_ok:
@@ -180,6 +185,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
             **checks,
             'max_positions_ok': max_positions_ok,
             'max_total_notional_ok': max_total_ok,
+            'max_open_legs_ok': max_open_legs_ok,
             'daily_loss_ok': True,
             'direction_allowed': direction_allowed,
             'no_pyramiding_ok': no_pyramiding_ok,
@@ -189,6 +195,7 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
         risk_profile={
             'profile_name': risk_profile['name'],
             'max_open_positions': risk_profile['max_open_positions'],
+            'max_open_legs': int(getattr(packet.policy_context, 'max_open_legs', getattr(settings, 'max_open_legs', 12)) or 12),
             'max_notional_per_trade': risk_profile['max_notional_per_trade'],
             'max_total_notional': risk_profile['max_total_notional'],
             'daily_loss_limit_usd': risk_profile['daily_loss_limit_usd'],

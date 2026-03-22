@@ -20,6 +20,7 @@ class GateChecks(BaseModel):
     cooldown_ok: bool
     max_positions_ok: bool
     max_total_notional_ok: bool
+    max_open_legs_ok: bool
     daily_loss_ok: bool
     direction_allowed: bool
 
@@ -27,6 +28,7 @@ class GateChecks(BaseModel):
 class RiskProfileSnapshot(BaseModel):
     profile_name: str
     max_open_positions: int
+    max_open_legs: int = 12
     max_notional_per_trade: float
     max_total_notional: float
     daily_loss_limit_usd: float

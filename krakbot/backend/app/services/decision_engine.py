@@ -50,6 +50,55 @@ def _paper_open_coins_from_execution_records(db: Session) -> set[str]:
     return out
 
 
+
+
+def _paper_open_legs_count_from_execution_records(db: Session) -> int:
+    rows = db.execute(text("""
+      SELECT (payload->>'symbol') as symbol,
+             (payload->>'action') as action,
+             COALESCE((payload->>'filled_notional_usd')::float, (payload->>'notional_usd')::float, 0) as notional,
+             NULLIF(COALESCE((payload->>'fill_price')::float, 0),0) as fill_price,
+             payload->>'status' as status,
+             payload->>'created_at' as created_at
+      FROM execution_records
+      WHERE mode='paper'
+      ORDER BY created_at ASC
+    """)).mappings().all()
+
+    open_lots: dict[str, list[tuple[str,float]]] = {}
+    for r in rows:
+        if r.get('status') != 'filled':
+            continue
+        sym = r.get('symbol')
+        px = float(r.get('fill_price') or 0.0)
+        notion = float(r.get('notional') or 0.0)
+        if not sym or px <= 0 or notion <= 0:
+            continue
+        side = 'short' if str(r.get('action')) == 'short' else 'long'
+        qty = notion / px
+        lots = open_lots.setdefault(sym, [])
+        opposite = 'short' if side == 'long' else 'long'
+        rem = qty
+        i = 0
+        while i < len(lots) and rem > 1e-12:
+            lside,lqty = lots[i]
+            if lside != opposite or lqty <= 1e-12:
+                i += 1
+                continue
+            c = min(lqty, rem)
+            lqty -= c
+            rem -= c
+            if lqty <= 1e-12:
+                lots.pop(i)
+            else:
+                lots[i] = (lside,lqty)
+                i += 1
+        if rem > 1e-12:
+            lots.append((side, rem))
+
+    return int(sum(len(v) for v in open_lots.values()))
+
+
 def run_decision_cycle(db: Session) -> dict:
     if not _cycle_lock.acquire(blocking=False):
         return {'items': [], 'status': 'skipped_overlapping_cycle'}
@@ -146,8 +195,10 @@ def run_decision_cycle(db: Session) -> dict:
                 ml_scores=s,
                 policy_context={
                     'current_open_positions': len([p for p in broker.get_positions() if abs(float(p.get('qty', 0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)]),
+                    'current_open_legs': _paper_open_legs_count_from_execution_records(db) if mode == 'paper' else 0,
                     'symbol_open_position': any((str(p.get('symbol')) == f"{coin}-PERP" and abs(float(p.get('qty',0))) >= (cfg.paper_material_position_qty_threshold if mode == 'paper' else 1e-9)) for p in broker.get_positions()),
                     'max_open_positions': runtime_settings.risk.max_open_positions,
+                    'max_open_legs': getattr(runtime_settings.risk, 'max_open_legs', 12),
                     'max_notional_per_trade': runtime_settings.risk.max_notional_per_trade,
                     'max_total_notional': runtime_settings.risk.max_total_notional,
                     'cooldown_active': False,
@@ -228,6 +279,10 @@ def run_decision_cycle(db: Session) -> dict:
                     'market_quality_score': bucket_audit.get('market_quality_score'),
                     'setup_type': decision.setup_type,
                     'direction': decision.action,
+                    'take_profit': getattr(getattr(decision, 'targets', None), 'take_profit_hint', None),
+                    'stop_loss': getattr(getattr(decision, 'invalidation', None), 'value', None) if getattr(getattr(decision, 'invalidation', None), 'type', None) == 'price_level' else None,
+                    'invalidation': getattr(decision, 'invalidation', None).model_dump() if getattr(decision, 'invalidation', None) is not None else None,
+                    'expiry': None,
                     'allocation': {
                         'notional_usd': policy.position_sizing.notional_usd or 0.0,
                         'spending_power_used_usd': policy.position_sizing.notional_usd or 0.0,

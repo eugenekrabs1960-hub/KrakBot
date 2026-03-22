@@ -33,6 +33,7 @@ runtime_settings = SettingsBundle(
     ),
     risk=RiskSettings(
         max_open_positions=cfg.max_open_positions,
+        max_open_legs=cfg.max_open_legs,
         max_notional_per_trade=cfg.fixed_notional_usd,
         max_total_notional=cfg.max_total_notional,
         leverage_cap=cfg.leverage_cap,

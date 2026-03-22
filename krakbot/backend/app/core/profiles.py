@@ -1,6 +1,6 @@
 PAPER_V1 = {
     "name": "paper_v1",
-    "max_open_positions": 3,
+    "max_open_positions": 8,
     "max_notional_per_trade": 50.0,
     "max_total_notional": 300.0,
     "daily_loss_limit_usd": 150.0,

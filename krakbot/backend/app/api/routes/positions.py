@@ -85,6 +85,10 @@ def _paper_open_legs_from_exec(exec_rows: list[dict], decision_by_packet: dict[s
                 'remaining_qty': remaining,
                 'leverage': _safe_float(e.get('leverage') or 1.0, 1.0),
                 'setup_type': dec.get('setup_type'),
+                'take_profit': (dec.get('targets') or {}).get('take_profit_hint') if isinstance(dec.get('targets'), dict) else e.get('take_profit'),
+                'stop_loss': (dec.get('invalidation') or {}).get('value') if isinstance(dec.get('invalidation'), dict) and (dec.get('invalidation') or {}).get('type') == 'price_level' else e.get('stop_loss'),
+                'invalidation': dec.get('invalidation') if isinstance(dec.get('invalidation'), dict) else e.get('invalidation'),
+                'expiry': e.get('expiry'),
                 'opened_at': e.get('created_at'),
             })
 

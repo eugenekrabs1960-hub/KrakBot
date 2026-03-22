@@ -44,6 +44,9 @@ export default function Positions({ data, tradesData }: any) {
                 <th className="num">Entry</th>
                 <th className="num">Mark</th>
                 <th className="num">Unrealized PnL</th>
+                <th className="num">Stop Loss</th>
+                <th className="num">Take Profit</th>
+                <th>Invalidation</th>
                 <th>Setup</th>
                 <th>Opened (PT)</th>
               </tr>
@@ -60,6 +63,9 @@ export default function Positions({ data, tradesData }: any) {
                   <td className="num">{fmtUsd(x.entry_px)}</td>
                   <td className="num">{fmtUsd(x.mark_px)}</td>
                   <td className={`num value ${pnlClass(x.unrealized_pnl)}`}>{fmtUsd(x.unrealized_pnl)}</td>
+                  <td className="num">{x.stop_loss != null ? fmtUsd(x.stop_loss) : '-'}</td>
+                  <td className="num">{x.take_profit != null ? fmtUsd(x.take_profit) : '-'}</td>
+                  <td>{x.invalidation?.type || '-'}</td>
                   <td>{x.setup_type || '-'}</td>
                   <td>{fmtTsLA(x.opened_at)}</td>
                 </tr>

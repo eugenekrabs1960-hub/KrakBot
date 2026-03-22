@@ -128,7 +128,9 @@ class OptionalSignals(BaseModel):
 
 class PolicyContext(BaseModel):
     current_open_positions: int
+    current_open_legs: int = 0
     max_open_positions: int
+    max_open_legs: int = 12
     max_notional_per_trade: float
     max_total_notional: float
     cooldown_active: bool
