@@ -39,6 +39,7 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
   const recentDecisions = data?.recent_decision_trace || [];
   const blocked = data?.recent_blocked_trades || [];
   const paperAccount = data?.paper_account || {};
+  const kpiScopeLabel = perf.kpi_scope === 'since_last_paper_reset' ? 'Since last paper reset' : 'Recent policy window';
   const newsSignals = data?.latest_news_signals || {};
   const communitySignals = data?.latest_community_signals || {};
   const featureStatus = data?.latest_feature_status || {};
@@ -77,8 +78,8 @@ export default function Overview({ data, modelHealth, loopsStatus, loopsHistory,
         <KeyStat label="Model Cooldown Until" value={fmtTsLA(loopsStatus?.model_cooldown_until)} />
         <KeyStat label="Offline Events" value={loopsStatus?.model_offline_events ?? 0} />
         <KeyStat label="Open Positions" value={dataLoaded ? (perf.total_open_positions ?? 0) : 'Checking…'} sub="Current paper positions" />
-        <KeyStat label="Allowed Trades" value={dataLoaded ? (perf.allowed_trade_count ?? 0) : 'Checking…'} />
-        <KeyStat label="Blocked Trades" value={dataLoaded ? (perf.blocked_trade_count ?? 0) : 'Checking…'} />
+        <KeyStat label="Allowed Trades" value={dataLoaded ? (perf.allowed_trade_count ?? 0) : 'Checking…'} sub={kpiScopeLabel} />
+        <KeyStat label="Blocked Trades" value={dataLoaded ? (perf.blocked_trade_count ?? 0) : 'Checking…'} sub={kpiScopeLabel} />
         <KeyStat label="Recent Trades" value={dataLoaded ? (perf.recent_trade_count ?? 0) : 'Checking…'} />
         <KeyStat label="Realized PnL" value={fmtUsd(perf.realized_pnl || 0)} cls={pnlClass(perf.realized_pnl || 0)} />
         <KeyStat label="Unrealized PnL" value={fmtUsd(perf.unrealized_pnl || 0)} cls={pnlClass(perf.unrealized_pnl || 0)} />

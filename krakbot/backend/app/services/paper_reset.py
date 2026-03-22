@@ -24,6 +24,12 @@ def reset_paper_state(db: Session) -> dict:
     """))
     touched.append('execution_records(mode=paper)->archive')
 
+    db.execute(text("""
+        INSERT INTO paper_execution_records_archive(execution_id, payload)
+        VALUES ('__reset_marker__', '{"event":"paper_reset"}'::jsonb)
+    """))
+    touched.append('paper_reset_marker')
+
     db.execute(text("DELETE FROM execution_records WHERE mode='paper'"))
     touched.append('execution_records(mode=paper)')
 

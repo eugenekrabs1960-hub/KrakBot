@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 
 from app.api.models import runtime_settings
 from app.services.wildcard_universe import resolve_active_universe
@@ -19,6 +19,18 @@ from app.services.paper_account import compute_paper_account_from_exec
 from app.services.features.market_series import get_seed_state
 
 router = APIRouter(tags=['overview'])
+
+
+
+def _paper_reset_scope_start(db: Session):
+    row = db.execute(text("""
+      SELECT MAX(archived_at) AS ts
+      FROM paper_execution_records_archive
+      WHERE execution_id='__reset_marker__'
+    """)).mappings().first()
+    if row and row.get('ts'):
+        return row.get('ts')
+    return None
 
 
 def _top_candidates_snapshot(db: Session, coins: list[str]) -> list[dict]:
@@ -371,8 +383,19 @@ def overview(db: Session = Depends(get_db)):
 
     trades_panel, realized_pnl, wins, losses, avg_pnl = _derive_recent_trade_rows(recent_exec[::-1])
 
-    allowed_count = sum(1 for r in policy_rows if (r.payload or {}).get('final_action') == 'allow_trade')
-    blocked_count = sum(1 for r in policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_'))
+    scope_label = 'last_120_policy_rows'
+    if runtime_settings.mode.execution_mode == 'paper':
+        reset_ts = _paper_reset_scope_start(db)
+        if reset_ts is not None:
+            scoped_policy_rows = db.query(PolicyDecisionDB).filter(PolicyDecisionDB.evaluated_at >= reset_ts).all()
+            scope_label = 'since_last_paper_reset'
+        else:
+            scoped_policy_rows = policy_rows
+    else:
+        scoped_policy_rows = policy_rows
+
+    allowed_count = sum(1 for r in scoped_policy_rows if (r.payload or {}).get('final_action') == 'allow_trade')
+    blocked_count = sum(1 for r in scoped_policy_rows if str((r.payload or {}).get('final_action', '')).startswith('block_'))
 
     top_candidates = _top_candidates_snapshot(db, active_coins)
     degraded = [c for c in latest_feature_status.values() if c.get('degraded')]
@@ -414,6 +437,7 @@ def overview(db: Session = Depends(get_db)):
             'recent_trade_count': len(trades_panel),
             'allowed_trade_count': allowed_count,
             'blocked_trade_count': blocked_count,
+            'kpi_scope': scope_label,
             'win_rate': (wins / (wins + losses)) if (wins + losses) > 0 else None,
             'avg_pnl_per_trade': avg_pnl,
         },
