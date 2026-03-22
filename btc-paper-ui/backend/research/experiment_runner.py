@@ -46,11 +46,15 @@ def append_run(entry: dict[str, Any]) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def fetch_state(api_base: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def fetch_state(api_base: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     with httpx.Client(timeout=20.0) as c:
         kr = c.get(f"{api_base}/api/state").json()
         hl = c.get(f"{api_base}/api/hyperliquid/state").json()
-    return kr, hl
+        try:
+            news = c.get(f"{api_base}/api/news/context").json()
+        except Exception:
+            news = {}
+    return kr, hl, news
 
 
 def classify_mode(mode_key: str, mode_state: dict[str, Any]) -> dict[str, Any]:
@@ -119,7 +123,7 @@ def apply_mutation(surface: dict[str, Any], mutation: dict[str, Any]) -> None:
 
 def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
     surface = load_json(SURFACE_FILE, {"version": 1, "kraken_overrides": {}})
-    kr, hl = fetch_state(api_base)
+    kr, hl, news = fetch_state(api_base)
 
     analyses = []
     for mode, st in (kr.get("modes") or {}).items():
@@ -143,6 +147,13 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
         "applied": bool(apply and mutation),
         "kraken_scan_time": ((kr.get("modes") or {}).get("btc_15m_conservative") or {}).get("latest_scan_time"),
         "hl_active": hl.get("active_strategy_keys") or [hl.get("active_strategy_key")],
+        "news_context": {
+            "news_risk": news.get("news_risk"),
+            "news_bias": news.get("news_bias"),
+            "source_confidence": news.get("source_confidence"),
+            "summary": news.get("summary"),
+            "why_it_matters": news.get("why_it_matters"),
+        },
     }
     append_run(result)
     return result
