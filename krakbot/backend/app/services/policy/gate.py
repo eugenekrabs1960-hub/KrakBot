@@ -4,6 +4,7 @@ import uuid
 from app.schemas.policy_decision import PolicyDecision
 from app.services.policy.checks import check_market_quality
 from app.services.policy.sizing import fixed_small_notional
+from app.services.policy.leverage_bucketing import enforce_paper_bucket
 
 
 def _assign_paper_leverage(packet, decision, checks, settings, final_action: str) -> tuple[float, str]:
@@ -115,9 +116,15 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
         if not checks['cooldown_ok']:
             reasons.append('cooldown_check_failed')
 
-    lev, lev_reason = _assign_paper_leverage(packet, decision, checks, settings, final_action)
-    lev = min(max(1.0, float(lev)), 3.0) if mode_settings.execution_mode == 'paper' else 1.0
-    effective_notional = base_notional * lev if final_action == 'allow_trade' else 0.0
+    lev_base, lev_reason = _assign_paper_leverage(packet, decision, checks, settings, final_action)
+    lev_base = min(max(1.0, float(lev_base)), float(settings.leverage_cap or 1.0)) if mode_settings.execution_mode == 'paper' else 1.0
+
+    # chunk-2: enforce paper leverage bucket assignment (3/6/9 active, 18 deferred)
+    bucket_audit = enforce_paper_bucket(packet, decision, final_action=final_action, current_leverage=lev_base)
+    lev = float(bucket_audit.get('applied_leverage') or lev_base)
+
+    # keep allocation/notional logic unchanged from pre-bucket behavior
+    effective_notional = base_notional * lev_base if final_action == 'allow_trade' else 0.0
 
     estimated_total_notional = current_open * base_notional
     max_positions_ok = current_open < risk_profile['max_open_positions']
@@ -151,6 +158,10 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
 
     if final_action == 'allow_trade':
         reasons.append(f'leverage_policy:{lev_reason}')
+        if bucket_audit.get('downgrade_reason_code') not in (None, 'none'):
+            reasons.append(f"bucket_downgrade:{bucket_audit.get('downgrade_reason_code')}")
+        if bucket_audit.get('cap_clip_reason_code') not in (None, 'none'):
+            reasons.append(f"bucket_clip:{bucket_audit.get('cap_clip_reason_code')}")
 
     notional = effective_notional if final_action == 'allow_trade' else None
     return PolicyDecision(
@@ -182,4 +193,5 @@ def evaluate_policy(packet, decision, mode_settings, risk_profile, settings) -> 
             'max_total_notional': risk_profile['max_total_notional'],
             'daily_loss_limit_usd': risk_profile['daily_loss_limit_usd'],
         },
+        leverage_bucket_audit=bucket_audit,
     )

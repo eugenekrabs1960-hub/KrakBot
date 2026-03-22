@@ -18,7 +18,6 @@ from app.services.features.ml_scores import compute_ml_scores
 from app.services.features.packet_builder import build_feature_packet
 from app.services.models.analyst_runner import analyst_runner
 from app.services.policy.gate import evaluate_policy
-from app.services.policy.leverage_bucketing import compute_bucket_audit
 from app.services.execution.broker_router import get_broker
 from app.services.journal.writer import write_cycle
 from app.services.wallet_signals import ingest_wallet_events_for_coin, generate_wallet_summary_for_coin
@@ -160,8 +159,7 @@ def run_decision_cycle(db: Session) -> dict:
             )
             decision = analyst_runner.run(packet)
             policy = evaluate_policy(packet, decision, runtime_settings.mode, risk_profile, cfg)
-            bucket_audit = compute_bucket_audit(packet, decision, policy)
-            policy = policy.model_copy(update={'leverage_bucket_audit': bucket_audit})
+            bucket_audit = dict(getattr(policy, 'leverage_bucket_audit', None) or {})
 
             emit_event(
                 db,
@@ -179,12 +177,16 @@ def run_decision_cycle(db: Session) -> dict:
                     'requested_action': decision.action,
                     'final_action': policy.final_action,
                     'candidate_bucket': bucket_audit.get('candidate_bucket'),
+                    'enforced_bucket': bucket_audit.get('enforced_bucket'),
+                    'enforced_leverage': bucket_audit.get('enforced_leverage'),
+                    'clipped_leverage': bucket_audit.get('clipped_leverage'),
+                    'downgrade_reason_code': bucket_audit.get('downgrade_reason_code'),
+                    'cap_clip_reason_code': bucket_audit.get('cap_clip_reason_code'),
                     'assigned_leverage_current': bucket_audit.get('assigned_leverage_current'),
-                    'bucket_preview_leverage': bucket_audit.get('bucket_preview_leverage'),
                     'conviction_score': bucket_audit.get('conviction_score'),
                     'market_quality_score': bucket_audit.get('market_quality_score'),
                     'caution_flags': bucket_audit.get('caution_flags'),
-                    'enforcement_applied': False,
+                    'enforcement_applied': bool(bucket_audit.get('enforcement_applied')),
                 },
             )
 
@@ -214,7 +216,13 @@ def run_decision_cycle(db: Session) -> dict:
                     'broker_order_id': er.get('order_id'),
                     'reason': er.get('reason'),
                     'created_at': datetime.now(timezone.utc),
-                    'leverage_bucket': bucket_audit.get('candidate_bucket'),
+                    'leverage_bucket': bucket_audit.get('enforced_bucket') if bucket_audit.get('enforced_bucket') is not None else bucket_audit.get('candidate_bucket'),
+                    'candidate_bucket': bucket_audit.get('candidate_bucket'),
+                    'enforced_bucket': bucket_audit.get('enforced_bucket'),
+                    'enforced_leverage': bucket_audit.get('enforced_leverage'),
+                    'clipped_leverage': bucket_audit.get('clipped_leverage'),
+                    'downgrade_reason_code': bucket_audit.get('downgrade_reason_code'),
+                    'cap_clip_reason_code': bucket_audit.get('cap_clip_reason_code'),
                     'bucket_reason_code': bucket_audit.get('bucket_reason_code'),
                     'conviction_score': bucket_audit.get('conviction_score'),
                     'market_quality_score': bucket_audit.get('market_quality_score'),
