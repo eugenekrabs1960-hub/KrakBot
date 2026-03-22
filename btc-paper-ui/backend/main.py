@@ -82,6 +82,13 @@ EDITABLE_EXPERIMENT_FIELDS = {
     "max_minutes_open",
 }
 
+EDITABLE_HL_EXPERIMENT_MODES = {
+    "hl_15m_trend_follow_momo_gate_v1",
+}
+EDITABLE_HL_EXPERIMENT_FIELDS = {
+    "momentum_gate_min_atr_body",
+}
+
 PRIMARY_KRAKEN_MODE_KEYS = [
     "btc_15m_conservative",
     "btc_15m_conservative_netedge_v1",
@@ -440,19 +447,26 @@ def _load_experiment_surface() -> dict[str, Any]:
 
 def apply_experiment_surface_overrides() -> None:
     surface = _load_experiment_surface()
-    overrides = surface.get("kraken_overrides", {}) if isinstance(surface, dict) else {}
-    if not isinstance(overrides, dict):
-        return
 
-    for mode, patch in overrides.items():
-        if mode not in EDITABLE_EXPERIMENT_MODES:
-            continue
-        if mode not in MODE_CONFIGS or not isinstance(patch, dict):
-            continue
-        for k, v in patch.items():
-            if k not in EDITABLE_EXPERIMENT_FIELDS:
+    overrides = surface.get("kraken_overrides", {}) if isinstance(surface, dict) else {}
+    if isinstance(overrides, dict):
+        for mode, patch in overrides.items():
+            if mode not in EDITABLE_EXPERIMENT_MODES:
                 continue
-            MODE_CONFIGS[mode][k] = v
+            if mode not in MODE_CONFIGS or not isinstance(patch, dict):
+                continue
+            for k, v in patch.items():
+                if k not in EDITABLE_EXPERIMENT_FIELDS:
+                    continue
+                MODE_CONFIGS[mode][k] = v
+
+    hl_overrides = surface.get("hyperliquid_overrides", {}) if isinstance(surface, dict) else {}
+    if isinstance(hl_overrides, dict):
+        hyper_track.apply_research_overrides(
+            overrides=hl_overrides,
+            editable_modes=EDITABLE_HL_EXPERIMENT_MODES,
+            editable_fields=EDITABLE_HL_EXPERIMENT_FIELDS,
+        )
 
 
 def run_experiment_cycle_once(apply: bool = False) -> dict[str, Any]:
@@ -2160,8 +2174,14 @@ async def research_state():
         "runs_file": str(EXPERIMENT_RUNS_FILE),
         "surface": surface,
         "last_run": last_run,
-        "editable_modes": sorted(EDITABLE_EXPERIMENT_MODES),
-        "editable_fields": sorted(EDITABLE_EXPERIMENT_FIELDS),
+        "editable_modes": {
+            "kraken": sorted(EDITABLE_EXPERIMENT_MODES),
+            "hyperliquid": sorted(EDITABLE_HL_EXPERIMENT_MODES),
+        },
+        "editable_fields": {
+            "kraken": sorted(EDITABLE_EXPERIMENT_FIELDS),
+            "hyperliquid": sorted(EDITABLE_HL_EXPERIMENT_FIELDS),
+        },
         "frozen_evaluator": [
             "comparator",
             "regime_recommendations",

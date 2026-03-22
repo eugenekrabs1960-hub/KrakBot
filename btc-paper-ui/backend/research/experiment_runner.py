@@ -17,12 +17,11 @@ RUNS_FILE = BASE_DIR / "experiment_runs.jsonl"
 
 KRAKEN_BASELINE_MODE = "btc_15m_conservative"
 KRAKEN_LEARNER_MODE = "btc_15m_conservative_netedge_v1"
+HYPERLIQUID_BASELINE_MODE = "hl_15m_trend_follow"
 HYPERLIQUID_LEARNER_MODE = "hl_15m_trend_follow_momo_gate_v1"
 
-# Normal autonomous targeting is intentionally narrow.
-ALLOWED_MODES = {
-    KRAKEN_LEARNER_MODE,
-}
+ALLOWED_KRAKEN_MODES = {KRAKEN_LEARNER_MODE}
+ALLOWED_HL_MODES = {HYPERLIQUID_LEARNER_MODE}
 
 
 def now_iso() -> str:
@@ -60,7 +59,7 @@ def fetch_state(api_base: str) -> tuple[dict[str, Any], dict[str, Any], dict[str
     return kr, hl, news
 
 
-def classify_mode(mode_key: str, mode_state: dict[str, Any]) -> dict[str, Any]:
+def classify_kraken_mode(mode_key: str, mode_state: dict[str, Any]) -> dict[str, Any]:
     cmp_verdict = mode_state.get("comparator_verdict") or "INSUFFICIENT_DATA"
     review = (mode_state.get("mode_review_recommendation") or {}).get("recommended_status") or "insufficient_data"
     sm = mode_state.get("strategy_metrics") or {}
@@ -78,6 +77,7 @@ def classify_mode(mode_key: str, mode_state: dict[str, Any]) -> dict[str, Any]:
         keep_discard = "inconclusive"
 
     return {
+        "domain": "kraken",
         "mode": mode_key,
         "comparator_verdict": cmp_verdict,
         "mode_review": review,
@@ -88,37 +88,82 @@ def classify_mode(mode_key: str, mode_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
+    overall = ((hl_state.get("metrics") or {}).get("strategy_overall") or {}).get(mode_key, {})
+    sample = int(overall.get("sample_closed", 0) or 0)
+    expectancy = float(overall.get("expectancy_net", 0.0) or 0.0)
+    fee_drag = float(overall.get("fee_drag_pct", 0.0) or 0.0)
+
+    if sample < 20:
+        keep_discard = "inconclusive"
+    elif expectancy > 0 and fee_drag <= 120:
+        keep_discard = "keep"
+    elif expectancy <= 0:
+        keep_discard = "probation"
+    else:
+        keep_discard = "inconclusive"
+
+    return {
+        "domain": "hyperliquid",
+        "mode": mode_key,
+        "comparator_verdict": "N/A",
+        "mode_review": "n/a",
+        "sample_size": sample,
+        "expectancy_net": expectancy,
+        "fee_drag_pct": fee_drag,
+        "keep_discard": keep_discard,
+    }
+
+
 def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]]) -> dict[str, Any] | None:
-    # Target one inconclusive/weak mode with smallest sample first.
-    candidates = [a for a in analyses if a["mode"] in ALLOWED_MODES and a["keep_discard"] in {"inconclusive", "probation", "discard_watch"}]
+    candidates = [a for a in analyses if a["keep_discard"] in {"inconclusive", "probation", "discard_watch"}]
     if not candidates:
         return None
     candidates.sort(key=lambda x: (x["sample_size"], x["expectancy_net"]))
-    target = candidates[0]["mode"]
+    target = candidates[0]
 
-    s = surface.setdefault("kraken_overrides", {}).setdefault(target, {})
-    default_rr = 1.5
-    current_rr = float(s.get("rr_min", default_rr))
+    if target["domain"] == "kraken" and target["mode"] in ALLOWED_KRAKEN_MODES:
+        mode = target["mode"]
+        s = surface.setdefault("kraken_overrides", {}).setdefault(mode, {})
+        current_rr = float(s.get("rr_min", 1.5))
+        new_rr = round(max(1.20, current_rr - 0.05), 2)
+        if new_rr == current_rr:
+            return None
+        return {
+            "domain": "kraken",
+            "mode": mode,
+            "param": "rr_min",
+            "old": current_rr,
+            "new": new_rr,
+            "reason": "small-step exploration under fixed evaluator",
+        }
 
-    floor = 1.20
-    new_rr = round(max(floor, current_rr - 0.05), 2)
-    if new_rr == current_rr:
-        return None
+    if target["domain"] == "hyperliquid" and target["mode"] in ALLOWED_HL_MODES:
+        mode = target["mode"]
+        s = surface.setdefault("hyperliquid_overrides", {}).setdefault(mode, {})
+        current_gate = float(s.get("momentum_gate_min_atr_body", 0.18))
+        new_gate = round(max(0.10, current_gate - 0.02), 2)
+        if new_gate == current_gate:
+            return None
+        return {
+            "domain": "hyperliquid",
+            "mode": mode,
+            "param": "momentum_gate_min_atr_body",
+            "old": current_gate,
+            "new": new_gate,
+            "reason": "small-step exploration under fixed evaluator",
+        }
 
-    return {
-        "mode": target,
-        "param": "rr_min",
-        "old": current_rr,
-        "new": new_rr,
-        "reason": "small-step exploration under fixed evaluator",
-    }
+    return None
 
 
 def apply_mutation(surface: dict[str, Any], mutation: dict[str, Any]) -> None:
     mode = mutation["mode"]
-    if mode not in ALLOWED_MODES:
-        return
-    surface.setdefault("kraken_overrides", {}).setdefault(mode, {})[mutation["param"]] = mutation["new"]
+    domain = mutation.get("domain")
+    if domain == "kraken" and mode in ALLOWED_KRAKEN_MODES:
+        surface.setdefault("kraken_overrides", {}).setdefault(mode, {})[mutation["param"]] = mutation["new"]
+    elif domain == "hyperliquid" and mode in ALLOWED_HL_MODES:
+        surface.setdefault("hyperliquid_overrides", {}).setdefault(mode, {})[mutation["param"]] = mutation["new"]
 
 
 def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
@@ -128,7 +173,8 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
     analyses = []
     kr_modes = kr.get("modes") or {}
     if KRAKEN_LEARNER_MODE in kr_modes:
-        analyses.append(classify_mode(KRAKEN_LEARNER_MODE, kr_modes.get(KRAKEN_LEARNER_MODE) or {}))
+        analyses.append(classify_kraken_mode(KRAKEN_LEARNER_MODE, kr_modes.get(KRAKEN_LEARNER_MODE) or {}))
+    analyses.append(classify_hl_mode(HYPERLIQUID_LEARNER_MODE, hl))
 
     mutation = propose_mutation(surface, analyses)
     if apply and mutation:
@@ -146,6 +192,7 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
         "targets": {
             "kraken_baseline": KRAKEN_BASELINE_MODE,
             "kraken_learner": KRAKEN_LEARNER_MODE,
+            "hyperliquid_baseline": HYPERLIQUID_BASELINE_MODE,
             "hyperliquid_learner": HYPERLIQUID_LEARNER_MODE,
         },
         "analyses": analyses,

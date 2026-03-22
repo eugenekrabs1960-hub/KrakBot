@@ -21,14 +21,14 @@ Allowed keys:
 - `kraken_overrides.<mode>.max_bars_open`
 - `kraken_overrides.<mode>.max_minutes_open`
 
-Allowed mode for autonomous mutation (single learner):
-- `btc_15m_conservative_netedge_v1`
+Allowed learner modes for autonomous mutation (one target per cycle):
+- `btc_15m_conservative_netedge_v1` (Kraken learner)
+- `hl_15m_trend_follow_momo_gate_v1` (Hyperliquid learner)
 
-Tracked but not mutated by autonomous loop:
+Tracked but never mutated by autonomous loop:
 - Kraken baseline reference: `btc_15m_conservative`
 - Hyperliquid baseline reference: `hl_15m_trend_follow`
-- Hyperliquid learner monitor: `hl_15m_trend_follow_momo_gate_v1`
-- Retired Kraken variants are archive-only
+- Retired variants are archive-only
 
 ## One-cycle loop
 1. Read `/api/state` (fixed evaluator) and `/api/hyperliquid/state`.
@@ -47,7 +47,9 @@ Tracked but not mutated by autonomous loop:
 5. Append run report to `experiment_runs.jsonl`.
 
 ## Mutation policy (small-step)
-- For the single Kraken learner (`btc_15m_conservative_netedge_v1`): adjust `rr_min` by -0.05 (floor 1.20) only when comparator remains inconclusive.
+- Kraken learner (`btc_15m_conservative_netedge_v1`): adjust `rr_min` by -0.05 (floor 1.20) only when comparator remains inconclusive.
+- Hyperliquid learner (`hl_15m_trend_follow_momo_gate_v1`): adjust `momentum_gate_min_atr_body` by -0.02 (floor 0.10) when expectancy remains weak/inconclusive.
+- Mutate only one learner per cycle.
 - Never change baseline mode in autonomous cycle.
 
 ## Safety

@@ -872,6 +872,29 @@ class HyperliquidFuturesPaperTrack:
         self.state['executed_signal_ids'] = agg_ids[-MAX_SIGNAL_IDS_PERSIST:]
         self.state['latest_by_strategy'] = latest_by
 
+    def apply_research_overrides(self, overrides: dict[str, Any], editable_modes: set[str], editable_fields: set[str]) -> None:
+        if not isinstance(overrides, dict):
+            return
+        registry = self.state.get('strategy_registry') or {}
+        if not isinstance(registry, dict):
+            return
+
+        changed = False
+        for mode, patch in overrides.items():
+            if mode not in editable_modes:
+                continue
+            if mode not in registry or not isinstance(patch, dict):
+                continue
+            for k, v in patch.items():
+                if k not in editable_fields:
+                    continue
+                registry[mode][k] = v
+                changed = True
+
+        if changed:
+            self.state['strategy_registry'] = registry
+            self._reconcile_registry_and_metrics()
+
     def run_scan(self) -> dict[str, Any]:
         self._reconcile_registry_and_metrics()
         source = 'hyperliquid_public'

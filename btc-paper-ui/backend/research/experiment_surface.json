@@ -2,5 +2,8 @@
   "version": 1,
   "kraken_overrides": {
     "btc_15m_conservative_netedge_v1": {}
+  },
+  "hyperliquid_overrides": {
+    "hl_15m_trend_follow_momo_gate_v1": {}
   }
 }
