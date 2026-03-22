@@ -82,6 +82,15 @@ EDITABLE_EXPERIMENT_FIELDS = {
     "max_minutes_open",
 }
 
+PRIMARY_KRAKEN_MODE_KEYS = [
+    "btc_15m_conservative",
+    "btc_15m_conservative_netedge_v1",
+]
+RETIRED_KRAKEN_MODE_KEYS = [
+    "btc_15m_conservative_inverse_v1",
+    "btc_15m_breakout_retest",
+]
+
 MODE_CONFIGS = {
     "btc_15m_conservative": {
         "label": "Kraken Baseline (Frozen Reference)",
@@ -96,34 +105,10 @@ MODE_CONFIGS = {
         "enable_invalidation_exit": False,
     },
     "btc_15m_conservative_netedge_v1": {
-        "label": "Kraken Learner (Autonomous) · NetEdge v1",
+        "label": "Kraken Learner (Autonomous)",
         "interval": 15,
         "rr_min": 1.5,
         "aggressive": False,
-        "fee_bps_entry": 40.0,
-        "fee_bps_exit": 40.0,
-        "enable_time_exit": False,
-        "max_bars_open": 0,
-        "max_minutes_open": 0,
-        "enable_invalidation_exit": False,
-    },
-    "btc_15m_conservative_inverse_v1": {
-        "label": "Kraken Diagnostic Opposite (Inverse Mirror)",
-        "interval": 15,
-        "rr_min": 0.5,
-        "aggressive": False,
-        "fee_bps_entry": 40.0,
-        "fee_bps_exit": 40.0,
-        "enable_time_exit": False,
-        "max_bars_open": 0,
-        "max_minutes_open": 0,
-        "enable_invalidation_exit": False,
-    },
-    "btc_15m_breakout_retest": {
-        "label": "Kraken Breakout Retest (Secondary / Paused Target)",
-        "interval": 15,
-        "rr_min": 1.35,
-        "aggressive": True,
         "fee_bps_entry": 40.0,
         "fee_bps_exit": 40.0,
         "enable_time_exit": False,
@@ -361,6 +346,7 @@ def mode_bucket() -> dict[str, Any]:
 store: dict[str, Any] = {
     "auto_scan": True,
     "modes": {k: mode_bucket() for k in MODE_CONFIGS.keys()},
+    "retired_modes": {},
 }
 
 # Separate futures-oriented paper training track (Phase 2/3). Non-destructive: Kraken path stays intact.
@@ -385,7 +371,11 @@ def _json_safe_store_snapshot() -> dict[str, Any]:
             "strategy_metrics": bucket.get("strategy_metrics", strategy_metrics_bucket()),
             "performance_by_regime": bucket.get("performance_by_regime", regime_metrics_bucket()),
         }
-    return {"auto_scan": store.get("auto_scan", True), "modes": modes}
+    return {
+        "auto_scan": store.get("auto_scan", True),
+        "modes": modes,
+        "retired_modes": store.get("retired_modes", {}),
+    }
 
 
 def persist_store() -> None:
@@ -404,6 +394,13 @@ def load_store() -> None:
         return
     store["auto_scan"] = bool(data.get("auto_scan", True))
     saved_modes = data.get("modes", {})
+    retired = data.get("retired_modes", {}) if isinstance(data.get("retired_modes", {}), dict) else {}
+    if isinstance(saved_modes, dict):
+        for rk in RETIRED_KRAKEN_MODE_KEYS:
+            if rk in saved_modes:
+                retired[rk] = saved_modes.get(rk)
+    store["retired_modes"] = retired
+
     for mode in MODE_CONFIGS.keys():
         bucket = mode_bucket()
         saved = saved_modes.get(mode, {}) if isinstance(saved_modes, dict) else {}
@@ -2053,9 +2050,30 @@ async def get_state():
     for m in MODE_CONFIGS.keys():
         if store["modes"][m]["latest"] is None:
             await execute_mode_scan(m)
+    retired_mode_archive = {
+        k: {
+            "history_rows": len((v or {}).get("history", []) if isinstance(v, dict) else []),
+            "closed_trades": len((v or {}).get("closed_trades", []) if isinstance(v, dict) else []),
+            "last_candle_time": (v or {}).get("last_candle_time") if isinstance(v, dict) else None,
+        }
+        for k, v in (store.get("retired_modes") or {}).items()
+    }
+
     return {
         "auto_scan": store["auto_scan"],
         "paper_mode": True,
+        "structure": {
+            "kraken": {
+                "baseline": "btc_15m_conservative",
+                "learner": "btc_15m_conservative_netedge_v1",
+                "retired": RETIRED_KRAKEN_MODE_KEYS,
+            },
+            "hyperliquid": {
+                "baseline": "hl_15m_trend_follow",
+                "learner": "hl_15m_trend_follow_momo_gate_v1",
+                "retired": ["hl_15m_trend_follow_conflev_v1", "hl_15m_breakout_retest"],
+            },
+        },
         "modes": {m: store["modes"][m]["latest"] for m in MODE_CONFIGS.keys()},
         "available_modes": MODE_CONFIGS,
         "strategy_registry": STRATEGY_REGISTRY,
@@ -2065,6 +2083,7 @@ async def get_state():
         "regime_recommendations_by_mode": {m: build_regime_recommendations(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "mode_review_recommendations_by_mode": {m: build_mode_review_recommendation(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
         "mode_regime_policy_summaries_by_mode": {m: build_mode_regime_policy_summary(m) for m in MODE_CONFIGS.keys() if m != BASELINE_MODE_KEY},
+        "retired_mode_archive": retired_mode_archive,
         "hyperliquid_strategy_registry": hyper_track.get_state().get("strategy_registry", {}),
         "hyperliquid_active_strategy_key": hyper_track.get_state().get("active_strategy_key"),
         "runtime_info": {

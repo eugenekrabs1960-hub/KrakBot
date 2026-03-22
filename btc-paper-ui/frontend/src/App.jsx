@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createChart } from 'lightweight-charts'
 
 const API = window.location.origin.includes('5173') ? 'http://127.0.0.1:8000' : window.location.origin
-const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_conservative_netedge_v1', 'btc_15m_conservative_inverse_v1', 'btc_15m_breakout_retest']
+const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_conservative_netedge_v1']
 const POLL_MS = 30000
 
 function SharedChart({ state, theme }) {
@@ -388,11 +388,7 @@ function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
   const modeRole = modeKey === 'btc_15m_conservative'
     ? 'baseline/reference'
-    : modeKey === 'btc_15m_conservative_netedge_v1'
-      ? 'autonomous learner'
-      : modeKey === 'btc_15m_conservative_inverse_v1'
-        ? 'diagnostic/opposite'
-        : 'secondary/paused target'
+    : 'autonomous learner'
   const isBaselineMode = modeKey === 'btc_15m_conservative'
   const comparatorVerdict = m?.comparator_verdict || m?.comparison_vs_baseline?.verdict || '-'
   const modeReview = m?.mode_review_recommendation?.recommended_status || '-'
@@ -726,7 +722,7 @@ export default function App() {
   const hActiveKeys = hyperState?.active_strategy_keys || (hKey ? [hKey] : [])
   const hOverall = (hyperState?.metrics || {}).strategy_overall || {}
   const hRegistry = hyperState?.strategy_registry || {}
-  const hKeys = Array.from(new Set([...Object.keys(hRegistry), ...Object.keys(hOverall)]))
+  const hKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1'].filter(k => hRegistry[k] || hOverall[k])
   for (const sk of hKeys) {
     const hm = hOverall?.[sk] || {}
     const byReg = (hyperState?.metrics || {}).strategy_regime || {}
@@ -755,11 +751,8 @@ export default function App() {
   }
 
   rows.sort((a, b) => (b.expectancy - a.expectancy) || (a.feeDrag - b.feeDrag))
-  const preferredHlLearner = 'hl_15m_trend_follow_momo_gate_v1'
-  const hlPanelKeys = ((hyperState?.strategy_registry || {})[preferredHlLearner]
-    ? [preferredHlLearner]
-    : (hyperState?.active_strategy_keys || [hyperState?.active_strategy_key]).filter(Boolean)
-  )
+  const primaryHlKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1']
+  const hlPanelKeys = primaryHlKeys.filter(k => (hyperState?.strategy_registry || {})[k])
 
   return (
     <div className={`wrap theme-${theme}`}>
@@ -780,12 +773,12 @@ export default function App() {
           <SharedChart state={state} theme={theme} />
         </div>
         <div>
-          <div className='panel' style={{ marginBottom: 8 }}><strong>Hyperliquid Learner Track</strong> <span className='badge'>single autonomous learner</span></div>
+          <div className='panel' style={{ marginBottom: 8 }}><strong>Hyperliquid Track</strong> <span className='badge'>reference + autonomous learner</span></div>
           {hlPanelKeys.map((k) => (
             <HyperliquidPanel key={k} hstate={hyperState} strategyKey={k} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
           ))}
           <div className='panel' style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-            Secondary Hyperliquid variants remain shadow/paused and are tracked via scoreboard/status.
+            Retired Hyperliquid variants are hidden from default UI/runtime and kept in backend archives/metrics.
           </div>
         </div>
       </div>

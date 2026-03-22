@@ -26,8 +26,9 @@ Allowed mode for autonomous mutation (single learner):
 
 Tracked but not mutated by autonomous loop:
 - Kraken baseline reference: `btc_15m_conservative`
+- Hyperliquid baseline reference: `hl_15m_trend_follow`
 - Hyperliquid learner monitor: `hl_15m_trend_follow_momo_gate_v1`
-- Diagnostic/secondary Kraken modes: inverse + breakout
+- Retired Kraken variants are archive-only
 
 ## One-cycle loop
 1. Read `/api/state` (fixed evaluator) and `/api/hyperliquid/state`.
@@ -46,8 +47,7 @@ Tracked but not mutated by autonomous loop:
 5. Append run report to `experiment_runs.jsonl`.
 
 ## Mutation policy (small-step)
-- For breakout mode: adjust `rr_min` by -0.05 (floor 1.10) when no-edge/over-filtering pattern dominates.
-- For netedge/inverse: adjust `rr_min` by -0.05 (mode-specific floor) only when sample is low and comparator is inconclusive.
+- For the single Kraken learner (`btc_15m_conservative_netedge_v1`): adjust `rr_min` by -0.05 (floor 1.20) only when comparator remains inconclusive.
 - Never change baseline mode in autonomous cycle.
 
 ## Safety

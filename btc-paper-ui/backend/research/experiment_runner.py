@@ -97,13 +97,10 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]]) ->
     target = candidates[0]["mode"]
 
     s = surface.setdefault("kraken_overrides", {}).setdefault(target, {})
-    default_rr = {
-        "btc_15m_conservative_inverse_v1": 0.5,
-        "btc_15m_breakout_retest": 1.35,
-    }.get(target, 1.5)
+    default_rr = 1.5
     current_rr = float(s.get("rr_min", default_rr))
 
-    floor = 0.35 if target == "btc_15m_conservative_inverse_v1" else (1.10 if target == "btc_15m_breakout_retest" else 1.20)
+    floor = 1.20
     new_rr = round(max(floor, current_rr - 0.05), 2)
     if new_rr == current_rr:
         return None
