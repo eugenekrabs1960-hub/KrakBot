@@ -28,8 +28,6 @@ function SharedChart({ state, theme }) {
       const modeColors = {
         btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
         btc_15m_conservative_netedge_v1: { entry: '#0ea5e9', open: '#0ea5e9', close: '#0284c7', sl: '#dc2626', tp: '#16a34a' },
-        btc_15m_conservative_inverse_v1: { entry: '#f59e0b', open: '#f59e0b', close: '#d97706', sl: '#dc2626', tp: '#16a34a' },
-        btc_15m_breakout_retest: { entry: '#a855f7', open: '#a855f7', close: '#7e22ce', sl: '#ef4444', tp: '#22c55e' },
       }
 
       const chart = createChart(container, {
@@ -151,24 +149,23 @@ function confidenceLabel(c) {
 function ScoreboardTable({ rows }) {
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
-      <h3 style={{ marginTop: 0 }}>Strategy Scoreboard (Phase 1 · read-only)</h3>
+      <h3 style={{ marginTop: 0 }}>Active Bot Scoreboard (4-bot view)</h3>
       <table className='rows' style={{ width: '100%' }}>
         <thead>
           <tr>
-            <th>Strategy</th><th>Status</th><th>Best regime</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th><th>Score</th><th>Confidence</th>
+            <th>Bot</th><th>Group</th><th>Status</th><th>Sample</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
-              <td>{r.key}<div style={{ fontSize: 11, opacity: 0.75 }}>{r.family} · {r.symbol}</div></td>
-              <td>{r.status}{r.closed < 10 ? <div style={{ color: 'var(--danger)', fontSize: 11 }}>small sample ({r.closed})</div> : null}</td>
-              <td>{r.bestRegime || '-'}</td>
+              <td>{r.key}</td>
+              <td>{r.symbol === 'BTC/USD' ? 'Kraken' : 'Hyperliquid'}</td>
+              <td>{r.status}</td>
+              <td>{r.closed}</td>
               <td>{fmt2(r.expectancy)}</td>
               <td>{fmt2(r.feeDrag)}</td>
               <td>{fmt2(r.netRealized)}</td>
-              <td>{r.score == null ? '-' : fmt2(r.score)}</td>
-              <td>{r.confidence}% ({confidenceLabel(r.confidence)})</td>
             </tr>
           ))}
         </tbody>
@@ -261,35 +258,41 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <div><strong>Per-position risk cap</strong><div>{risk.max_risk_per_position_pct ?? '-'}%</div></div>
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
-        <strong>Strategy learning snapshot</strong>
-        <div>Opened: {metrics.total_opened ?? 0} | Closed: {metrics.total_closed ?? 0} | Open: {metrics.open_positions ?? 0}</div>
-        <div>TP / SL / STALE: {metrics.tp_closes ?? 0} / {metrics.sl_closes ?? 0} / {metrics.time_exit_stale_closes ?? 0}</div>
-        <div>Net realized: {fmt2(metrics.net_realized_pnl)} | Net unrealized: {fmt2(metrics.net_unrealized_pnl)} | Fees: {fmt2(metrics.total_fees)} | Fee drag: {fmt2(metrics.fee_drag_pct)}%</div>
-        <div>Expectancy (net): {fmt2(metrics.expectancy_net)} | Median time-to-close: {metrics.median_time_to_close_min ?? 0} min</div>
-      </div>
-
-      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
-        <strong>Latest closed trade</strong>
-        {latestClosed ? (
-          <div style={{ marginTop: 6 }}>
-            <div>Close: {fmtLA(latestClosed.close_time)} | Reason: {latestClosed.close_reason || '-'} | Leverage: {latestClosed.leverage ? `${latestClosed.leverage}x` : '-'}</div>
-            <div>Entry/Close: {fmt2(Number(latestClosed.entry_price ?? latestClosed.entry_fill_price ?? 0))} / {fmt2(Number(latestClosed.close_price ?? latestClosed.close_fill_price ?? 0))} | Net PnL: <strong style={{ color: pnlColor(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0)) }}>{fmt2(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0))}</strong></div>
-          </div>
-        ) : <div style={{ marginTop: 6 }}>No closed trades yet.</div>}
-      </div>
-
-      <div style={{ marginTop: 10, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
-        <strong>Paper account summary (simulator baseline)</strong>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:6 }}>
-          <div><strong>Starting balance</strong><div>{fmt2(PAPER_START_BALANCE)}</div></div>
-          <div><strong>Realized PnL</strong><div style={{ color: pnlColor(realizedPnl) }}>{fmt2(realizedPnl)}</div></div>
-          <div><strong>Unrealized PnL</strong><div style={{ color: pnlColor(unrealizedPnl) }}>{fmt2(unrealizedPnl)}</div></div>
-          <div><strong>Net PnL</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(netPnl)}</div></div>
-          <div><strong>Total fees</strong><div>{fmt2(totalFees)}</div></div>
-          <div><strong>Current equity</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(equity)}</div></div>
+      <details style={{ marginTop: 10 }}>
+        <summary>Strategy learning snapshot</summary>
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+          <div>Opened: {metrics.total_opened ?? 0} | Closed: {metrics.total_closed ?? 0} | Open: {metrics.open_positions ?? 0}</div>
+          <div>TP / SL / STALE: {metrics.tp_closes ?? 0} / {metrics.sl_closes ?? 0} / {metrics.time_exit_stale_closes ?? 0}</div>
+          <div>Net realized: {fmt2(metrics.net_realized_pnl)} | Net unrealized: {fmt2(metrics.net_unrealized_pnl)} | Fees: {fmt2(metrics.total_fees)} | Fee drag: {fmt2(metrics.fee_drag_pct)}%</div>
+          <div>Expectancy (net): {fmt2(metrics.expectancy_net)} | Median time-to-close: {metrics.median_time_to_close_min ?? 0} min</div>
         </div>
-      </div>
+      </details>
+
+      <details style={{ marginTop: 10 }}>
+        <summary>Latest closed trade</summary>
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+          {latestClosed ? (
+            <div style={{ marginTop: 6 }}>
+              <div>Close: {fmtLA(latestClosed.close_time)} | Reason: {latestClosed.close_reason || '-'} | Leverage: {latestClosed.leverage ? `${latestClosed.leverage}x` : '-'}</div>
+              <div>Entry/Close: {fmt2(Number(latestClosed.entry_price ?? latestClosed.entry_fill_price ?? 0))} / {fmt2(Number(latestClosed.close_price ?? latestClosed.close_fill_price ?? 0))} | Net PnL: <strong style={{ color: pnlColor(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0)) }}>{fmt2(Number(latestClosed.net_realized_pnl ?? latestClosed.realized_pnl ?? 0))}</strong></div>
+            </div>
+          ) : <div style={{ marginTop: 6 }}>No closed trades yet.</div>}
+        </div>
+      </details>
+
+      <details style={{ marginTop: 10 }}>
+        <summary>Paper account summary (simulator baseline)</summary>
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:6 }}>
+            <div><strong>Starting balance</strong><div>{fmt2(PAPER_START_BALANCE)}</div></div>
+            <div><strong>Realized PnL</strong><div style={{ color: pnlColor(realizedPnl) }}>{fmt2(realizedPnl)}</div></div>
+            <div><strong>Unrealized PnL</strong><div style={{ color: pnlColor(unrealizedPnl) }}>{fmt2(unrealizedPnl)}</div></div>
+            <div><strong>Net PnL</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(netPnl)}</div></div>
+            <div><strong>Total fees</strong><div>{fmt2(totalFees)}</div></div>
+            <div><strong>Current equity</strong><div style={{ color: pnlColor(netPnl) }}>{fmt2(equity)}</div></div>
+          </div>
+        </div>
+      </details>
 
       {activeStrategyKeys.includes(key) && (
         <div style={{ marginTop: 10 }}>
@@ -446,40 +449,17 @@ function ModePanel({ modeKey, m, onAck }) {
       <p>Side: {d.side || '-'} | Entry: {d.entry_price || 0} | SL: {d.stop_loss || 0} | TP: {d.take_profit || 0} | R:R: {d.risk_reward_ratio || 0}</p>
       <p style={{ fontSize: 12 }}>Reason: {d.reason}</p>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,margin:'8px 0',fontSize:12}}>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Cash</strong><div>{fmt2(cash)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Equity</strong><div>{fmt2(equity)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Gross Realized PnL</strong><div>{fmt2(grossRealized)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Net Realized PnL</strong><div>{fmt2(realized)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Gross Unrealized PnL</strong><div>{fmt2(grossUnrealized)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Net Unrealized PnL</strong><div>{fmt2(unrealized)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total Fees Paid</strong><div>{fmt2(totalFees)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Fee Model / %</strong><div>{feeModel} / {fmt2(feePct)}%</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Fee Drag % Gross PnL</strong><div>{fmt2(feeDragPct)}%</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Total PnL (Net)</strong><div>{fmt2(totalPnl)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Max Drawdown</strong><div>{fmt2(m?.mode_stats?.max_drawdown ?? 0)}</div></div>
-      </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8,fontSize:12}}>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Open Size / Notional</strong><div>{posQty} / {Number(notional).toFixed(2)}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Latest Fill</strong><div>{openPos?.entry_fill_price ?? '-'}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Bid / Ask</strong><div>{bid} / {ask}</div></div>
-        <div style={{background:'var(--cardSoft)',padding:8,borderRadius:6,border:'1px solid var(--border)'}}><strong>Spread / %</strong><div>{Number(spread).toFixed(4)} / {Number(spreadPct).toFixed(6)}%</div></div>
-      </div>
-
-      <p>Open: {(m?.open_positions || []).length} / {(m?.execution_limits?.max_open_positions_per_mode || m?.max_open_positions_per_mode || 2)} | Closed: {(m?.closed_trades || []).length} | Pending: {(m?.pending_orders || []).length}</p>
-      <div style={{ fontSize: 12 }}>
-        WinRate: {m?.mode_stats?.win_rate ?? 0}% | AvgWin: {m?.mode_stats?.average_win ?? 0} | AvgLoss: {m?.mode_stats?.average_loss ?? 0} | MaxDD: {m?.mode_stats?.max_drawdown ?? 0}
-      </div>
       <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
-        <strong>Mode summary</strong>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:6 }}>
-          <div><strong>Total closed</strong><div>{closedTrades.length}</div></div>
-          <div><strong>Gross realized</strong><div>{fmt2(grossRealized)}</div></div>
-          <div><strong>Total fees</strong><div>{fmt2(totalFees)}</div></div>
+        <strong>Quick summary</strong>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8, marginTop:6 }}>
+          <div><strong>Open / Closed</strong><div>{(m?.open_positions || []).length} / {(m?.closed_trades || []).length}</div></div>
+          <div><strong>Sample</strong><div>{m?.strategy_metrics?.sample_size ?? 0}</div></div>
           <div><strong>Net realized</strong><div style={{ color: pnlColor(realized) }}>{fmt2(realized)}</div></div>
-          <div><strong>Unrealized</strong><div style={{ color: pnlColor(unrealized) }}>{fmt2(unrealized)}</div></div>
+          <div><strong>Net unrealized</strong><div style={{ color: pnlColor(unrealized) }}>{fmt2(unrealized)}</div></div>
           <div><strong>Expectancy</strong><div style={{ color: pnlColor(expectancy) }}>{fmt2(expectancy)}</div></div>
+          <div><strong>Fee drag %</strong><div>{fmt2(feeDragPct)}%</div></div>
+          <div><strong>Bid / Ask</strong><div>{bid} / {ask}</div></div>
+          <div><strong>Spread %</strong><div>{Number(spreadPct).toFixed(6)}%</div></div>
         </div>
       </div>
 
@@ -757,7 +737,7 @@ export default function App() {
   return (
     <div className={`wrap theme-${theme}`}>
       <div className='top'>
-        <h2>BTC Paper Dashboard (15m Baseline vs 15m Experiment)</h2>
+        <h2>Paper Trading Dashboard · Kraken (Baseline + Learner) · Hyperliquid (Reference + Learner)</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <span className='badge'>PAPER MODE</span>
           <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'Light' : 'Dark'}</button>
@@ -769,7 +749,7 @@ export default function App() {
       <RuntimePanel state={state} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
         <div>
-          <div className='panel' style={{ marginBottom: 8 }}><strong>Kraken Baseline Track</strong> <span className='badge'>PAPER MODE</span></div>
+          <div className='panel' style={{ marginBottom: 8 }}><strong>Kraken Track</strong> <span className='badge'>baseline + autonomous learner</span></div>
           <SharedChart state={state} theme={theme} />
         </div>
         <div>
