@@ -1,0 +1,28 @@
+{
+  "started_at": "2026-03-20T22:09:54.821981+00:00",
+  "updated_at": "2026-03-20T23:35:31.642492+00:00",
+  "poll_index": 226,
+  "poll_target": 240,
+  "offline_events": 184,
+  "backoff_entries": 1,
+  "backoff_active_polls": 188,
+  "recoveries": 1,
+  "current_loop_status": {
+    "running": true,
+    "tracked_scores": [
+      "BTC",
+      "ETH",
+      "SOL"
+    ],
+    "feature_count": 3,
+    "last_feature_run_at": "2026-03-20T23:34:46.094867+00:00",
+    "last_decision_run_at": "2026-03-20T23:31:12.312798+00:00",
+    "last_error": "feature_loop:can't subtract offset-naive and offset-aware datetimes",
+    "model_backoff_active": false,
+    "model_cooldown_until": null,
+    "model_offline_events": 27,
+    "model_consecutive_offline": 0,
+    "model_last_offline_at": "2026-03-20T23:20:53.933725+00:00",
+    "model_last_recovered_at": "2026-03-20T23:25:53.945050+00:00"
+  }
+}
