@@ -72,8 +72,6 @@ EXPERIMENT_RUNS_FILE = RESEARCH_DIR / "experiment_runs.jsonl"
 
 EDITABLE_EXPERIMENT_MODES = {
     "btc_15m_conservative_netedge_v1",
-    "btc_15m_conservative_inverse_v1",
-    "btc_15m_breakout_retest",
 }
 EDITABLE_EXPERIMENT_FIELDS = {
     "rr_min",
@@ -86,7 +84,7 @@ EDITABLE_EXPERIMENT_FIELDS = {
 
 MODE_CONFIGS = {
     "btc_15m_conservative": {
-        "label": "BTC/USD 15m conservative (frozen baseline)",
+        "label": "Kraken Baseline (Frozen Reference)",
         "interval": 15,
         "rr_min": 1.5,
         "aggressive": False,
@@ -98,7 +96,7 @@ MODE_CONFIGS = {
         "enable_invalidation_exit": False,
     },
     "btc_15m_conservative_netedge_v1": {
-        "label": "BTC/USD 15m conservative netedge v1 (experimental)",
+        "label": "Kraken Learner (Autonomous) · NetEdge v1",
         "interval": 15,
         "rr_min": 1.5,
         "aggressive": False,
@@ -110,7 +108,7 @@ MODE_CONFIGS = {
         "enable_invalidation_exit": False,
     },
     "btc_15m_conservative_inverse_v1": {
-        "label": "BTC/USD 15m conservative inverse v1 (experimental)",
+        "label": "Kraken Diagnostic Opposite (Inverse Mirror)",
         "interval": 15,
         "rr_min": 0.5,
         "aggressive": False,
@@ -122,7 +120,7 @@ MODE_CONFIGS = {
         "enable_invalidation_exit": False,
     },
     "btc_15m_breakout_retest": {
-        "label": "BTC/USD 15m breakout-retest experiment",
+        "label": "Kraken Breakout Retest (Secondary / Paused Target)",
         "interval": 15,
         "rr_min": 1.35,
         "aggressive": True,

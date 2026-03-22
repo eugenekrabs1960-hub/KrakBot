@@ -386,6 +386,13 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
 
 function ModePanel({ modeKey, m, onAck }) {
   const d = m?.latest_decision || {}
+  const modeRole = modeKey === 'btc_15m_conservative'
+    ? 'baseline/reference'
+    : modeKey === 'btc_15m_conservative_netedge_v1'
+      ? 'autonomous learner'
+      : modeKey === 'btc_15m_conservative_inverse_v1'
+        ? 'diagnostic/opposite'
+        : 'secondary/paused target'
   const isBaselineMode = modeKey === 'btc_15m_conservative'
   const comparatorVerdict = m?.comparator_verdict || m?.comparison_vs_baseline?.verdict || '-'
   const modeReview = m?.mode_review_recommendation?.recommended_status || '-'
@@ -431,6 +438,7 @@ function ModePanel({ modeKey, m, onAck }) {
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
+      <div style={{ fontSize: 12, opacity: .8, marginTop: -6, marginBottom: 6 }}>Role: <strong>{modeRole}</strong></div>
       <div style={{ fontSize: 12, opacity: .85 }}>Timeframe: {m?.timeframe} | Last scan: {fmtLA(m?.latest_scan_time)}</div>
       {m?.notify_user && (
         <div style={{ marginTop: 8, border: '1px solid var(--danger)', padding: 8, borderRadius: 6 }}>
@@ -747,7 +755,11 @@ export default function App() {
   }
 
   rows.sort((a, b) => (b.expectancy - a.expectancy) || (a.feeDrag - b.feeDrag))
-  const hlPanelKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1', 'hl_15m_trend_follow_conflev_v1'].filter(k => (hyperState?.strategy_registry || {})[k])
+  const preferredHlLearner = 'hl_15m_trend_follow_momo_gate_v1'
+  const hlPanelKeys = ((hyperState?.strategy_registry || {})[preferredHlLearner]
+    ? [preferredHlLearner]
+    : (hyperState?.active_strategy_keys || [hyperState?.active_strategy_key]).filter(Boolean)
+  )
 
   return (
     <div className={`wrap theme-${theme}`}>
@@ -768,9 +780,13 @@ export default function App() {
           <SharedChart state={state} theme={theme} />
         </div>
         <div>
+          <div className='panel' style={{ marginBottom: 8 }}><strong>Hyperliquid Learner Track</strong> <span className='badge'>single autonomous learner</span></div>
           {hlPanelKeys.map((k) => (
             <HyperliquidPanel key={k} hstate={hyperState} strategyKey={k} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
           ))}
+          <div className='panel' style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+            Secondary Hyperliquid variants remain shadow/paused and are tracked via scoreboard/status.
+          </div>
         </div>
       </div>
       <ScoreboardTable rows={rows} />

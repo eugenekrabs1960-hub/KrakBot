@@ -84,45 +84,43 @@ BACKUP_RETENTION_COUNT = 6
 BACKUP_MIN_INTERVAL_SECONDS = 3600
 
 HL_ACTIVE_STRATEGY_KEYS = [
-    'hl_15m_trend_follow',
     'hl_15m_trend_follow_momo_gate_v1',
-    'hl_15m_trend_follow_conflev_v1',
 ]
 
 HL_STRATEGY_REGISTRY = {
     'hl_15m_trend_follow': {
         'strategy_key': 'hl_15m_trend_follow',
-        'label': 'HL 15m trend-follow (active)',
+        'label': 'Hyperliquid Reference (Shadow)',
         'family': 'trend_follow',
-        'status': 'active',
+        'status': 'reference_shadow',
         'paper_only': True,
-        'shadow_only': False,
+        'shadow_only': True,
         'allowed_regimes': ['trend', 'breakout'],
     },
     'hl_15m_trend_follow_momo_gate_v1': {
         'strategy_key': 'hl_15m_trend_follow_momo_gate_v1',
-        'label': 'HL 15m trend-follow momo-gate v1 (experimental shadow)',
+        'label': 'Hyperliquid Learner (Autonomous) · Momo Gate v1',
         'family': 'trend_follow',
-        'status': 'experimental_shadow',
+        'status': 'active_learner',
         'paper_only': True,
-        'shadow_only': True,
+        'shadow_only': False,
         'allowed_regimes': ['trend', 'breakout'],
         'momentum_gate_min_atr_body': 0.18,
     },
     'hl_15m_trend_follow_conflev_v1': {
         'strategy_key': 'hl_15m_trend_follow_conflev_v1',
-        'label': 'HL 15m trend-follow conf-lev v1 (experimental shadow)',
+        'label': 'Hyperliquid Secondary (Paused Shadow) · ConfLev v1',
         'family': 'trend_follow',
-        'status': 'experimental_shadow',
+        'status': 'paused_shadow',
         'paper_only': True,
         'shadow_only': True,
         'allowed_regimes': ['trend', 'breakout'],
     },
     'hl_15m_breakout_retest': {
         'strategy_key': 'hl_15m_breakout_retest',
-        'label': 'HL 15m breakout-retest (planned shadow)',
+        'label': 'Hyperliquid Breakout (Paused Shadow)',
         'family': 'breakout_retest',
-        'status': 'planned_shadow',
+        'status': 'paused_shadow',
         'paper_only': True,
         'shadow_only': True,
         'allowed_regimes': ['breakout', 'trend'],
@@ -461,17 +459,16 @@ class HyperliquidFuturesPaperTrack:
             if sk not in registry or not isinstance(registry.get(sk), dict):
                 registry[sk] = dict(sv)
             else:
-                merged = dict(sv)
-                merged.update(registry[sk])
+                # Code-defined registry values are authoritative for role/status labeling.
+                merged = dict(registry[sk])
+                merged.update(sv)
                 registry[sk] = merged
         self.state['strategy_registry'] = registry
 
-        # Route execution using explicit active strategy list.
-        active_keys = [k for k in (self.state.get('active_strategy_keys') or []) if k in registry]
+        # Route execution using configured active learner list (deterministic single-target execution).
+        active_keys = [k for k in HL_ACTIVE_STRATEGY_KEYS if k in registry]
         if not active_keys:
-            active_keys = [k for k in HL_ACTIVE_STRATEGY_KEYS if k in registry]
-        if not active_keys:
-            active_keys = ['hl_15m_trend_follow']
+            active_keys = ['hl_15m_trend_follow_momo_gate_v1' if 'hl_15m_trend_follow_momo_gate_v1' in registry else 'hl_15m_trend_follow']
         self.state['active_strategy_keys'] = active_keys
         self.state['active_strategy_key'] = active_keys[0]
 

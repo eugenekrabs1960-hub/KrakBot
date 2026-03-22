@@ -1,8 +1,6 @@
 {
   "version": 1,
   "kraken_overrides": {
-    "btc_15m_conservative_netedge_v1": {},
-    "btc_15m_conservative_inverse_v1": {},
-    "btc_15m_breakout_retest": {}
+    "btc_15m_conservative_netedge_v1": {}
   }
 }

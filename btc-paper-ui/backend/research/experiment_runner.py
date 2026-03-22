@@ -15,10 +15,13 @@ PROGRAM_FILE = BASE_DIR / "experiment_program.md"
 SURFACE_FILE = BASE_DIR / "experiment_surface.json"
 RUNS_FILE = BASE_DIR / "experiment_runs.jsonl"
 
+KRAKEN_BASELINE_MODE = "btc_15m_conservative"
+KRAKEN_LEARNER_MODE = "btc_15m_conservative_netedge_v1"
+HYPERLIQUID_LEARNER_MODE = "hl_15m_trend_follow_momo_gate_v1"
+
+# Normal autonomous targeting is intentionally narrow.
 ALLOWED_MODES = {
-    "btc_15m_conservative_netedge_v1",
-    "btc_15m_conservative_inverse_v1",
-    "btc_15m_breakout_retest",
+    KRAKEN_LEARNER_MODE,
 }
 
 
@@ -126,15 +129,16 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
     kr, hl, news = fetch_state(api_base)
 
     analyses = []
-    for mode, st in (kr.get("modes") or {}).items():
-        if mode == "btc_15m_conservative":
-            continue
-        analyses.append(classify_mode(mode, st or {}))
+    kr_modes = kr.get("modes") or {}
+    if KRAKEN_LEARNER_MODE in kr_modes:
+        analyses.append(classify_mode(KRAKEN_LEARNER_MODE, kr_modes.get(KRAKEN_LEARNER_MODE) or {}))
 
     mutation = propose_mutation(surface, analyses)
     if apply and mutation:
         apply_mutation(surface, mutation)
         save_json(SURFACE_FILE, surface)
+
+    hl_overall = ((hl.get("metrics") or {}).get("strategy_overall") or {}).get(HYPERLIQUID_LEARNER_MODE, {})
 
     result = {
         "ts": now_iso(),
@@ -142,11 +146,23 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
         "apply": apply,
         "surface_file": str(SURFACE_FILE),
         "program_file": str(PROGRAM_FILE),
+        "targets": {
+            "kraken_baseline": KRAKEN_BASELINE_MODE,
+            "kraken_learner": KRAKEN_LEARNER_MODE,
+            "hyperliquid_learner": HYPERLIQUID_LEARNER_MODE,
+        },
         "analyses": analyses,
         "mutation": mutation,
         "applied": bool(apply and mutation),
-        "kraken_scan_time": ((kr.get("modes") or {}).get("btc_15m_conservative") or {}).get("latest_scan_time"),
+        "kraken_scan_time": ((kr.get("modes") or {}).get(KRAKEN_BASELINE_MODE) or {}).get("latest_scan_time"),
         "hl_active": hl.get("active_strategy_keys") or [hl.get("active_strategy_key")],
+        "hl_learner_snapshot": {
+            "mode": HYPERLIQUID_LEARNER_MODE,
+            "sample_size": hl_overall.get("sample_closed"),
+            "expectancy_net": hl_overall.get("expectancy_net"),
+            "fee_drag_pct": hl_overall.get("fee_drag_pct"),
+            "net_realized_pnl": hl_overall.get("net_realized_pnl"),
+        },
         "news_context": {
             "news_risk": news.get("news_risk"),
             "news_bias": news.get("news_bias"),

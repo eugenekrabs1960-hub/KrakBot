@@ -21,10 +21,13 @@ Allowed keys:
 - `kraken_overrides.<mode>.max_bars_open`
 - `kraken_overrides.<mode>.max_minutes_open`
 
-Allowed modes:
+Allowed mode for autonomous mutation (single learner):
 - `btc_15m_conservative_netedge_v1`
-- `btc_15m_conservative_inverse_v1`
-- `btc_15m_breakout_retest`
+
+Tracked but not mutated by autonomous loop:
+- Kraken baseline reference: `btc_15m_conservative`
+- Hyperliquid learner monitor: `hl_15m_trend_follow_momo_gate_v1`
+- Diagnostic/secondary Kraken modes: inverse + breakout
 
 ## One-cycle loop
 1. Read `/api/state` (fixed evaluator) and `/api/hyperliquid/state`.
