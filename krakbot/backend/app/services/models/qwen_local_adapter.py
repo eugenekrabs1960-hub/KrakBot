@@ -151,6 +151,73 @@ class QwenLocalAdapter(LocalModelAdapter):
             }]
         return out
 
+
+    def _sanitize_string_list(self, xs, default: list[str]) -> list[str]:
+        out: list[str] = []
+        if isinstance(xs, list):
+            for x in xs:
+                v = str(x).strip() if x is not None else ''
+                if not v:
+                    continue
+                out.append(v[:120])
+                if len(out) >= 10:
+                    break
+        return out or list(default)
+
+    def _sanitize_invalidation(self, invalidation, action: str):
+        if action not in ('long', 'short'):
+            return None
+        if not isinstance(invalidation, dict):
+            return {"type": "thesis_failure", "value": None, "reason": "model_thesis_invalidated"}
+        itype = str(invalidation.get('type') or 'thesis_failure')
+        if itype not in {"price_level", "regime_break", "volatility_break", "thesis_failure", "null"}:
+            itype = 'thesis_failure'
+        val = invalidation.get('value')
+        try:
+            val = None if val is None else float(val)
+        except Exception:
+            val = None
+        reason = invalidation.get('reason')
+        reason = None if reason is None else str(reason)[:160]
+        return {"type": itype, "value": val, "reason": reason}
+
+    def _normalize_with_boundary_repair(self, packet: FeaturePacket, raw: dict, err: Exception) -> DecisionOutput:
+        # boundary repair path: keep model intent when possible, force contract-safe shape
+        action = str(raw.get("action") or "no_trade")
+        if action not in ("long", "short", "no_trade"):
+            action = "no_trade"
+        conf = self._safe_float(raw.get("confidence", 0.45), default=0.45, lo=0.0, hi=1.0)
+        setup = str(raw.get("setup_type") or ("mean_reversion" if action in ("long", "short") else "unclear"))
+        if setup not in ("trend_continuation", "breakout_confirmation", "mean_reversion", "range_rejection", "unclear"):
+            setup = "mean_reversion" if action in ("long", "short") else "unclear"
+        out = {
+            "decision_version": "1.0",
+            "packet_id": packet.packet_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "model_name": settings.local_model_name,
+            "model_role": "local_analyst",
+            "coin": packet.coin,
+            "symbol": packet.symbol,
+            "action": action,
+            "setup_type": setup,
+            "horizon": packet.decision_context.primary_horizon if packet.decision_context.primary_horizon in ("15m","1h","4h") else "1h",
+            "confidence": conf,
+            "uncertainty": max(0.0, min(1.0, 1.0-conf)),
+            "thesis_summary": str(raw.get("thesis_summary") or raw.get("reasoning") or f"model_output_boundary_repaired:{type(err).__name__}")[:500],
+            "reasons": self._sanitize_reasons(raw.get("reasons"), packet),
+            "risks": self._sanitize_risks(raw.get("risks"), packet),
+            "invalidation": self._sanitize_invalidation(raw.get("invalidation"), action),
+            "targets": {
+                "take_profit_hint": None,
+                "expected_move_magnitude": "small" if action != "no_trade" else "null",
+            },
+            "evidence_used": self._sanitize_string_list(raw.get("evidence_used"), ["features.returns.momentum_score","ml_scores.trade_quality_prior"]),
+            "evidence_ignored": self._sanitize_string_list(raw.get("evidence_ignored"), ["optional_signals.news_summary"]),
+            "alternatives_considered": [{"action": "no_trade", "reason": "boundary_repair_default"}],
+            "execution_preference": {"urgency": "normal" if action != "no_trade" else "low", "entry_style_hint": "market_or_aggressive_limit" if action != "no_trade" else "none"},
+        }
+        return DecisionOutput.model_validate(out)
+
     def _normalize(self, packet: FeaturePacket, raw: dict) -> DecisionOutput:
         action = raw.get("action")
         if action not in ("long", "short", "no_trade"):
@@ -175,9 +242,7 @@ class QwenLocalAdapter(LocalModelAdapter):
 
         risks = self._sanitize_risks(raw.get("risks"), packet)
 
-        invalidation = raw.get("invalidation")
-        if action in ("long", "short") and not invalidation:
-            invalidation = {"type": "thesis_failure", "value": None, "reason": "model_thesis_invalidated"}
+        invalidation = self._sanitize_invalidation(raw.get("invalidation"), action)
 
         targets = raw.get("targets") or {}
         if not isinstance(targets, dict):
@@ -192,9 +257,7 @@ class QwenLocalAdapter(LocalModelAdapter):
             emm = 'small' if action != 'no_trade' else 'null'
         targets = {'take_profit_hint': tpm, 'expected_move_magnitude': emm}
 
-        evidence_used = raw.get("evidence_used")
-        if not isinstance(evidence_used, list) or not evidence_used:
-            evidence_used = ["features.returns.momentum_score", "ml_scores.tradability_score"]
+        evidence_used = self._sanitize_string_list(raw.get("evidence_used"), ["features.returns.momentum_score", "ml_scores.tradability_score"])
 
         alternatives = raw.get("alternatives_considered")
         alt_out = []
@@ -241,7 +304,7 @@ class QwenLocalAdapter(LocalModelAdapter):
             "invalidation": invalidation,
             "targets": targets,
             "evidence_used": evidence_used,
-            "evidence_ignored": raw.get("evidence_ignored", []),
+            "evidence_ignored": self._sanitize_string_list(raw.get("evidence_ignored"), []),
             "alternatives_considered": alternatives,
             "execution_preference": exec_pref,
         }
@@ -324,8 +387,12 @@ class QwenLocalAdapter(LocalModelAdapter):
             body = r.json()
             text = body["choices"][0]["message"]["content"]
             parsed = self._extract_json(text)
-            out = self._normalize(packet, parsed)
-            return out
+            try:
+                out = self._normalize(packet, parsed)
+                return out
+            except Exception as norm_err:
+                logger.warning('llm_call_boundary_repair packet=%s err=%s', packet.packet_id, repr(norm_err))
+                return self._normalize_with_boundary_repair(packet, parsed if isinstance(parsed, dict) else {}, norm_err)
         except Exception as e:
             logger.warning('llm_call_fail packet=%s err=%s', packet.packet_id, repr(e))
             return self._deterministic_fallback(packet)
