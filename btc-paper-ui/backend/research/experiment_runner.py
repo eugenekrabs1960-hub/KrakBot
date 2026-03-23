@@ -161,7 +161,7 @@ def _default_limit_test_config() -> dict[str, Any]:
         "family": HL_REGIME_ACTIONABILITY_FAMILY,
         "enabled": True,
         "phase": "phase_1_probe_only",
-        "phase_1_min_observation_runs": 3,
+        "phase_1_min_observation_runs": 2,
         "same_blocker_rotate_after": 3,
         "goals": [
             "unblock_regime_actionability",
@@ -318,6 +318,33 @@ def _passes_escalation(metrics: dict[str, Any], cfg: dict[str, Any]) -> bool:
     )
 
 
+def _force_escalation_when_stuck(target: dict[str, Any], metrics: dict[str, Any], news_context: dict[str, Any] | None = None) -> bool:
+    """
+    Bounded fast-path: if phase-1 keeps seeing the same non-actionable blocker with minimal action,
+    allow phase-2 escalation earlier (still paper-only and rollback-protected).
+    """
+    obs = int(metrics.get("obs", 0) or 0)
+    if obs < 2:
+        return False
+
+    non_actionable_wait_ratio = float(target.get("non_actionable_wait_ratio", 0.0) or 0.0)
+    action_ratio = float(target.get("action_ratio", 0.0) or 0.0)
+    dom_reason = str(target.get("dominant_wait_reason") or "").lower()
+
+    if "regime not actionable" not in dom_reason:
+        return False
+    if non_actionable_wait_ratio < 0.80 or action_ratio > 0.12:
+        return False
+
+    news = news_context or {}
+    news_risk = str(news.get("news_risk", "low"))
+    news_conf = str(news.get("source_confidence", "low"))
+    if news_risk == "high" and news_conf in {"medium", "high"}:
+        return False
+
+    return True
+
+
 def _needs_rollback(metrics: dict[str, Any], cfg: dict[str, Any]) -> bool:
     rb = cfg.get("rollback", {}) if isinstance(cfg.get("rollback"), dict) else {}
     return (
@@ -393,7 +420,10 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
         phase_metrics = _phase_metrics(recent, mode, HL_REGIME_ACTIONABILITY_FAMILY)
 
         phase = str(cfg.get("phase", "phase_1_probe_only"))
-        if phase == "phase_1_probe_only" and _passes_escalation(phase_metrics, cfg):
+        if phase == "phase_1_probe_only" and (
+            _passes_escalation(phase_metrics, cfg)
+            or _force_escalation_when_stuck(target, phase_metrics, news_context=news_context)
+        ):
             phase = "phase_2_escalation"
         elif phase == "phase_2_escalation" and _needs_rollback(phase_metrics, cfg):
             phase = "phase_3_rollback"
@@ -432,20 +462,16 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
             old = bool(s.get("leverage_escalation_gate_enabled", bounds.get("leverage_escalation_gate_enabled", {}).get("default", False)))
             if not old:
                 candidate_mutations.append({"param": "leverage_escalation_gate_enabled", "old": old, "new": True, "reason": "phase-2 escalation: enable leverage escalation gate"})
-            old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
-            new = _bounded_step(old, bounds.get("max_probe_risk_fraction", {}), direction="up")
-            if new != old:
-                candidate_mutations.append({"param": "max_probe_risk_fraction", "old": old, "new": new, "reason": "phase-2 escalation: controlled probe risk increase"})
             old = float(s.get("leverage_cap_during_probe_phase", bounds.get("leverage_cap_during_probe_phase", {}).get("default", 3.0)) or 3.0)
             new = _bounded_step(old, bounds.get("leverage_cap_during_probe_phase", {}), direction="up")
             if new != old:
                 candidate_mutations.append({"param": "leverage_cap_during_probe_phase", "old": old, "new": new, "reason": "phase-2 escalation: controlled probe leverage cap increase"})
-        else:
-            old = float(s.get("actionable_confidence_min", bounds.get("actionable_confidence_min", {}).get("default", 0.58)) or 0.58)
-            new = _bounded_step(old, bounds.get("actionable_confidence_min", {}), direction="down")
+            old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
+            new = _bounded_step(old, bounds.get("max_probe_risk_fraction", {}), direction="up")
             if new != old:
-                candidate_mutations.append({"param": "actionable_confidence_min", "old": old, "new": new, "reason": "phase-1 probe: lower actionable confidence threshold"})
-
+                candidate_mutations.append({"param": "max_probe_risk_fraction", "old": old, "new": new, "reason": "phase-2 escalation: controlled probe risk increase"})
+        else:
+            high_wait_stall = float(target.get("non_actionable_wait_ratio", 0.0) or 0.0) >= 0.80
             old = bool(s.get("neutral_regime_participation_allow", bounds.get("neutral_regime_participation_allow", {}).get("default", False)))
             if not old:
                 candidate_mutations.append({"param": "neutral_regime_participation_allow", "old": old, "new": True, "reason": "phase-1 probe: allow neutral regime participation"})
@@ -454,6 +480,14 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
             new = _bounded_step(old, bounds.get("min_regime_strength_for_probe_entries", {}), direction="down")
             if new != old:
                 candidate_mutations.append({"param": "min_regime_strength_for_probe_entries", "old": old, "new": new, "reason": "phase-1 probe: lower minimum regime strength for probe entries"})
+
+            old = float(s.get("actionable_confidence_min", bounds.get("actionable_confidence_min", {}).get("default", 0.58)) or 0.58)
+            new = _bounded_step(old, bounds.get("actionable_confidence_min", {}), direction="down")
+            if new != old:
+                candidate_mutations.append({"param": "actionable_confidence_min", "old": old, "new": new, "reason": "phase-1 probe: lower actionable confidence threshold"})
+
+            if not high_wait_stall:
+                candidate_mutations.sort(key=lambda x: 0 if x.get("param") == "actionable_confidence_min" else 1)
 
             old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
             if old > float(bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)):
