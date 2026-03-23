@@ -34,6 +34,12 @@ def load_state() -> dict[str, Any]:
         "pending_mutation": None,
         "daily_apply_count": 0,
         "daily_apply_date": None,
+        "limit_testing": {
+            "enabled": True,
+            "daily_limit_test_budget": 1,
+            "daily_limit_test_count": 0,
+            "last_limit_test_ts": None,
+        },
     }
     if not AUTONOMY_STATE_FILE.exists():
         return base
@@ -46,6 +52,12 @@ def load_state() -> dict[str, Any]:
             base["daily_apply_count"] = 0
         if base.get("enabled") is None:
             base["enabled"] = True
+        lt = base.get("limit_testing") if isinstance(base.get("limit_testing"), dict) else {}
+        lt.setdefault("enabled", True)
+        lt.setdefault("daily_limit_test_budget", 1)
+        lt.setdefault("daily_limit_test_count", 0)
+        lt.setdefault("last_limit_test_ts", None)
+        base["limit_testing"] = lt
         return base
     except Exception:
         return base
@@ -79,6 +91,9 @@ def _reset_daily_if_needed(st: dict[str, Any]) -> None:
     if st.get("daily_apply_date") != today:
         st["daily_apply_date"] = today
         st["daily_apply_count"] = 0
+        lt = st.get("limit_testing") if isinstance(st.get("limit_testing"), dict) else {}
+        lt["daily_limit_test_count"] = 0
+        st["limit_testing"] = lt
 
 
 def _bottleneck_block(result: dict[str, Any]) -> str | None:
@@ -209,29 +224,66 @@ def autonomy_tick(api_base: str = "http://127.0.0.1:8000") -> dict[str, Any]:
             if n:
                 out["reason"] = n
             else:
-                applied = run_cycle(api_base=api_base, apply=True)
-                out["action"] = "auto_apply"
-                out["reason"] = "bounded_auto_apply"
-                out["applied_run"] = applied
-                st["last_apply"] = out["ts"]
-                st["daily_apply_count"] = int(st.get("daily_apply_count", 0) or 0) + 1
+                lt = st.get("limit_testing") if isinstance(st.get("limit_testing"), dict) else {}
+                mutation_mode = str(mutation.get("mutation_mode") or "normal_adaptive")
+                if mutation_mode == "limit_test" and bool(lt.get("enabled", True)):
+                    used = int(lt.get("daily_limit_test_count", 0) or 0)
+                    budget = int(lt.get("daily_limit_test_budget", 1) or 1)
+                    if used >= budget:
+                        out["reason"] = "limit_test_budget_exhausted"
+                    else:
+                        applied = run_cycle(api_base=api_base, apply=True)
+                        out["action"] = "auto_apply"
+                        out["reason"] = "bounded_auto_apply"
+                        out["applied_run"] = applied
+                        st["last_apply"] = out["ts"]
+                        st["daily_apply_count"] = int(st.get("daily_apply_count", 0) or 0) + 1
+                        lt["daily_limit_test_count"] = used + 1
+                        lt["last_limit_test_ts"] = out["ts"]
+                        st["limit_testing"] = lt
 
-                # Track pending mutation for later keep/revert review.
-                mode = mutation.get("mode")
-                current_expectancy = None
-                for a in (dry.get("analyses") or []):
-                    if a.get("mode") == mode:
-                        current_expectancy = a.get("expectancy_net")
-                        break
-                st["pending_mutation"] = {
-                    "ts": out["ts"],
-                    "domain": mutation.get("domain"),
-                    "mode": mode,
-                    "param": mutation.get("param"),
-                    "old": mutation.get("old"),
-                    "new": mutation.get("new"),
-                    "before_expectancy": current_expectancy,
-                }
+                        mode = mutation.get("mode")
+                        current_expectancy = None
+                        for a in (dry.get("analyses") or []):
+                            if a.get("mode") == mode:
+                                current_expectancy = a.get("expectancy_net")
+                                break
+                        st["pending_mutation"] = {
+                            "ts": out["ts"],
+                            "domain": mutation.get("domain"),
+                            "mode": mode,
+                            "param": mutation.get("param"),
+                            "old": mutation.get("old"),
+                            "new": mutation.get("new"),
+                            "before_expectancy": current_expectancy,
+                            "mutation_mode": mutation_mode,
+                            "limit_test_goal": mutation.get("limit_test_goal"),
+                        }
+                else:
+                    applied = run_cycle(api_base=api_base, apply=True)
+                    out["action"] = "auto_apply"
+                    out["reason"] = "bounded_auto_apply"
+                    out["applied_run"] = applied
+                    st["last_apply"] = out["ts"]
+                    st["daily_apply_count"] = int(st.get("daily_apply_count", 0) or 0) + 1
+
+                    mode = mutation.get("mode")
+                    current_expectancy = None
+                    for a in (dry.get("analyses") or []):
+                        if a.get("mode") == mode:
+                            current_expectancy = a.get("expectancy_net")
+                            break
+                    st["pending_mutation"] = {
+                        "ts": out["ts"],
+                        "domain": mutation.get("domain"),
+                        "mode": mode,
+                        "param": mutation.get("param"),
+                        "old": mutation.get("old"),
+                        "new": mutation.get("new"),
+                        "before_expectancy": current_expectancy,
+                        "mutation_mode": mutation_mode,
+                        "limit_test_goal": mutation.get("limit_test_goal"),
+                    }
 
     st["last_tick"] = out["ts"]
     save_state(st)

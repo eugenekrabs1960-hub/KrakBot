@@ -171,6 +171,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
             "new": new_rr,
             "reason": "small-step exploration under fixed evaluator",
             "context_note": "news_cautious_step" if cautious else "news_normal_step",
+            "mutation_mode": "normal_adaptive",
+            "limit_test_goal": None,
         }
 
     if target["domain"] == "hyperliquid" and target["mode"] in ALLOWED_HL_MODES:
@@ -193,6 +195,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
                     "new": new_mp,
                     "reason": "cap-bound self-healing mutation",
                     "context_note": "dead_end_unblock_max_positions",
+                    "mutation_mode": "limit_test",
+                    "limit_test_goal": "exposure_capacity_probe",
                 }
 
         # Self-healing for low-action no-entry dead-end: loosen momentum gate.
@@ -200,6 +204,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
         gate_step = 0.01 if cautious else 0.03
         new_gate = round(max(0.08, current_gate - gate_step), 2)
         if new_gate != current_gate:
+            delta = round(current_gate - new_gate, 4)
+            is_limit = delta >= 0.03
             return {
                 "domain": "hyperliquid",
                 "mode": mode,
@@ -208,6 +214,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
                 "new": new_gate,
                 "reason": "small-step exploration under fixed evaluator",
                 "context_note": "news_cautious_step" if cautious else "news_normal_step",
+                "mutation_mode": "limit_test" if is_limit else "normal_adaptive",
+                "limit_test_goal": "unblock_entry_frequency" if is_limit else None,
             }
 
         # If gate already low, try leverage-ceiling exploration (bounded).
@@ -222,6 +230,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
                 "new": new_lev,
                 "reason": "bounded leverage exploration for learner",
                 "context_note": "aggressive_hl_priority",
+                "mutation_mode": "limit_test",
+                "limit_test_goal": "discover_leverage_breakpoint",
             }
 
         return None
