@@ -120,6 +120,13 @@ HL_STRATEGY_REGISTRY = {
         'max_positions': 2,
         'max_position_notional_usd': 150.0,
         'max_total_exposure_usd': 300.0,
+        # Phase-1 actionability/probe participation tune (bounded, paper-only)
+        'actionable_confidence_min': 0.55,
+        'neutral_regime_participation_allow': True,
+        'min_regime_strength_for_probe_entries': 0.45,
+        'max_probe_risk_fraction': 0.35,
+        'leverage_cap_during_probe_phase': 2.5,
+        'leverage_escalation_gate_enabled': False,
     },
     'hl_15m_trend_follow_conflev_v1': {
         'strategy_key': 'hl_15m_trend_follow_conflev_v1',
