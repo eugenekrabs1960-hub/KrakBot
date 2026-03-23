@@ -41,6 +41,10 @@ def blank_metrics() -> dict[str, Any]:
         'tp_closes': 0,
         'sl_closes': 0,
         'time_exit_stale_closes': 0,
+        'adaptive_exit_closes': 0,
+        'adaptive_exit_helped': 0,
+        'adaptive_exit_hurt': 0,
+        'adaptive_exit_pending_reviews': 0,
         'gross_realized_pnl': 0.0,
         'net_realized_pnl': 0.0,
         'gross_unrealized_pnl': 0.0,
@@ -63,12 +67,15 @@ def blank_book() -> dict[str, Any]:
         'history': [],
         'executed_signal_ids': [],
         'latest': None,
+        'adaptive_exit_reviews': [],
     }
 
 
 STALE_EXIT_MIN_BARS = 8
 STALE_EXIT_MIN_TP_PROGRESS = 0.35
 BAR_MINUTES = 15
+ADAPTIVE_EXIT_MIN_BARS = 2
+ADAPTIVE_EXIT_REVIEW_BARS = 4
 
 BASE_DIR = Path(__file__).resolve().parent
 STATE_DIR = BASE_DIR / "data"
@@ -489,6 +496,7 @@ class HyperliquidFuturesPaperTrack:
                 books[sk].setdefault('history', [])
                 books[sk].setdefault('executed_signal_ids', [])
                 books[sk].setdefault('latest', None)
+                books[sk].setdefault('adaptive_exit_reviews', [])
                 books[sk]['positions'] = (books[sk].get('positions') or [])[-MAX_POSITIONS_PERSIST:]
                 books[sk]['closed_trades'] = (books[sk].get('closed_trades') or [])[-MAX_CLOSED_TRADES_PERSIST:]
                 books[sk]['history'] = (books[sk].get('history') or [])[-MAX_HISTORY_PERSIST:]
@@ -813,7 +821,150 @@ class HyperliquidFuturesPaperTrack:
         book['executed_signal_ids'] = book['executed_signal_ids'][-MAX_SIGNAL_IDS_PERSIST:]
         return {'ok': True, 'position': asdict(p)}
 
-    def _update_positions(self, book: dict[str, Any], tick: dict[str, Any]) -> list[dict[str, Any]]:
+
+    def _news_risk_context(self) -> tuple[str, str]:
+        news = self._load_news_context()
+        return (str(news.get('news_risk', 'low')), str(news.get('source_confidence', 'low')))
+
+    def _adaptive_exit_signal(
+        self,
+        p: dict[str, Any],
+        tick: dict[str, Any],
+        regime: dict[str, Any],
+        candles: list[dict[str, Any]],
+        strategy_cfg: dict[str, Any],
+    ) -> tuple[str | None, dict[str, Any]]:
+        # Learner-only adaptive exits; keep hard TP/SL and stale exits intact/priority-first.
+        if p.get('strategy_key') != 'hl_15m_trend_follow_momo_gate_v1':
+            return None, {}
+
+        try:
+            opened_at = parse_iso(str(p.get('open_time')))
+            bars_open = int(((datetime.now(timezone.utc) - opened_at).total_seconds()) // (BAR_MINUTES * 60))
+        except Exception:
+            bars_open = 0
+
+        if bars_open < ADAPTIVE_EXIT_MIN_BARS:
+            return None, {}
+
+        side = str(p.get('side'))
+        entry = float(p.get('entry_price', 0) or 0)
+        stop = float(p.get('stop_loss', 0) or 0)
+        tp = float(p.get('take_profit', 0) or 0)
+        mark = float(tick.get('bid') if side == 'BUY' else tick.get('ask'))
+        qty = float(p.get('qty', 0) or 0)
+
+        regime_name = str(regime.get('regime') or '')
+        regime_conf = float(regime.get('confidence', 0.0) or 0.0)
+        actionable_conf_min = float(strategy_cfg.get('actionable_confidence_min', 0.58) or 0.58)
+
+        risk_dist = abs(entry - stop) * max(qty, 1e-9)
+        adverse_now = ((entry - mark) if side == 'BUY' else (mark - entry)) * qty
+        tp_distance = abs(tp - entry) * max(qty, 1e-9)
+        tp_progress = (float(p.get('max_favorable_excursion', 0)) / tp_distance) if tp_distance > 0 else 0.0
+
+        atr = self._atr(candles, period=14) if candles else 0.0
+        body_ratio = 0.0
+        if candles and atr > 0:
+            c = candles[-1]
+            o = float(c.get('open', 0))
+            cl = float(c.get('close', 0))
+            body_ratio = ((cl - o) / atr) if side == 'BUY' else ((o - cl) / atr)
+
+        news_risk, news_conf = self._news_risk_context()
+
+        diagnostics = {
+            'bars_open': bars_open,
+            'regime': regime_name,
+            'regime_confidence': round2(regime_conf),
+            'actionable_confidence_min': round2(actionable_conf_min),
+            'entry_body_atr_ratio_now': round2(body_ratio),
+            'tp_progress': round2(tp_progress),
+            'adverse_pnl_vs_risk': round2(adverse_now / risk_dist) if risk_dist > 0 else 0.0,
+            'news_risk': news_risk,
+            'news_confidence': news_conf,
+        }
+
+        # Bounded, deterministic trigger order (first match wins for auditability).
+        if regime_name not in {'trend', 'breakout'} or regime_conf < max(0.45, actionable_conf_min - 0.08):
+            return 'ADAPTIVE_EXIT_REGIME_SHIFT', diagnostics
+
+        if body_ratio < 0.04 and tp_progress < 0.30:
+            return 'ADAPTIVE_EXIT_MOMENTUM_COLLAPSE', diagnostics
+
+        if (side == 'BUY' and mark <= entry - max(abs(entry - stop) * 0.70, entry * 0.0015)) or (
+            side == 'SELL' and mark >= entry + max(abs(stop - entry) * 0.70, entry * 0.0015)
+        ):
+            return 'ADAPTIVE_EXIT_PRICE_ACTION_INVALIDATION', diagnostics
+
+        if news_risk == 'high' and news_conf in {'medium', 'high'} and tp_progress < 0.35:
+            return 'ADAPTIVE_EXIT_NEWS_RISK_WORSENING', diagnostics
+
+        if risk_dist > 0 and adverse_now >= risk_dist * 0.55 and tp_progress < 0.25:
+            return 'ADAPTIVE_EXIT_TRADE_THESIS_INVALIDATION', diagnostics
+
+        return None, diagnostics
+
+    def _append_adaptive_exit_review(self, book: dict[str, Any], trade: dict[str, Any]) -> None:
+        opened = parse_iso(str(trade.get('open_time')))
+        due_at = (opened + timedelta(minutes=(int(trade.get('bars_open_at_close', 0)) + ADAPTIVE_EXIT_REVIEW_BARS) * BAR_MINUTES)).replace(microsecond=0)
+        review = {
+            'strategy_key': trade.get('strategy_key'),
+            'signal_id': trade.get('signal_id'),
+            'side': trade.get('side'),
+            'entry_price': trade.get('entry_price'),
+            'stop_loss': trade.get('stop_loss'),
+            'take_profit': trade.get('take_profit'),
+            'adaptive_exit_price': trade.get('close_price'),
+            'adaptive_exit_reason': trade.get('close_reason'),
+            'review_due_at': due_at.isoformat().replace('+00:00', 'Z'),
+            'status': 'pending',
+            'created_at': now_iso(),
+        }
+        arr = book.setdefault('adaptive_exit_reviews', [])
+        arr.append(review)
+        book['adaptive_exit_reviews'] = arr[-MAX_HISTORY_PERSIST:]
+
+    def _evaluate_adaptive_exit_reviews(self, book: dict[str, Any], tick: dict[str, Any]) -> None:
+        reviews = book.get('adaptive_exit_reviews', []) or []
+        if not reviews:
+            return
+
+        now = datetime.now(timezone.utc)
+        for r in reviews:
+            if r.get('status') != 'pending':
+                continue
+            due = parse_iso(str(r.get('review_due_at'))) if r.get('review_due_at') else None
+            if not due or now < due:
+                continue
+
+            side = str(r.get('side'))
+            mark = float(tick.get('bid') if side == 'BUY' else tick.get('ask'))
+            stop = float(r.get('stop_loss', 0) or 0)
+            tp = float(r.get('take_profit', 0) or 0)
+            adaptive_px = float(r.get('adaptive_exit_price', 0) or 0)
+
+            would_hit_sl = (side == 'BUY' and mark <= stop) or (side == 'SELL' and mark >= stop)
+            would_hit_tp = (side == 'BUY' and mark >= tp) or (side == 'SELL' and mark <= tp)
+            if side == 'BUY':
+                moved_adverse_vs_exit = mark < adaptive_px
+            else:
+                moved_adverse_vs_exit = mark > adaptive_px
+
+            outcome = 'neutral'
+            if would_hit_sl or moved_adverse_vs_exit:
+                outcome = 'helped'
+            elif would_hit_tp:
+                outcome = 'hurt'
+
+            r['status'] = 'reviewed'
+            r['reviewed_at'] = now_iso()
+            r['mark_at_review'] = round2(mark)
+            r['would_hit_sl_by_review'] = bool(would_hit_sl)
+            r['would_hit_tp_by_review'] = bool(would_hit_tp)
+            r['outcome'] = outcome
+
+    def _update_positions(self, book: dict[str, Any], tick: dict[str, Any], regime: dict[str, Any], candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         closed = []
         still = []
         for p in book['positions']:
@@ -833,10 +984,17 @@ class HyperliquidFuturesPaperTrack:
 
             close_reason = None
             exit_price = None
+            adaptive_diag: dict[str, Any] = {}
             if tp_hit or sl_hit:
                 close_reason = 'TAKE_PROFIT' if tp_hit else 'STOP_LOSS'
                 exit_price = p['take_profit'] if tp_hit else p['stop_loss']
             else:
+                # Learner-only bounded adaptive early exits (after TP/SL priority, before stale exit).
+                strategy_cfg = ((self.state.get('strategy_registry') or {}).get(p.get('strategy_key', ''), {}) or {})
+                adaptive_reason, adaptive_diag = self._adaptive_exit_signal(p, tick, regime, candles, strategy_cfg)
+                if adaptive_reason:
+                    close_reason = adaptive_reason
+                    exit_price = tick['bid'] if side == 'BUY' else tick['ask']
                 # Controlled stale exit: close only when BOTH conditions are met.
                 # 1) bars_open >= STALE_EXIT_MIN_BARS
                 # 2) tp_progress < STALE_EXIT_MIN_TP_PROGRESS (MFE-based)
@@ -872,14 +1030,19 @@ class HyperliquidFuturesPaperTrack:
                     'bars_open_at_close': int(minutes_open // BAR_MINUTES),
                     'minutes_open_at_close': minutes_open,
                     'tp_progress_at_close': round2(tp_progress),
+                    'adaptive_exit_diagnostics': adaptive_diag if str(close_reason).startswith('ADAPTIVE_EXIT_') else {},
+                    'adaptive_exit_learning_review': 'pending' if str(close_reason).startswith('ADAPTIVE_EXIT_') else 'n/a',
                 }
                 closed.append(closed_trade)
+                if str(close_reason).startswith('ADAPTIVE_EXIT_'):
+                    self._append_adaptive_exit_review(book, closed_trade)
             else:
                 still.append(p)
         book['positions'] = still
         if closed:
             book['closed_trades'].extend(closed)
             book['closed_trades'] = book['closed_trades'][-MAX_CLOSED_TRADES_PERSIST:]
+        self._evaluate_adaptive_exit_reviews(book, tick)
         return closed
 
     def _recompute_metrics(self) -> None:
@@ -911,6 +1074,11 @@ class HyperliquidFuturesPaperTrack:
             overall['tp_closes'] = sum(1 for t in closed if t.get('close_reason') == 'TAKE_PROFIT')
             overall['sl_closes'] = sum(1 for t in closed if t.get('close_reason') == 'STOP_LOSS')
             overall['time_exit_stale_closes'] = sum(1 for t in closed if t.get('close_reason') == 'TIME_EXIT_STALE')
+            overall['adaptive_exit_closes'] = sum(1 for t in closed if str(t.get('close_reason', '')).startswith('ADAPTIVE_EXIT_'))
+            reviews = book.get('adaptive_exit_reviews', []) or []
+            overall['adaptive_exit_helped'] = sum(1 for r in reviews if r.get('status') == 'reviewed' and r.get('outcome') == 'helped')
+            overall['adaptive_exit_hurt'] = sum(1 for r in reviews if r.get('status') == 'reviewed' and r.get('outcome') == 'hurt')
+            overall['adaptive_exit_pending_reviews'] = sum(1 for r in reviews if r.get('status') == 'pending')
             overall['risk_guard_blocks'] = sum(1 for h in hist[-300:] if 'risk guard blocked open' in str((h.get('decision', {}) or {}).get('reason', '')).lower())
             overall['duplicate_signal_skips'] = sum(1 for h in hist[-300:] if 'duplicate signal skipped' in str((h.get('decision', {}) or {}).get('reason', '')).lower())
             mins = sorted(int(t.get('minutes_open_at_close', 0)) for t in closed if t.get('minutes_open_at_close') is not None)
@@ -1005,7 +1173,7 @@ class HyperliquidFuturesPaperTrack:
 
         for strategy_key in self.state.get('active_strategy_keys', []):
             book = self.state['books'].setdefault(strategy_key, blank_book())
-            closed_now = self._update_positions(book, tick)
+            closed_now = self._update_positions(book, tick, regime, candles)
             proposal = self._build_proposal(tick, candles, regime, strategy_key)
             decision = proposal
 
