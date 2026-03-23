@@ -27,26 +27,28 @@ def _ts_to_dt(ts: str | None) -> datetime | None:
 
 
 def load_state() -> dict[str, Any]:
+    base = {
+        "enabled": True,
+        "last_tick": None,
+        "last_apply": None,
+        "pending_mutation": None,
+        "daily_apply_count": 0,
+        "daily_apply_date": None,
+    }
     if not AUTONOMY_STATE_FILE.exists():
-        return {
-            "enabled": True,
-            "last_tick": None,
-            "last_apply": None,
-            "pending_mutation": None,
-            "daily_apply_count": 0,
-            "daily_apply_date": None,
-        }
+        return base
     try:
-        return json.loads(AUTONOMY_STATE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(AUTONOMY_STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            base.update(raw)
+        # sanitize nullable counters from older files
+        if base.get("daily_apply_count") is None:
+            base["daily_apply_count"] = 0
+        if base.get("enabled") is None:
+            base["enabled"] = True
+        return base
     except Exception:
-        return {
-            "enabled": True,
-            "last_tick": None,
-            "last_apply": None,
-            "pending_mutation": None,
-            "daily_apply_count": 0,
-            "daily_apply_date": None,
-        }
+        return base
 
 
 def save_state(st: dict[str, Any]) -> None:
@@ -89,11 +91,19 @@ def _bottleneck_block(result: dict[str, Any]) -> str | None:
     if not target:
         return None
 
+    # Hyperliquid-first policy: Kraken is near-frozen support unless very strong reason.
+    if mutation.get("domain") == "kraken":
+        if not (
+            str(target.get("keep_discard")) == "discard_watch"
+            and float(target.get("sample_size", 0) or 0) >= 30
+            and float(target.get("fee_drag_pct", 0.0) or 0.0) < 200
+        ):
+            return "kraken_deprioritized_support_only"
+
     # Bottleneck-aware skips
     # Kraken: rr_min tweaks are not useful when fee-efficiency block dominates.
     if mutation.get("domain") == "kraken" and mutation.get("param") == "rr_min":
-        # We rely on current WAIT distribution in backend; if fee drag is already extreme, defer.
-        if float(target.get("fee_drag_pct", 0.0) or 0.0) > 400:
+        if float(target.get("fee_drag_pct", 0.0) or 0.0) > 300:
             return "kraken_fee_drag_extreme_skip"
 
     # Hyperliquid: momentum gate tweaks are masked when max-position cap blocks entries.
@@ -190,7 +200,7 @@ def autonomy_tick(api_base: str = "http://127.0.0.1:8000") -> dict[str, Any]:
                     st["pending_mutation"] = None
 
     # Controlled auto-apply (bounded)
-    if mutation and st.get("daily_apply_count", 0) < 1 and not st.get("pending_mutation"):
+    if mutation and st.get("daily_apply_count", 0) < 2 and not st.get("pending_mutation"):
         b = _bottleneck_block(dry)
         if b:
             out["reason"] = b

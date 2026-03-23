@@ -94,6 +94,28 @@ def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
     expectancy = float(overall.get("expectancy_net", 0.0) or 0.0)
     fee_drag = float(overall.get("fee_drag_pct", 0.0) or 0.0)
 
+    book = (hl_state.get("books") or {}).get(mode_key, {})
+    hist = (book.get("history") or [])[-120:]
+    latest = ((book.get("latest") or {}).get("decision") or {})
+    latest_reason = str(latest.get("reason") or "")
+
+    wait_reasons: dict[str, int] = {}
+    waits = 0
+    actionable = 0
+    for r in hist:
+        d = (r.get("decision") or r)
+        st = d.get("status")
+        if st == "WAIT":
+            waits += 1
+            rs = str(d.get("reason") or "")
+            wait_reasons[rs] = wait_reasons.get(rs, 0) + 1
+        elif st in {"PROPOSE_TRADE", "PAPER_TRADE_OPEN"}:
+            actionable += 1
+
+    dominant_reason = max(wait_reasons.items(), key=lambda x: x[1])[0] if wait_reasons else latest_reason
+    wait_ratio = (waits / max(1, len(hist))) if hist else 0.0
+    action_ratio = (actionable / max(1, len(hist))) if hist else 0.0
+
     if sample < 20:
         keep_discard = "inconclusive"
     elif expectancy > 0 and fee_drag <= 120:
@@ -112,6 +134,10 @@ def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
         "expectancy_net": expectancy,
         "fee_drag_pct": fee_drag,
         "keep_discard": keep_discard,
+        "latest_reason": latest_reason,
+        "dominant_wait_reason": dominant_reason,
+        "wait_ratio": round(wait_ratio, 4),
+        "action_ratio": round(action_ratio, 4),
     }
 
 
@@ -120,7 +146,8 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
     if not candidates:
         return None
     priority = {"discard_watch": 0, "probation": 1, "inconclusive": 2}
-    candidates.sort(key=lambda x: (priority.get(x["keep_discard"], 9), x["sample_size"], x["expectancy_net"]))
+    domain_pri = {"hyperliquid": 0, "kraken": 1}
+    candidates.sort(key=lambda x: (domain_pri.get(x.get("domain"), 9), priority.get(x["keep_discard"], 9), x["sample_size"], x["expectancy_net"]))
     target = candidates[0]
 
     news_context = news_context or {}
@@ -149,20 +176,55 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
     if target["domain"] == "hyperliquid" and target["mode"] in ALLOWED_HL_MODES:
         mode = target["mode"]
         s = surface.setdefault("hyperliquid_overrides", {}).setdefault(mode, {})
+
+        dom_reason = str(target.get("dominant_wait_reason") or "")
+        wait_ratio = float(target.get("wait_ratio", 0.0) or 0.0)
+
+        # Self-healing for cap-bound dead-end: open one extra slot (bounded).
+        if "max positions reached" in dom_reason.lower() and wait_ratio >= 0.4:
+            old_mp = int(s.get("max_positions", 2) or 2)
+            new_mp = min(4, old_mp + 1)
+            if new_mp != old_mp:
+                return {
+                    "domain": "hyperliquid",
+                    "mode": mode,
+                    "param": "max_positions",
+                    "old": old_mp,
+                    "new": new_mp,
+                    "reason": "cap-bound self-healing mutation",
+                    "context_note": "dead_end_unblock_max_positions",
+                }
+
+        # Self-healing for low-action no-entry dead-end: loosen momentum gate.
         current_gate = float(s.get("momentum_gate_min_atr_body", 0.18))
-        gate_step = 0.01 if cautious else 0.02
-        new_gate = round(max(0.10, current_gate - gate_step), 2)
-        if new_gate == current_gate:
-            return None
-        return {
-            "domain": "hyperliquid",
-            "mode": mode,
-            "param": "momentum_gate_min_atr_body",
-            "old": current_gate,
-            "new": new_gate,
-            "reason": "small-step exploration under fixed evaluator",
-            "context_note": "news_cautious_step" if cautious else "news_normal_step",
-        }
+        gate_step = 0.01 if cautious else 0.03
+        new_gate = round(max(0.08, current_gate - gate_step), 2)
+        if new_gate != current_gate:
+            return {
+                "domain": "hyperliquid",
+                "mode": mode,
+                "param": "momentum_gate_min_atr_body",
+                "old": current_gate,
+                "new": new_gate,
+                "reason": "small-step exploration under fixed evaluator",
+                "context_note": "news_cautious_step" if cautious else "news_normal_step",
+            }
+
+        # If gate already low, try leverage-ceiling exploration (bounded).
+        old_lev = float(s.get("max_leverage", 6.0) or 6.0)
+        new_lev = min(10.0, round(old_lev + 1.0, 1))
+        if new_lev != old_lev:
+            return {
+                "domain": "hyperliquid",
+                "mode": mode,
+                "param": "max_leverage",
+                "old": old_lev,
+                "new": new_lev,
+                "reason": "bounded leverage exploration for learner",
+                "context_note": "aggressive_hl_priority",
+            }
+
+        return None
 
     return None
 

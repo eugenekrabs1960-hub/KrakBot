@@ -1,6 +1,6 @@
 # experiment_program.md
 
-Goal: improve paper-only mode performance with small, reversible edits while keeping evaluator fixed.
+Goal: improve paper-only mode performance with Hyperliquid-first autonomous learning while keeping evaluator fixed.
 
 ## Frozen boundary (do not edit in normal cycles)
 - `btc-paper-ui/backend/main.py` evaluator outputs and logic:
@@ -22,8 +22,8 @@ Allowed keys:
 - `kraken_overrides.<mode>.max_minutes_open`
 
 Allowed learner modes for autonomous mutation (one target per cycle):
-- `btc_15m_conservative_netedge_v1` (Kraken learner)
-- `hl_15m_trend_follow_momo_gate_v1` (Hyperliquid learner)
+- `hl_15m_trend_follow_momo_gate_v1` (primary learner)
+- `btc_15m_conservative_netedge_v1` (secondary support learner; near-frozen unless strong reason)
 
 Tracked but never mutated by autonomous loop:
 - Kraken baseline reference: `btc_15m_conservative`
@@ -46,9 +46,13 @@ Tracked but never mutated by autonomous loop:
    - write update to `experiment_surface.json`
 5. Append run report to `experiment_runs.jsonl`.
 
-## Mutation policy (small-step)
-- Kraken learner (`btc_15m_conservative_netedge_v1`): adjust `rr_min` by -0.05 (floor 1.20) only when comparator remains inconclusive.
-- Hyperliquid learner (`hl_15m_trend_follow_momo_gate_v1`): adjust `momentum_gate_min_atr_body` by -0.02 (floor 0.10) when expectancy remains weak/inconclusive.
+## Mutation policy (aggressive-but-bounded)
+- Hyperliquid learner first:
+  - unblock dead-end cap states by increasing learner `max_positions` (bounded up to 4)
+  - loosen `momentum_gate_min_atr_body` in larger steps when low-action dead-end persists
+  - expand learner `max_leverage` gradually (bounded to 10x)
+- Kraken learner remains secondary and near-frozen unless strong reason.
+- News context influences mutation aggressiveness (cautious vs normal step), never direct trade commands.
 - Mutate only one learner per cycle.
 - Never change baseline mode in autonomous cycle.
 

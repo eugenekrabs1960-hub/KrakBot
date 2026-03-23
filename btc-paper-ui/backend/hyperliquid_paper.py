@@ -10,6 +10,8 @@ import shutil
 
 import httpx
 
+NEWS_STATE_FILE = Path(__file__).resolve().parent / 'data' / 'news_context_state.json'
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
@@ -106,6 +108,11 @@ HL_STRATEGY_REGISTRY = {
         'shadow_only': False,
         'allowed_regimes': ['trend', 'breakout'],
         'momentum_gate_min_atr_body': 0.18,
+        'max_leverage': 10.0,
+        'leverage_target': 4.0,
+        'max_positions': 2,
+        'max_position_notional_usd': 150.0,
+        'max_total_exposure_usd': 300.0,
     },
     'hl_15m_trend_follow_conflev_v1': {
         'strategy_key': 'hl_15m_trend_follow_conflev_v1',
@@ -648,11 +655,64 @@ class HyperliquidFuturesPaperTrack:
             'reason': f"Controlled futures proposal from {regime.get('regime')} regime.",
         }
 
+    def _load_news_context(self) -> dict[str, Any]:
+        try:
+            return json.loads(NEWS_STATE_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            return {}
+
+    def _adaptive_leverage(self, strategy_key: str, proposal: dict[str, Any], strategy_cfg: dict[str, Any], lev_cap: float) -> float:
+        target = float(strategy_cfg.get('leverage_target', 4.0))
+
+        rg = str(proposal.get('market_regime') or '')
+        conf = float(proposal.get('regime_confidence') or 0.0)
+        body_atr = float(proposal.get('entry_body_atr_ratio') or 0.0)
+        spread_pct = float(proposal.get('spread_pct') or 0.0)
+
+        if rg in {'trend', 'breakout'}:
+            target += 0.5
+        if conf >= 0.80:
+            target += 1.0
+        elif conf < 0.55:
+            target -= 1.0
+        if body_atr >= 0.35:
+            target += 0.75
+        elif body_atr < 0.18:
+            target -= 0.75
+        if spread_pct > 0.03:
+            target -= 1.0
+
+        overall = ((self.state.get('metrics') or {}).get('strategy_overall') or {}).get(strategy_key, {})
+        expectancy = float(overall.get('expectancy_net', 0.0) or 0.0)
+        fee_drag = float(overall.get('fee_drag_pct', 0.0) or 0.0)
+        if expectancy < 0:
+            target -= 0.75
+        if fee_drag > 220:
+            target -= 0.75
+
+        news = self._load_news_context()
+        news_risk = str(news.get('news_risk', 'low'))
+        news_conf = str(news.get('source_confidence', 'low'))
+        if news_risk == 'high' and news_conf in {'medium', 'high'}:
+            target -= 1.5
+        elif news_risk == 'medium' and news_conf in {'medium', 'high'}:
+            target -= 0.5
+
+        target = max(1.0, min(target, lev_cap))
+        return round2(target)
+
     def _open_from_proposal(self, book: dict[str, Any], proposal: dict[str, Any], tick: dict[str, Any]) -> dict[str, Any]:
         side = proposal['side']
         qty = float(proposal['qty'])
         strategy_key = proposal.get('strategy_key', self.state.get('active_strategy_key', 'hl_15m_trend_follow'))
-        base_lev = min(max(1.0, float(self.state['leverage_default'])), self.risk.max_leverage)
+        strategy_cfg = ((self.state.get('strategy_registry') or {}).get(strategy_key) or {})
+
+        max_positions_cap = int(strategy_cfg.get('max_positions', self.risk.max_positions) or self.risk.max_positions)
+        max_pos_notional_cap = float(strategy_cfg.get('max_position_notional_usd', self.risk.max_position_notional_usd) or self.risk.max_position_notional_usd)
+        max_total_exposure_cap = float(strategy_cfg.get('max_total_exposure_usd', self.risk.max_total_exposure_usd) or self.risk.max_total_exposure_usd)
+        max_leverage_cap = float(strategy_cfg.get('max_leverage', self.risk.max_leverage) or self.risk.max_leverage)
+
+        base_lev = min(max(1.0, float(strategy_cfg.get('leverage_target', self.state['leverage_default']))), max_leverage_cap)
         high_conf_5x = False
         stepup_block_reason = 'not_conflev_variant'
         if strategy_key == 'hl_15m_trend_follow_conflev_v1':
@@ -671,17 +731,17 @@ class HyperliquidFuturesPaperTrack:
             else:
                 high_conf_5x = True
                 stepup_block_reason = 'passed_all_gates'
-        lev_target = 5.0 if high_conf_5x else base_lev
-        lev_cap = 5.0 if strategy_key == 'hl_15m_trend_follow_conflev_v1' else self.risk.max_leverage
+        lev_cap = 5.0 if strategy_key == 'hl_15m_trend_follow_conflev_v1' else max_leverage_cap
+        lev_target = 5.0 if high_conf_5x else self._adaptive_leverage(strategy_key, proposal, strategy_cfg, lev_cap)
         lev = min(max(1.0, float(lev_target)), lev_cap)
         entry = float(proposal['entry_price'])
         notional = entry * qty
-        if len(book['positions']) >= self.risk.max_positions:
+        if len(book['positions']) >= max_positions_cap:
             return {'ok': False, 'reason': 'max positions reached'}
-        if notional > self.risk.max_position_notional_usd:
+        if notional > max_pos_notional_cap:
             return {'ok': False, 'reason': 'position notional exceeds per-position cap'}
         exposure = sum(p['entry_price'] * p['qty'] for p in book['positions'])
-        if exposure + notional > self.risk.max_total_exposure_usd:
+        if exposure + notional > max_total_exposure_cap:
             return {'ok': False, 'reason': 'total exposure cap exceeded'}
 
         margin_used = notional / lev

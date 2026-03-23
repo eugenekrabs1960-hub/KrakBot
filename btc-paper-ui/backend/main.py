@@ -91,6 +91,11 @@ EDITABLE_HL_EXPERIMENT_MODES = {
 }
 EDITABLE_HL_EXPERIMENT_FIELDS = {
     "momentum_gate_min_atr_body",
+    "max_positions",
+    "max_leverage",
+    "max_total_exposure_usd",
+    "max_position_notional_usd",
+    "leverage_target",
 }
 
 PRIMARY_KRAKEN_MODE_KEYS = [
