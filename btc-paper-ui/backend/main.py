@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from hyperliquid_paper import HyperliquidFuturesPaperTrack
 from news_context import build_news_context
+from research.autonomy_controller import autonomy_tick, load_state as load_autonomy_state
 
 app = FastAPI(title="BTC Paper Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -47,6 +49,8 @@ CONSERVATIVE_MIN_REWARD_TO_FEE = 1.50
 CONSERVATIVE_NETEDGE_V1_MIN_REWARD_TO_FEE = 2.20
 # Safety/conservation mode: Kraken scan path can run without LLM calls.
 KRAKEN_USE_LLM_SCAN = False
+AUTONOMY_LOOP_ENABLED = os.getenv("AUTONOMY_LOOP_ENABLED", "1") in {"1", "true", "yes", "on"}
+AUTONOMY_LOOP_INTERVAL_SECONDS = int(os.getenv("AUTONOMY_LOOP_INTERVAL_SECONDS", "900"))
 
 # Read-only comparator thresholds (no execution impact)
 BASELINE_MODE_KEY = "btc_15m_conservative"
@@ -2196,6 +2200,22 @@ async def research_run_cycle(apply: bool = False):
     return run_experiment_cycle_once(apply=apply)
 
 
+@app.get("/api/research/autonomy/state")
+async def research_autonomy_state():
+    st = load_autonomy_state()
+    return {
+        "enabled": bool(st.get("enabled", True)),
+        "loop_enabled": AUTONOMY_LOOP_ENABLED,
+        "loop_interval_seconds": AUTONOMY_LOOP_INTERVAL_SECONDS,
+        "state": st,
+    }
+
+
+@app.post("/api/research/autonomy/tick")
+async def research_autonomy_tick():
+    return await asyncio.to_thread(autonomy_tick, "http://127.0.0.1:8000")
+
+
 @app.post("/api/hyperliquid/mock-open")
 async def hyperliquid_mock_open(side: str = "BUY", qty: float = 0.01, leverage: float = 2.0):
     # Explicit manual paper helper only. No exchange route is called.
@@ -2234,3 +2254,15 @@ async def start_auto_scanner():
                 persist_store()
             await asyncio.sleep(20)
     asyncio.create_task(loop())
+
+    async def autonomy_loop():
+        while True:
+            try:
+                if AUTONOMY_LOOP_ENABLED:
+                    await asyncio.to_thread(autonomy_tick, "http://127.0.0.1:8000")
+                    apply_experiment_surface_overrides()
+            except Exception:
+                pass
+            await asyncio.sleep(max(60, AUTONOMY_LOOP_INTERVAL_SECONDS))
+
+    asyncio.create_task(autonomy_loop())
