@@ -1,9 +1,54 @@
 {
-  "version": 1,
-  "kraken_overrides": {
-    "btc_15m_conservative_netedge_v1": {}
+  "autonomy_config": {
+    "hyperliquid_limit_test": {
+      "enabled": true,
+      "family": "hl_regime_actionability_limit_test_v1",
+      "phase": "phase_1_probe_only",
+      "phase_1_min_observation_runs": 3,
+      "same_blocker_rotate_after": 3,
+      "goals": [
+        "unblock_regime_actionability",
+        "reduce_wait_from_non_actionable_regime",
+        "validate_probe_phase_before_escalation"
+      ],
+      "thresholds": {
+        "min_non_actionable_wait_ratio_improvement": 0.1,
+        "min_actionable_ratio_improvement": 0.08,
+        "max_expectancy_net_drop": 0.03,
+        "max_fee_drag_pct_increase": 20.0,
+        "max_blocker_persistence_delta": 0
+      },
+      "rollback": {
+        "expectancy_net_drop": 0.05,
+        "fee_drag_pct_increase": 30.0,
+        "non_actionable_wait_ratio_regression": 0.07,
+        "actionable_ratio_drop": 0.05
+      },
+      "bounds": {
+        "actionable_confidence_min": {"min": 0.45, "max": 0.7, "step": 0.03, "default": 0.58},
+        "neutral_regime_participation_allow": {"default": false},
+        "min_regime_strength_for_probe_entries": {"min": 0.35, "max": 0.65, "step": 0.05, "default": 0.5},
+        "max_probe_risk_fraction": {"min": 0.2, "max": 0.6, "step": 0.1, "default": 0.35},
+        "leverage_cap_during_probe_phase": {"min": 1.5, "max": 4.0, "step": 0.5, "default": 3.0},
+        "leverage_escalation_gate_enabled": {"default": false}
+      }
+    }
   },
   "hyperliquid_overrides": {
-    "hl_15m_trend_follow_momo_gate_v1": {}
-  }
+    "hl_15m_trend_follow_momo_gate_v1": {
+      "momentum_gate_min_atr_body": 0.1,
+      "actionable_confidence_min": 0.58,
+      "neutral_regime_participation_allow": false,
+      "min_regime_strength_for_probe_entries": 0.5,
+      "max_probe_risk_fraction": 0.35,
+      "leverage_cap_during_probe_phase": 3.0,
+      "leverage_escalation_gate_enabled": false
+    }
+  },
+  "kraken_overrides": {
+    "btc_15m_conservative_netedge_v1": {
+      "rr_min": 1.45
+    }
+  },
+  "version": 2
 }

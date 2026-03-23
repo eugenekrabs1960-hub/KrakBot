@@ -578,9 +578,11 @@ class HyperliquidFuturesPaperTrack:
             'reason': 'Public market structure does not show clear edge.',
         }
 
-    def _compute_qty(self, entry_price: float) -> float:
+    def _compute_qty(self, entry_price: float, risk_fraction: float = 1.0) -> float:
         cap_qty = self.risk.max_position_notional_usd / max(entry_price, 1.0)
-        return round(max(0.001, min(0.03, cap_qty)), 4)
+        base_qty = max(0.001, min(0.03, cap_qty))
+        rf = max(0.05, min(float(risk_fraction), 1.0))
+        return round(max(0.001, base_qty * rf), 4)
 
     def _atr(self, candles: list[dict[str, Any]], period: int = 14) -> float:
         if len(candles) < period + 1:
@@ -596,8 +598,24 @@ class HyperliquidFuturesPaperTrack:
         return round2(sum(trs) / len(trs)) if trs else 0.0
 
     def _build_proposal(self, tick: dict[str, Any], candles: list[dict[str, Any]], regime: dict[str, Any], strategy_key: str) -> dict[str, Any]:
-        if regime.get('regime') not in {'trend', 'breakout'}:
+        strategy_cfg = ((self.state.get('strategy_registry') or {}).get(strategy_key, {}) or {})
+        actionable_conf_min = float(strategy_cfg.get('actionable_confidence_min', 0.58) or 0.58)
+        neutral_probe_allow = bool(strategy_cfg.get('neutral_regime_participation_allow', False))
+        min_probe_strength = float(strategy_cfg.get('min_regime_strength_for_probe_entries', 0.50) or 0.50)
+        max_probe_risk_fraction = float(strategy_cfg.get('max_probe_risk_fraction', 0.35) or 0.35)
+
+        current_regime = str(regime.get('regime') or '')
+        regime_conf = float(regime.get('confidence', 0.0) or 0.0)
+        probe_phase = False
+
+        if current_regime in {'trend', 'breakout'}:
+            if regime_conf < actionable_conf_min:
+                return {'status': 'WAIT', 'reason': 'No futures entry: regime confidence below actionable threshold.'}
+        elif neutral_probe_allow and current_regime in {'chop', 'low_edge'} and regime_conf >= min_probe_strength:
+            probe_phase = True
+        else:
             return {'status': 'WAIT', 'reason': 'No futures entry: regime not actionable for controlled simulator.'}
+
         if len(candles) < 8:
             return {'status': 'WAIT', 'reason': 'No futures entry: insufficient candle depth.'}
 
@@ -617,7 +635,8 @@ class HyperliquidFuturesPaperTrack:
             risk = max(stop - entry, entry * 0.0025)
             stop = entry + risk
             tp = entry - risk * 1.8
-        qty = self._compute_qty(entry)
+        risk_fraction = max_probe_risk_fraction if probe_phase else 1.0
+        qty = self._compute_qty(entry, risk_fraction=risk_fraction)
         atr = self._atr(candles, period=14)
         entry_candle = candles[-1]
         entry_body_atr_ratio = 0.0
@@ -653,6 +672,10 @@ class HyperliquidFuturesPaperTrack:
             'spread_pct': round2(float(tick.get('spread_pct', 0))),
             'regime_confidence': round2(float(regime.get('confidence', 0))),
             'reason': f"Controlled futures proposal from {regime.get('regime')} regime.",
+            'probe_phase': probe_phase,
+            'probe_risk_fraction': round2(risk_fraction),
+            'actionable_confidence_min': round2(actionable_conf_min),
+            'min_regime_strength_for_probe_entries': round2(min_probe_strength),
         }
 
     def _load_news_context(self) -> dict[str, Any]:
@@ -732,6 +755,16 @@ class HyperliquidFuturesPaperTrack:
                 high_conf_5x = True
                 stepup_block_reason = 'passed_all_gates'
         lev_cap = 5.0 if strategy_key == 'hl_15m_trend_follow_conflev_v1' else max_leverage_cap
+
+        probe_phase = bool(proposal.get('probe_phase', False))
+        probe_lev_cap = float(strategy_cfg.get('leverage_cap_during_probe_phase', 3.0) or 3.0)
+        escalation_gate_enabled = bool(strategy_cfg.get('leverage_escalation_gate_enabled', False))
+
+        if probe_phase:
+            lev_cap = min(lev_cap, probe_lev_cap)
+        elif not escalation_gate_enabled and strategy_key == 'hl_15m_trend_follow_momo_gate_v1':
+            lev_cap = min(lev_cap, probe_lev_cap)
+
         lev_target = 5.0 if high_conf_5x else self._adaptive_leverage(strategy_key, proposal, strategy_cfg, lev_cap)
         lev = min(max(1.0, float(lev_target)), lev_cap)
         entry = float(proposal['entry_price'])

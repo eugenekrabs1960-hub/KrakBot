@@ -96,6 +96,12 @@ EDITABLE_HL_EXPERIMENT_FIELDS = {
     "max_total_exposure_usd",
     "max_position_notional_usd",
     "leverage_target",
+    "actionable_confidence_min",
+    "neutral_regime_participation_allow",
+    "min_regime_strength_for_probe_entries",
+    "max_probe_risk_fraction",
+    "leverage_cap_during_probe_phase",
+    "leverage_escalation_gate_enabled",
 }
 
 PRIMARY_KRAKEN_MODE_KEYS = [

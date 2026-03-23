@@ -23,6 +23,16 @@ HYPERLIQUID_LEARNER_MODE = "hl_15m_trend_follow_momo_gate_v1"
 ALLOWED_KRAKEN_MODES = {KRAKEN_LEARNER_MODE}
 ALLOWED_HL_MODES = {HYPERLIQUID_LEARNER_MODE}
 
+HL_REGIME_ACTIONABILITY_FAMILY = "hl_regime_actionability_limit_test_v1"
+HL_REGIME_ACTIONABILITY_PARAMS = [
+    "actionable_confidence_min",
+    "neutral_regime_participation_allow",
+    "min_regime_strength_for_probe_entries",
+    "max_probe_risk_fraction",
+    "leverage_cap_during_probe_phase",
+    "leverage_escalation_gate_enabled",
+]
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -102,19 +112,23 @@ def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
     wait_reasons: dict[str, int] = {}
     waits = 0
     actionable = 0
+    non_actionable_waits = 0
     for r in hist:
         d = (r.get("decision") or r)
         st = d.get("status")
+        reason = str(d.get("reason") or "")
         if st == "WAIT":
             waits += 1
-            rs = str(d.get("reason") or "")
-            wait_reasons[rs] = wait_reasons.get(rs, 0) + 1
+            wait_reasons[reason] = wait_reasons.get(reason, 0) + 1
+            if "regime not actionable" in reason.lower():
+                non_actionable_waits += 1
         elif st in {"PROPOSE_TRADE", "PAPER_TRADE_OPEN"}:
             actionable += 1
 
     dominant_reason = max(wait_reasons.items(), key=lambda x: x[1])[0] if wait_reasons else latest_reason
     wait_ratio = (waits / max(1, len(hist))) if hist else 0.0
     action_ratio = (actionable / max(1, len(hist))) if hist else 0.0
+    non_actionable_wait_ratio = (non_actionable_waits / max(1, len(hist))) if hist else 0.0
 
     if sample < 20:
         keep_discard = "inconclusive"
@@ -138,7 +152,198 @@ def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
         "dominant_wait_reason": dominant_reason,
         "wait_ratio": round(wait_ratio, 4),
         "action_ratio": round(action_ratio, 4),
+        "non_actionable_wait_ratio": round(non_actionable_wait_ratio, 4),
     }
+
+
+def _default_limit_test_config() -> dict[str, Any]:
+    return {
+        "family": HL_REGIME_ACTIONABILITY_FAMILY,
+        "enabled": True,
+        "phase": "phase_1_probe_only",
+        "phase_1_min_observation_runs": 3,
+        "same_blocker_rotate_after": 3,
+        "goals": [
+            "unblock_regime_actionability",
+            "reduce_wait_from_non_actionable_regime",
+            "validate_probe_phase_before_escalation",
+        ],
+        "thresholds": {
+            "min_non_actionable_wait_ratio_improvement": 0.10,
+            "min_actionable_ratio_improvement": 0.08,
+            "max_expectancy_net_drop": 0.03,
+            "max_fee_drag_pct_increase": 20.0,
+            "max_blocker_persistence_delta": 0,
+        },
+        "rollback": {
+            "expectancy_net_drop": 0.05,
+            "fee_drag_pct_increase": 30.0,
+            "non_actionable_wait_ratio_regression": 0.07,
+            "actionable_ratio_drop": 0.05,
+        },
+        "bounds": {
+            "actionable_confidence_min": {"min": 0.45, "max": 0.70, "step": 0.03, "default": 0.58},
+            "neutral_regime_participation_allow": {"default": False},
+            "min_regime_strength_for_probe_entries": {"min": 0.35, "max": 0.65, "step": 0.05, "default": 0.50},
+            "max_probe_risk_fraction": {"min": 0.20, "max": 0.60, "step": 0.10, "default": 0.35},
+            "leverage_cap_during_probe_phase": {"min": 1.5, "max": 4.0, "step": 0.5, "default": 3.0},
+            "leverage_escalation_gate_enabled": {"default": False},
+        },
+    }
+
+
+def _limit_test_config(surface: dict[str, Any]) -> dict[str, Any]:
+    cfg = _default_limit_test_config()
+    user = surface.get("autonomy_config", {}).get("hyperliquid_limit_test", {}) if isinstance(surface, dict) else {}
+    if not isinstance(user, dict):
+        return cfg
+
+    merged = dict(cfg)
+    merged.update({k: v for k, v in user.items() if k in {"enabled", "family", "phase", "phase_1_min_observation_runs", "same_blocker_rotate_after"}})
+
+    t = dict(cfg.get("thresholds", {}))
+    if isinstance(user.get("thresholds"), dict):
+        t.update(user.get("thresholds") or {})
+    merged["thresholds"] = t
+
+    rb = dict(cfg.get("rollback", {}))
+    if isinstance(user.get("rollback"), dict):
+        rb.update(user.get("rollback") or {})
+    merged["rollback"] = rb
+
+    b = dict(cfg.get("bounds", {}))
+    if isinstance(user.get("bounds"), dict):
+        for k, v in user.get("bounds", {}).items():
+            if isinstance(v, dict):
+                cur = dict(b.get(k, {}))
+                cur.update(v)
+                b[k] = cur
+    merged["bounds"] = b
+
+    goals = user.get("goals")
+    if isinstance(goals, list) and goals:
+        merged["goals"] = [str(g) for g in goals]
+
+    return merged
+
+
+def _load_recent_runs(limit: int = 200) -> list[dict[str, Any]]:
+    if not RUNS_FILE.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with RUNS_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                    if isinstance(r, dict):
+                        rows.append(r)
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return rows[-limit:]
+
+
+def _extract_family_memory(runs: list[dict[str, Any]], family: str, mode: str) -> dict[str, Any]:
+    tests = []
+    for r in runs:
+        m = r.get("mutation") or {}
+        if not isinstance(m, dict):
+            continue
+        if m.get("domain") != "hyperliquid" or m.get("mode") != mode:
+            continue
+        if str(m.get("limit_test_family") or "") != family:
+            continue
+        tests.append(r)
+
+    blocker = None
+    blocker_persist = 0
+    seen_deltas: set[str] = set()
+    for tr in reversed(tests):
+        mut = tr.get("mutation") or {}
+        sig = f"{mut.get('param')}:{mut.get('new')}"
+        seen_deltas.add(sig)
+        analysis = next((a for a in (tr.get("analyses") or []) if a.get("mode") == mode), None)
+        dom = str((analysis or {}).get("dominant_wait_reason") or "")
+        if blocker is None:
+            blocker = dom
+            blocker_persist = 1
+        elif dom == blocker and dom:
+            blocker_persist += 1
+        else:
+            break
+
+    return {
+        "tests_in_family": len(tests),
+        "same_blocker_persistence": blocker_persist,
+        "same_blocker_text": blocker or "",
+        "seen_deltas": sorted(seen_deltas),
+    }
+
+
+def _phase_metrics(runs: list[dict[str, Any]], mode: str, family: str) -> dict[str, Any]:
+    family_runs = [r for r in runs if str((r.get("mutation") or {}).get("limit_test_family") or "") == family]
+    mode_analyses = []
+    for r in family_runs:
+        a = next((x for x in (r.get("analyses") or []) if x.get("mode") == mode), None)
+        if a:
+            mode_analyses.append(a)
+    if not mode_analyses:
+        return {"obs": 0}
+
+    first = mode_analyses[0]
+    last = mode_analyses[-1]
+    return {
+        "obs": len(mode_analyses),
+        "non_actionable_wait_ratio_improvement": round(float(first.get("non_actionable_wait_ratio", 0.0)) - float(last.get("non_actionable_wait_ratio", 0.0)), 4),
+        "actionable_ratio_improvement": round(float(last.get("action_ratio", 0.0)) - float(first.get("action_ratio", 0.0)), 4),
+        "expectancy_net_delta": round(float(last.get("expectancy_net", 0.0)) - float(first.get("expectancy_net", 0.0)), 4),
+        "fee_drag_pct_delta": round(float(last.get("fee_drag_pct", 0.0)) - float(first.get("fee_drag_pct", 0.0)), 4),
+    }
+
+
+def _passes_escalation(metrics: dict[str, Any], cfg: dict[str, Any]) -> bool:
+    if int(metrics.get("obs", 0) or 0) < int(cfg.get("phase_1_min_observation_runs", 3) or 3):
+        return False
+    th = cfg.get("thresholds", {}) if isinstance(cfg.get("thresholds"), dict) else {}
+    return (
+        float(metrics.get("non_actionable_wait_ratio_improvement", 0.0)) >= float(th.get("min_non_actionable_wait_ratio_improvement", 0.10))
+        and float(metrics.get("actionable_ratio_improvement", 0.0)) >= float(th.get("min_actionable_ratio_improvement", 0.08))
+        and float(metrics.get("expectancy_net_delta", 0.0)) >= -float(th.get("max_expectancy_net_drop", 0.03))
+        and float(metrics.get("fee_drag_pct_delta", 0.0)) <= float(th.get("max_fee_drag_pct_increase", 20.0))
+    )
+
+
+def _needs_rollback(metrics: dict[str, Any], cfg: dict[str, Any]) -> bool:
+    rb = cfg.get("rollback", {}) if isinstance(cfg.get("rollback"), dict) else {}
+    return (
+        float(metrics.get("expectancy_net_delta", 0.0)) < -float(rb.get("expectancy_net_drop", 0.05))
+        or float(metrics.get("fee_drag_pct_delta", 0.0)) > float(rb.get("fee_drag_pct_increase", 30.0))
+        or float(metrics.get("non_actionable_wait_ratio_improvement", 0.0)) < -float(rb.get("non_actionable_wait_ratio_regression", 0.07))
+        or float(metrics.get("actionable_ratio_improvement", 0.0)) < -float(rb.get("actionable_ratio_drop", 0.05))
+    )
+
+
+def _choose_goal(cfg: dict[str, Any], phase: str) -> str:
+    goals = [str(g) for g in (cfg.get("goals") or [])]
+    if phase == "phase_1_probe_only" and "validate_probe_phase_before_escalation" in goals:
+        return "validate_probe_phase_before_escalation"
+    if "reduce_wait_from_non_actionable_regime" in goals:
+        return "reduce_wait_from_non_actionable_regime"
+    return goals[0] if goals else "unblock_regime_actionability"
+
+
+def _bounded_step(current: float, spec: dict[str, Any], direction: str = "down") -> float:
+    lo = float(spec.get("min", current))
+    hi = float(spec.get("max", current))
+    step = float(spec.get("step", 0.01) or 0.01)
+    if direction == "down":
+        return round(max(lo, current - step), 4)
+    return round(min(hi, current + step), 4)
 
 
 def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], news_context: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -179,68 +384,119 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
         mode = target["mode"]
         s = surface.setdefault("hyperliquid_overrides", {}).setdefault(mode, {})
 
-        dom_reason = str(target.get("dominant_wait_reason") or "")
-        wait_ratio = float(target.get("wait_ratio", 0.0) or 0.0)
-
-        # Self-healing for cap-bound dead-end: open one extra slot (bounded).
-        if "max positions reached" in dom_reason.lower() and wait_ratio >= 0.4:
-            old_mp = int(s.get("max_positions", 2) or 2)
-            new_mp = min(4, old_mp + 1)
-            if new_mp != old_mp:
-                return {
-                    "domain": "hyperliquid",
-                    "mode": mode,
-                    "param": "max_positions",
-                    "old": old_mp,
-                    "new": new_mp,
-                    "reason": "cap-bound self-healing mutation",
-                    "context_note": "dead_end_unblock_max_positions",
-                    "mutation_mode": "limit_test",
-                    "limit_test_goal": "exposure_capacity_probe",
-                }
-
-        # Self-healing for low-action no-entry dead-end: loosen momentum gate.
-        current_gate = float(s.get("momentum_gate_min_atr_body", 0.18))
-        no_entry_dead_end = "not actionable" in dom_reason.lower() and wait_ratio >= 0.85 and float(target.get("action_ratio", 0.0) or 0.0) <= 0.05
-
-        # Strong bottleneck-aware skip: avoid repeating same entry-frequency limit-test when already loosened.
-        if no_entry_dead_end and current_gate <= 0.10:
+        cfg = _limit_test_config(surface)
+        if not bool(cfg.get("enabled", True)):
             return None
 
-        if no_entry_dead_end:
-            gate_step = 0.03  # explicit bounded limit-test step
-        else:
-            gate_step = 0.01 if cautious else 0.03
-        new_gate = round(max(0.08, current_gate - gate_step), 2)
-        if new_gate != current_gate:
-            delta = round(current_gate - new_gate, 4)
-            is_limit = delta >= 0.03
-            return {
-                "domain": "hyperliquid",
-                "mode": mode,
-                "param": "momentum_gate_min_atr_body",
-                "old": current_gate,
-                "new": new_gate,
-                "reason": "small-step exploration under fixed evaluator",
-                "context_note": "news_cautious_step" if cautious else "news_normal_step",
-                "mutation_mode": "limit_test" if is_limit else "normal_adaptive",
-                "limit_test_goal": "unblock_entry_frequency" if is_limit else None,
-            }
+        recent = _load_recent_runs(limit=250)
+        fam_memory = _extract_family_memory(recent, HL_REGIME_ACTIONABILITY_FAMILY, mode)
+        phase_metrics = _phase_metrics(recent, mode, HL_REGIME_ACTIONABILITY_FAMILY)
 
-        # If gate already low, try leverage-ceiling exploration (bounded).
-        old_lev = float(s.get("max_leverage", 6.0) or 6.0)
-        new_lev = min(10.0, round(old_lev + 1.0, 1))
-        if new_lev != old_lev:
+        phase = str(cfg.get("phase", "phase_1_probe_only"))
+        if phase == "phase_1_probe_only" and _passes_escalation(phase_metrics, cfg):
+            phase = "phase_2_escalation"
+        elif phase == "phase_2_escalation" and _needs_rollback(phase_metrics, cfg):
+            phase = "phase_3_rollback"
+
+        dom_reason = str(target.get("dominant_wait_reason") or "")
+        non_actionable_wait_ratio = float(target.get("non_actionable_wait_ratio", 0.0) or 0.0)
+        if "regime not actionable" not in dom_reason.lower() and non_actionable_wait_ratio < 0.40:
+            return None
+
+        seen_deltas = set(fam_memory.get("seen_deltas", []))
+        rotate_after = int(cfg.get("same_blocker_rotate_after", 3) or 3)
+        blocker_persist = int(fam_memory.get("same_blocker_persistence", 0) or 0)
+        rotate_family_hypothesis = blocker_persist >= rotate_after
+
+        bounds = cfg.get("bounds", {}) if isinstance(cfg.get("bounds"), dict) else {}
+        goal = _choose_goal(cfg, phase)
+
+        candidate_mutations: list[dict[str, Any]] = []
+
+        if phase == "phase_3_rollback":
+            old = bool(s.get("neutral_regime_participation_allow", bounds.get("neutral_regime_participation_allow", {}).get("default", False)))
+            if old:
+                candidate_mutations.append({"param": "neutral_regime_participation_allow", "old": old, "new": False, "reason": "rollback: disable neutral probe participation"})
+            old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
+            new = _bounded_step(old, bounds.get("max_probe_risk_fraction", {}), direction="down")
+            if new != old:
+                candidate_mutations.append({"param": "max_probe_risk_fraction", "old": old, "new": new, "reason": "rollback: reduce probe risk fraction"})
+            old = float(s.get("leverage_cap_during_probe_phase", bounds.get("leverage_cap_during_probe_phase", {}).get("default", 3.0)) or 3.0)
+            new = _bounded_step(old, bounds.get("leverage_cap_during_probe_phase", {}), direction="down")
+            if new != old:
+                candidate_mutations.append({"param": "leverage_cap_during_probe_phase", "old": old, "new": new, "reason": "rollback: lower probe leverage cap"})
+            old = bool(s.get("leverage_escalation_gate_enabled", bounds.get("leverage_escalation_gate_enabled", {}).get("default", False)))
+            if old:
+                candidate_mutations.append({"param": "leverage_escalation_gate_enabled", "old": old, "new": False, "reason": "rollback: disable leverage escalation gate"})
+        elif phase == "phase_2_escalation":
+            old = bool(s.get("leverage_escalation_gate_enabled", bounds.get("leverage_escalation_gate_enabled", {}).get("default", False)))
+            if not old:
+                candidate_mutations.append({"param": "leverage_escalation_gate_enabled", "old": old, "new": True, "reason": "phase-2 escalation: enable leverage escalation gate"})
+            old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
+            new = _bounded_step(old, bounds.get("max_probe_risk_fraction", {}), direction="up")
+            if new != old:
+                candidate_mutations.append({"param": "max_probe_risk_fraction", "old": old, "new": new, "reason": "phase-2 escalation: controlled probe risk increase"})
+            old = float(s.get("leverage_cap_during_probe_phase", bounds.get("leverage_cap_during_probe_phase", {}).get("default", 3.0)) or 3.0)
+            new = _bounded_step(old, bounds.get("leverage_cap_during_probe_phase", {}), direction="up")
+            if new != old:
+                candidate_mutations.append({"param": "leverage_cap_during_probe_phase", "old": old, "new": new, "reason": "phase-2 escalation: controlled probe leverage cap increase"})
+        else:
+            old = float(s.get("actionable_confidence_min", bounds.get("actionable_confidence_min", {}).get("default", 0.58)) or 0.58)
+            new = _bounded_step(old, bounds.get("actionable_confidence_min", {}), direction="down")
+            if new != old:
+                candidate_mutations.append({"param": "actionable_confidence_min", "old": old, "new": new, "reason": "phase-1 probe: lower actionable confidence threshold"})
+
+            old = bool(s.get("neutral_regime_participation_allow", bounds.get("neutral_regime_participation_allow", {}).get("default", False)))
+            if not old:
+                candidate_mutations.append({"param": "neutral_regime_participation_allow", "old": old, "new": True, "reason": "phase-1 probe: allow neutral regime participation"})
+
+            old = float(s.get("min_regime_strength_for_probe_entries", bounds.get("min_regime_strength_for_probe_entries", {}).get("default", 0.50)) or 0.50)
+            new = _bounded_step(old, bounds.get("min_regime_strength_for_probe_entries", {}), direction="down")
+            if new != old:
+                candidate_mutations.append({"param": "min_regime_strength_for_probe_entries", "old": old, "new": new, "reason": "phase-1 probe: lower minimum regime strength for probe entries"})
+
+            old = float(s.get("max_probe_risk_fraction", bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)) or 0.35)
+            if old > float(bounds.get("max_probe_risk_fraction", {}).get("default", 0.35)):
+                new = _bounded_step(old, bounds.get("max_probe_risk_fraction", {}), direction="down")
+                if new != old:
+                    candidate_mutations.append({"param": "max_probe_risk_fraction", "old": old, "new": new, "reason": "phase-1 probe: keep risk bounded"})
+
+            old = float(s.get("leverage_cap_during_probe_phase", bounds.get("leverage_cap_during_probe_phase", {}).get("default", 3.0)) or 3.0)
+            if old > float(bounds.get("leverage_cap_during_probe_phase", {}).get("default", 3.0)):
+                new = _bounded_step(old, bounds.get("leverage_cap_during_probe_phase", {}), direction="down")
+                if new != old:
+                    candidate_mutations.append({"param": "leverage_cap_during_probe_phase", "old": old, "new": new, "reason": "phase-1 probe: keep leverage cap bounded"})
+
+            old = bool(s.get("leverage_escalation_gate_enabled", bounds.get("leverage_escalation_gate_enabled", {}).get("default", False)))
+            if old:
+                candidate_mutations.append({"param": "leverage_escalation_gate_enabled", "old": old, "new": False, "reason": "phase-1 probe: disable leverage escalation"})
+
+        if rotate_family_hypothesis:
+            candidate_mutations.sort(key=lambda x: 0 if x.get("param") in {"neutral_regime_participation_allow", "min_regime_strength_for_probe_entries"} else 1)
+
+        for cm in candidate_mutations:
+            sig = f"{cm.get('param')}:{cm.get('new')}"
+            if sig in seen_deltas:
+                continue
             return {
                 "domain": "hyperliquid",
                 "mode": mode,
-                "param": "max_leverage",
-                "old": old_lev,
-                "new": new_lev,
-                "reason": "bounded leverage exploration for learner",
-                "context_note": "aggressive_hl_priority",
+                "param": cm["param"],
+                "old": cm["old"],
+                "new": cm["new"],
+                "reason": cm["reason"],
+                "context_note": "regime_actionability_limit_test",
                 "mutation_mode": "limit_test",
-                "limit_test_goal": "discover_leverage_breakpoint",
+                "limit_test_goal": goal,
+                "limit_test_family": HL_REGIME_ACTIONABILITY_FAMILY,
+                "limit_test_phase": phase,
+                "anti_dead_end": {
+                    "same_blocker_persistence": blocker_persist,
+                    "rotate_after": rotate_after,
+                    "rotated_hypothesis": rotate_family_hypothesis,
+                    "blocked_reason": fam_memory.get("same_blocker_text", ""),
+                },
+                "phase_metrics": phase_metrics,
             }
 
         return None
@@ -258,7 +514,7 @@ def apply_mutation(surface: dict[str, Any], mutation: dict[str, Any]) -> None:
 
 
 def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
-    surface = load_json(SURFACE_FILE, {"version": 1, "kraken_overrides": {}})
+    surface = load_json(SURFACE_FILE, {"version": 1, "kraken_overrides": {}, "hyperliquid_overrides": {}})
     kr, hl, news = fetch_state(api_base)
 
     analyses = []
@@ -305,6 +561,7 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
             "summary": news.get("summary"),
             "why_it_matters": news.get("why_it_matters"),
         },
+        "limit_test_policy": _limit_test_config(surface),
     }
     append_run(result)
     return result
