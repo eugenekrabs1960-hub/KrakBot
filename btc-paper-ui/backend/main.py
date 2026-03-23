@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from hyperliquid_paper import HyperliquidFuturesPaperTrack
 from news_context import build_news_context
-from research.autonomy_controller import autonomy_tick, load_state as load_autonomy_state
+from research.autonomy_controller import autonomy_tick, load_state as load_autonomy_state, record_manual_apply
 
 app = FastAPI(title="BTC Paper Backend")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -485,6 +485,7 @@ def run_experiment_cycle_once(apply: bool = False) -> dict[str, Any]:
         result = run_cycle(api_base="http://127.0.0.1:8000", apply=apply)
         if apply:
             apply_experiment_surface_overrides()
+            record_manual_apply(result)
         return {"ok": True, "result": result}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}

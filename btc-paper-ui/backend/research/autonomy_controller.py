@@ -96,6 +96,31 @@ def _reset_daily_if_needed(st: dict[str, Any]) -> None:
         st["limit_testing"] = lt
 
 
+def record_manual_apply(result: dict[str, Any]) -> dict[str, Any]:
+    """Record counters for externally-triggered apply runs so autonomy accounting stays correct."""
+    st = load_state()
+    _reset_daily_if_needed(st)
+
+    if not (isinstance(result, dict) and result.get("apply") and result.get("applied")):
+        save_state(st)
+        return st
+
+    st["last_apply"] = result.get("ts") or now_iso()
+    st["daily_apply_count"] = int(st.get("daily_apply_count", 0) or 0) + 1
+
+    mut = result.get("mutation") or {}
+    if str(mut.get("mutation_mode") or "") == "limit_test":
+        lt = st.get("limit_testing") if isinstance(st.get("limit_testing"), dict) else {}
+        lt.setdefault("enabled", True)
+        lt.setdefault("daily_limit_test_budget", 1)
+        lt["daily_limit_test_count"] = int(lt.get("daily_limit_test_count", 0) or 0) + 1
+        lt["last_limit_test_ts"] = result.get("ts") or now_iso()
+        st["limit_testing"] = lt
+
+    save_state(st)
+    return st
+
+
 def _bottleneck_block(result: dict[str, Any]) -> str | None:
     analyses = result.get("analyses") or []
     mutation = result.get("mutation") or {}
