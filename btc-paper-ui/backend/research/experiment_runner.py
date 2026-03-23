@@ -201,7 +201,11 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], ne
 
         # Self-healing for low-action no-entry dead-end: loosen momentum gate.
         current_gate = float(s.get("momentum_gate_min_atr_body", 0.18))
-        gate_step = 0.01 if cautious else 0.03
+        no_entry_dead_end = "not actionable" in dom_reason.lower() and wait_ratio >= 0.85 and float(target.get("action_ratio", 0.0) or 0.0) <= 0.05
+        if no_entry_dead_end:
+            gate_step = 0.03  # explicit bounded limit-test step
+        else:
+            gate_step = 0.01 if cautious else 0.03
         new_gate = round(max(0.08, current_gate - gate_step), 2)
         if new_gate != current_gate:
             delta = round(current_gate - new_gate, 4)
