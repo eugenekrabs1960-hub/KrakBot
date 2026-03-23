@@ -37,6 +37,8 @@ NEGATIVE = [
 ]
 RISK_HIGH = ["hack", "exploit", "ban", "crackdown", "war", "default", "liquidation", "sanction", "emergency"]
 TARGET = re.compile(r"\b(bitcoin|btc|ethereum|eth|crypto|digital asset)\b", re.IGNORECASE)
+BTC_RE = re.compile(r"\b(bitcoin|btc)\b", re.IGNORECASE)
+ETH_RE = re.compile(r"\b(ethereum|eth)\b", re.IGNORECASE)
 
 
 def now_iso() -> str:
@@ -72,19 +74,20 @@ def parse_items(xml_text: str, source: NewsSource) -> list[dict[str, Any]]:
             "link": link,
             "score": score,
             "risk_boost": risk_boost,
+            "btc_hit": bool(BTC_RE.search(text)),
+            "eth_hit": bool(ETH_RE.search(text)),
         })
     return out
 
 
-def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
+def _aggregate_slice(items: list[dict[str, Any]], label: str) -> dict[str, Any]:
     if not items:
         return {
             "news_risk": "low",
             "news_bias": "neutral",
             "source_confidence": "low",
-            "summary": "No high-signal BTC/ETH headlines detected from configured sources.",
-            "why_it_matters": "No confirmed macro/regulatory catalyst currently detected in this pass.",
-            "items": [],
+            "summary": f"No high-signal {label} headlines detected.",
+            "why_it_matters": f"No confirmed {label} catalyst currently detected in this pass.",
         }
 
     weighted = sum(i["score"] * i["weight"] for i in items)
@@ -115,7 +118,7 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
         conf = "low"
 
     top = sorted(items, key=lambda x: abs(x["score"]) * x["weight"] + x["risk_boost"], reverse=True)[:3]
-    summary = "; ".join(i["title"] for i in top if i.get("title"))[:480] or "Mixed BTC/ETH headlines."
+    summary = "; ".join(i["title"] for i in top if i.get("title"))[:320] or f"Mixed {label} headlines."
     why = f"Bias={bias}, risk={risk}, confidence={conf}, based on {len(items)} relevant headlines across {len(tiers)} source tiers."
 
     return {
@@ -124,6 +127,23 @@ def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
         "source_confidence": conf,
         "summary": summary,
         "why_it_matters": why,
+    }
+
+
+def aggregate(items: list[dict[str, Any]]) -> dict[str, Any]:
+    overall = _aggregate_slice(items, "BTC/ETH")
+    btc_items = [i for i in items if i.get("btc_hit")]
+    eth_items = [i for i in items if i.get("eth_hit")]
+    btc = _aggregate_slice(btc_items, "BTC")
+    eth = _aggregate_slice(eth_items, "ETH")
+
+    top = sorted(items, key=lambda x: abs(x["score"]) * x["weight"] + x["risk_boost"], reverse=True)[:3]
+    return {
+        **overall,
+        "btc": {k: btc[k] for k in ["news_risk", "news_bias", "source_confidence"]},
+        "eth": {k: eth[k] for k in ["news_risk", "news_bias", "source_confidence"]},
+        "summary": overall["summary"],
+        "why_it_matters": overall["why_it_matters"],
         "items": top,
     }
 

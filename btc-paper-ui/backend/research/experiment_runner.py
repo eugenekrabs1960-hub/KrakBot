@@ -115,18 +115,25 @@ def classify_hl_mode(mode_key: str, hl_state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]]) -> dict[str, Any] | None:
+def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]], news_context: dict[str, Any] | None = None) -> dict[str, Any] | None:
     candidates = [a for a in analyses if a["keep_discard"] in {"inconclusive", "probation", "discard_watch"}]
     if not candidates:
         return None
-    candidates.sort(key=lambda x: (x["sample_size"], x["expectancy_net"]))
+    priority = {"discard_watch": 0, "probation": 1, "inconclusive": 2}
+    candidates.sort(key=lambda x: (priority.get(x["keep_discard"], 9), x["sample_size"], x["expectancy_net"]))
     target = candidates[0]
+
+    news_context = news_context or {}
+    risk = str(news_context.get("news_risk", "low"))
+    conf = str(news_context.get("source_confidence", "low"))
+    cautious = risk == "high" or (risk == "medium" and conf in {"medium", "high"})
 
     if target["domain"] == "kraken" and target["mode"] in ALLOWED_KRAKEN_MODES:
         mode = target["mode"]
         s = surface.setdefault("kraken_overrides", {}).setdefault(mode, {})
         current_rr = float(s.get("rr_min", 1.5))
-        new_rr = round(max(1.20, current_rr - 0.05), 2)
+        rr_step = 0.02 if cautious else 0.05
+        new_rr = round(max(1.20, current_rr - rr_step), 2)
         if new_rr == current_rr:
             return None
         return {
@@ -136,13 +143,15 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]]) ->
             "old": current_rr,
             "new": new_rr,
             "reason": "small-step exploration under fixed evaluator",
+            "context_note": "news_cautious_step" if cautious else "news_normal_step",
         }
 
     if target["domain"] == "hyperliquid" and target["mode"] in ALLOWED_HL_MODES:
         mode = target["mode"]
         s = surface.setdefault("hyperliquid_overrides", {}).setdefault(mode, {})
         current_gate = float(s.get("momentum_gate_min_atr_body", 0.18))
-        new_gate = round(max(0.10, current_gate - 0.02), 2)
+        gate_step = 0.01 if cautious else 0.02
+        new_gate = round(max(0.10, current_gate - gate_step), 2)
         if new_gate == current_gate:
             return None
         return {
@@ -152,6 +161,7 @@ def propose_mutation(surface: dict[str, Any], analyses: list[dict[str, Any]]) ->
             "old": current_gate,
             "new": new_gate,
             "reason": "small-step exploration under fixed evaluator",
+            "context_note": "news_cautious_step" if cautious else "news_normal_step",
         }
 
     return None
@@ -176,7 +186,7 @@ def run_cycle(api_base: str, apply: bool) -> dict[str, Any]:
         analyses.append(classify_kraken_mode(KRAKEN_LEARNER_MODE, kr_modes.get(KRAKEN_LEARNER_MODE) or {}))
     analyses.append(classify_hl_mode(HYPERLIQUID_LEARNER_MODE, hl))
 
-    mutation = propose_mutation(surface, analyses)
+    mutation = propose_mutation(surface, analyses, news_context=news)
     if apply and mutation:
         apply_mutation(surface, mutation)
         save_json(SURFACE_FILE, surface)

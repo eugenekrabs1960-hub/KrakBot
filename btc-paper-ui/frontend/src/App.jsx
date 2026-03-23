@@ -189,6 +189,33 @@ function RuntimePanel({ state }) {
   )
 }
 
+function NewsPanel({ news }) {
+  if (!news) return null
+  const btc = news.btc || {}
+  const eth = news.eth || {}
+  return (
+    <div className='panel' style={{ marginBottom: 12 }}>
+      <h3>News context (advisory)</h3>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:12 }}>
+        <div style={{ background:'var(--cardSoft)', padding:8, borderRadius:6, border:'1px solid var(--border)' }}>
+          <strong>BTC</strong>
+          <div>Risk: {btc.news_risk || '-'}</div>
+          <div>Bias: {btc.news_bias || '-'}</div>
+          <div>Confidence: {btc.source_confidence || '-'}</div>
+        </div>
+        <div style={{ background:'var(--cardSoft)', padding:8, borderRadius:6, border:'1px solid var(--border)' }}>
+          <strong>ETH</strong>
+          <div>Risk: {eth.news_risk || '-'}</div>
+          <div>Bias: {eth.news_bias || '-'}</div>
+          <div>Confidence: {eth.source_confidence || '-'}</div>
+        </div>
+      </div>
+      <div style={{ marginTop:8, fontSize:12 }}><strong>Summary:</strong> {news.summary || '-'}</div>
+      <div style={{ marginTop:4, fontSize:12 }}><strong>Why it matters:</strong> {news.why_it_matters || '-'}</div>
+    </div>
+  )
+}
+
 function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   if (!hstate) return null
   const latest = hstate.latest || {}
@@ -624,6 +651,7 @@ function ModePanel({ modeKey, m, onAck }) {
 export default function App() {
   const [state, setState] = useState(null)
   const [hyperState, setHyperState] = useState(null)
+  const [newsState, setNewsState] = useState(null)
   const [err, setErr] = useState('')
   const [theme, setTheme] = useState('dark')
 
@@ -632,6 +660,7 @@ export default function App() {
       const s = await fetch(`${API}/api/state`).then(r => r.json())
       const h = await fetch(`${API}/api/history`).then(r => r.json())
       const hs = await fetch(`${API}/api/hyperliquid/state`).then(r => r.json())
+      const ns = await fetch(`${API}/api/news/context`).then(r => r.json())
       if (h?.history && typeof h.history === 'object') {
         for (const k of Object.keys(h.history)) {
           if (s?.modes?.[k]) s.modes[k].history = h.history[k]
@@ -639,6 +668,7 @@ export default function App() {
       }
       setState(s)
       setHyperState(hs)
+      setNewsState(ns)
       setErr('')
     } catch (e) {
       setErr('Failed to load state')
@@ -747,6 +777,7 @@ export default function App() {
       </div>
       {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
       <RuntimePanel state={state} />
+      <NewsPanel news={newsState} />
       <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
         <div>
           <div className='panel' style={{ marginBottom: 8 }}><strong>Kraken Track</strong> <span className='badge'>baseline + autonomous learner</span></div>
