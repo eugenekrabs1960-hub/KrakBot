@@ -1,12 +1,130 @@
-body{font-family:Arial,sans-serif;margin:0}
-button{padding:8px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--panel);color:var(--text)}
-.wrap{padding:14px;min-height:100vh;background:var(--bg);color:var(--text)}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.badge{background:#1f6feb;color:#fff;padding:6px 10px;border-radius:999px;font-weight:700}
-.grid{display:grid;gap:12px}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;box-shadow:var(--shadow)}
-.rows th,.rows td{padding:4px 6px;border-bottom:1px solid var(--border);font-size:12px;text-align:left}
-.rows th{background:var(--cardSoft)}
+:root {
+  --bg: #070B14;
+  --surface: #0D1424;
+  --surface-raised: #121C31;
+  --border: #1E2A44;
+  --border-strong: #2A3A5F;
+  --text: #EAF1FF;
+  --text-secondary: #9FB0D1;
+  --text-muted: #6F7FA3;
+  --accent: #3B82F6;
+  --accent-alt: #22D3EE;
+  --success: #22C55E;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --badge-bg: #15213A;
+  --shadow-soft: 0 8px 24px rgba(2,8,23,0.35);
 
-.theme-dark{--bg:#0d1117;--text:#e6edf3;--panel:#161b22;--border:#30363d;--cardSoft:#0d1117;--danger:#f85149;--shadow:none}
-.theme-light{--bg:#f8fafc;--text:#0f172a;--panel:#ffffff;--border:#d0d7de;--cardSoft:#f1f5f9;--danger:#b91c1c;--shadow:0 1px 4px rgba(15,23,42,.08)}
+  /* legacy aliases for existing components */
+  --panel: var(--surface);
+  --cardSoft: var(--surface-raised);
+  --shadow: var(--shadow-soft);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(59,130,246,.18), rgba(59,130,246,.08));
+  color: var(--text);
+  transition: border-color .15s ease, transform .08s ease, background .2s ease;
+}
+button:hover { border-color: var(--accent); }
+button:active { transform: translateY(1px); }
+
+.wrap { padding: 14px; min-height: 100vh; background: var(--bg); color: var(--text); }
+.top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; }
+h2, h3 { color: var(--text); }
+p { color: var(--text-secondary); }
+
+.badge {
+  background: var(--badge-bg);
+  color: var(--accent-alt);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  border: 1px solid var(--border-strong);
+}
+
+.grid { display: grid; gap: 12px; }
+
+.panel {
+  background: linear-gradient(180deg, rgba(255,255,255,.01), rgba(255,255,255,0)) , var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: var(--shadow-soft);
+}
+
+.rows { border-collapse: collapse; }
+.rows th, .rows td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  text-align: left;
+}
+.rows th {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.rows td { color: var(--text); }
+.rows tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.01); }
+.rows tbody tr:hover td { background: rgba(59,130,246,0.08); }
+
+summary { color: var(--text-secondary); cursor: pointer; }
+
+.theme-dark {
+  --bg: #070B14;
+  --surface: #0D1424;
+  --surface-raised: #121C31;
+  --border: #1E2A44;
+  --border-strong: #2A3A5F;
+  --text: #EAF1FF;
+  --text-secondary: #9FB0D1;
+  --text-muted: #6F7FA3;
+  --accent: #3B82F6;
+  --accent-alt: #22D3EE;
+  --success: #22C55E;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --badge-bg: #15213A;
+  --shadow-soft: 0 8px 24px rgba(2,8,23,0.35);
+
+  --panel: var(--surface);
+  --cardSoft: var(--surface-raised);
+  --shadow: var(--shadow-soft);
+}
+
+/* keep theme toggle without changing layout behavior */
+.theme-light {
+  --bg: #f4f7fd;
+  --surface: #ffffff;
+  --surface-raised: #eef3ff;
+  --border: #d6deef;
+  --border-strong: #b5c3df;
+  --text: #0f172a;
+  --text-secondary: #3b4b6b;
+  --text-muted: #607091;
+  --accent: #2563eb;
+  --accent-alt: #0891b2;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --badge-bg: #e8eefc;
+  --shadow-soft: 0 6px 20px rgba(15,23,42,0.1);
+
+  --panel: var(--surface);
+  --cardSoft: var(--surface-raised);
+  --shadow: var(--shadow-soft);
+}

@@ -12,6 +12,12 @@ function SharedChart({ state, theme }) {
     ? state?.modes?.btc_15m_breakout_retest
     : state?.modes?.btc_15m_conservative
 
+  const cssVar = (name, fallback = '') => {
+    const root = document.querySelector('.wrap') || document.documentElement
+    const val = getComputedStyle(root).getPropertyValue(name).trim()
+    return val || fallback
+  }
+
   useEffect(() => {
     const candles = baseMode?.market_data?.[0]?.ohlcv || []
     if (!ref.current || candles.length === 0) {
@@ -22,19 +28,24 @@ function SharedChart({ state, theme }) {
     const container = ref.current
     container.innerHTML = ''
 
-    const isLight = theme === 'light'
-    const danger = isLight ? '#b91c1c' : '#f85149'
+    const danger = cssVar('--danger', '#EF4444')
+    const success = cssVar('--success', '#22C55E')
+    const accent = cssVar('--accent', '#3B82F6')
+    const accentAlt = cssVar('--accent-alt', '#22D3EE')
+    const chartText = cssVar('--text', '#EAF1FF')
+    const chartBg = cssVar('--surface', '#0D1424')
+    const chartGrid = cssVar('--border', '#1E2A44')
     try {
       const modeColors = {
-        btc_15m_conservative: { entry: '#2563eb', open: '#2563eb', close: '#1d4ed8', sl: '#dc2626', tp: '#16a34a' },
-        btc_15m_conservative_netedge_v1: { entry: '#0ea5e9', open: '#0ea5e9', close: '#0284c7', sl: '#dc2626', tp: '#16a34a' },
+        btc_15m_conservative: { entry: accent, open: accent, close: accentAlt, sl: danger, tp: success },
+        btc_15m_conservative_netedge_v1: { entry: accentAlt, open: accentAlt, close: accent, sl: danger, tp: success },
       }
 
       const chart = createChart(container, {
         width: container.clientWidth || 900,
         height: 320,
-        layout: { background: { color: isLight ? '#ffffff' : '#161b22' }, textColor: isLight ? '#111827' : '#e6edf3' },
-        grid: { vertLines: { color: isLight ? '#e5e7eb' : '#30363d' }, horzLines: { color: isLight ? '#e5e7eb' : '#30363d' } }
+        layout: { background: { color: chartBg }, textColor: chartText },
+        grid: { vertLines: { color: chartGrid }, horzLines: { color: chartGrid } }
       })
       const s = chart.addCandlestickSeries()
       s.setData(candles.map(c => ({
@@ -63,7 +74,7 @@ function SharedChart({ state, theme }) {
         const tr = m?.triggers
         if (tr) {
           s.createPriceLine({ price: tr.upper, color: danger, lineStyle: 4, lineWidth: 1, title: 'Upper trigger' })
-          s.createPriceLine({ price: tr.lower, color: '#2ea043', lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
+          s.createPriceLine({ price: tr.lower, color: success, lineStyle: 4, lineWidth: 1, title: 'Lower trigger' })
         }
       })
 
@@ -247,10 +258,10 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const totalFees = closedTrades.reduce((s, t) => s + Number(t.estimated_total_fees ?? t.total_fees ?? 0), 0) + positions.reduce((s, p) => s + Number(p.estimated_total_fees ?? 0), 0)
   const equity = PAPER_START_BALANCE + netPnl
 
-  const pnlColor = (v) => (Number(v) > 0 ? '#16a34a' : Number(v) < 0 ? '#dc2626' : 'inherit')
+  const pnlColor = (v) => (Number(v) > 0 ? 'var(--success)' : Number(v) < 0 ? 'var(--danger)' : 'inherit')
 
   return (
-    <div className='panel' style={{ marginBottom: 12, borderColor: '#7e22ce' }}>
+    <div className='panel' style={{ marginBottom: 12, borderColor: 'var(--border-strong)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={{ margin: 0 }}>Hyperliquid Futures Paper Track · {key}</h3>
         <span className='badge'>PAPER ONLY · NO LIVE EXECUTION</span>
@@ -460,7 +471,7 @@ function ModePanel({ modeKey, m, onAck }) {
     return acc
   }, {})
   const diagTop = Object.entries(diagCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-  const pnlColor = (v) => (Number(v) > 0 ? '#16a34a' : Number(v) < 0 ? '#dc2626' : 'inherit')
+  const pnlColor = (v) => (Number(v) > 0 ? 'var(--success)' : Number(v) < 0 ? 'var(--danger)' : 'inherit')
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
