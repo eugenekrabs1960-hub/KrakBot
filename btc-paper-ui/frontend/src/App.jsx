@@ -13,6 +13,22 @@ const PAGE_SUBTITLES = {
   'News / Logs': 'Advisory narrative and recent scan/lifecycle logs by exchange.',
 }
 
+const UI_MODE_NAME_MAP = {
+  btc_15m_conservative: { display: 'Kraken BTC 15m Baseline', badge: 'Frozen Reference' },
+  btc_15m_conservative_netedge_v1: { display: 'Kraken BTC 15m Net-Edge Learner', badge: 'Active Learner (Paper)' },
+  hl_15m_trend_follow: { display: 'Hyperliquid ETH Trend Reference', badge: 'Shadow Reference' },
+  hl_15m_trend_follow_momo_gate_v1: { display: 'Hyperliquid ETH Trend Learner (Momentum Gate)', badge: 'Active Learner (Paper)' },
+}
+
+function modeUiMeta(rawKey, backendLabel) {
+  const mapped = UI_MODE_NAME_MAP[rawKey] || {}
+  return {
+    displayName: mapped.display || backendLabel || rawKey || '-',
+    badge: mapped.badge || null,
+    rawKey: rawKey || '-',
+  }
+}
+
 function SharedChart({ state, theme, compact = false }) {
   const ref = useRef(null)
   const [chartError, setChartError] = useState('')
@@ -167,13 +183,17 @@ function ScoreboardTable({ rows }) {
         <table className='rows' style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Bot</th><th>Group</th><th>Status</th><th>Sample</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th>
+              <th>Bot</th><th>Badge</th><th>Group</th><th>Status</th><th>Sample</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td>{r.key}</td>
+                <td title={`Internal key: ${r.key}`}>
+                  <div>{r.displayName}</div>
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>{r.key}</div>
+                </td>
+                <td>{r.badge ? <span className='badge'>{r.badge}</span> : '-'}</td>
                 <td>{r.symbol === 'BTC/USD' ? 'Kraken' : 'Hyperliquid'}</td>
                 <td>{r.status}</td>
                 <td>{r.closed}</td>
@@ -248,12 +268,16 @@ function AlertStrip({ state, onAck }) {
     <div className='panel' style={{ marginBottom: 12, borderColor: 'var(--danger)' }}>
       <strong style={{ fontSize: 12 }}>Alerts</strong>
       <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-        {alerts.map((a) => (
-          <div key={a.mode} style={{ fontSize: 12 }}>
-            <strong style={{ color: 'var(--danger)' }}>{a.mode}:</strong> {a.msg}
-            <button style={{ marginLeft: 8 }} onClick={() => onAck(a.mode)}>Ack</button>
-          </div>
-        ))}
+        {alerts.map((a) => {
+          const meta = modeUiMeta(a.mode, state?.modes?.[a.mode]?.mode_label)
+          return (
+            <div key={a.mode} style={{ fontSize: 12 }} title={`Internal key: ${a.mode}`}>
+              <strong style={{ color: 'var(--danger)' }}>{meta.displayName}:</strong> {a.msg}
+              <span style={{ marginLeft: 6, opacity: 0.7 }}>({a.mode})</span>
+              <button style={{ marginLeft: 8 }} onClick={() => onAck(a.mode)}>Ack</button>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -267,6 +291,7 @@ function HyperliquidFocusCard({ hyperState, onJumpHyperliquid }) {
   const activeKey = hyperState?.active_strategy_key
   const activeKeys = hyperState?.active_strategy_keys || (activeKey ? [activeKey] : [])
   const focusKey = activeKeys[0] || activeKey || 'hl_15m_trend_follow'
+  const focusMeta = modeUiMeta(focusKey, (hyperState?.strategy_registry || {})[focusKey]?.label)
   const latest = hyperState?.latest || {}
   const latestByStrategy = (hyperState?.latest_by_strategy || {})[focusKey] || {}
   const decision = latestByStrategy?.decision?.status || latest?.decision?.status || 'SHADOW_TRACKING'
@@ -279,10 +304,10 @@ function HyperliquidFocusCard({ hyperState, onJumpHyperliquid }) {
     <div className='panel compact-focus' style={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <strong>Hyperliquid Focus</strong>
-        <span className='badge' style={{ fontSize: 11, padding: '4px 8px' }}>ACTIVE LEARNER</span>
+        <span className='badge' style={{ fontSize: 11, padding: '4px 8px' }}>{focusMeta.badge || 'ACTIVE LEARNER'}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 8, fontSize: 12 }}>
-        <div><strong>Learner</strong><div>{focusKey}</div></div>
+        <div title={`Internal key: ${focusMeta.rawKey}`}><strong>Learner</strong><div>{focusMeta.displayName}<div style={{ fontSize: 11, opacity: 0.7 }}>{focusMeta.rawKey}</div></div></div>
         <div><strong>Latest decision</strong><div>{decision}</div></div>
         <div><strong>Net PnL</strong><div style={{ color: pnlColor, fontWeight: 700 }}>{fmt2(netPnl)}</div></div>
         <div><strong>Open positions</strong><div>{openPositions}</div></div>
@@ -306,16 +331,18 @@ function HyperliquidResearchSnapshot({ hyperState }) {
             <tr><th>Strategy</th><th>Status</th><th>Closed sample</th><th>Expectancy (net)</th><th>Fee drag %</th><th>Net realized</th></tr>
           </thead>
           <tbody>
-            {strategies.map(([k, m]) => (
+            {strategies.map(([k, m]) => {
+              const meta = modeUiMeta(k, (hyperState?.strategy_registry || {})[k]?.label)
+              return (
               <tr key={k}>
-                <td>{k}</td>
+                <td title={`Internal key: ${k}`}><div>{meta.displayName}</div><div style={{ fontSize: 11, opacity: 0.7 }}>{k}</div></td>
                 <td>{(hyperState?.active_strategy_keys || []).includes(k) ? 'active' : prettyStatus((hyperState?.strategy_registry || {})[k]?.status || 'shadow')}</td>
                 <td>{m.sample_closed ?? 0}</td>
                 <td>{fmt2(m.expectancy_net ?? 0)}</td>
                 <td>{fmt2(m.fee_drag_pct ?? 0)}</td>
                 <td>{fmt2(m.net_realized_pnl ?? 0)}</td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </TableWrap>
@@ -327,6 +354,7 @@ function HyperliquidLogsPanel({ hyperState }) {
   if (!hyperState) return null
   const activeKey = hyperState?.active_strategy_key
   const strategyLatest = (hyperState?.latest_by_strategy || {})[activeKey] || {}
+  const activeMeta = modeUiMeta(activeKey, (hyperState?.strategy_registry || {})[activeKey]?.label)
   const positions = (hyperState?.positions || []).slice(-5).reverse()
   const closedTrades = (hyperState?.closed_trades || []).slice(-6).reverse()
 
@@ -334,7 +362,7 @@ function HyperliquidLogsPanel({ hyperState }) {
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3 style={{ marginTop: 0 }}>Hyperliquid logs (paper)</h3>
       <div style={{ fontSize: 12 }}>
-        <strong>Last scan:</strong> {fmtLA(hyperState?.latest?.timestamp)} | <strong>Strategy:</strong> {activeKey || '-'} | <strong>Decision:</strong> {strategyLatest?.decision?.status || hyperState?.latest?.decision?.status || 'SHADOW_TRACKING'}
+        <strong>Last scan:</strong> {fmtLA(hyperState?.latest?.timestamp)} | <strong>Strategy:</strong> <span title={`Internal key: ${activeMeta.rawKey}`}>{activeMeta.displayName}</span> <span style={{ opacity: 0.7 }}>({activeMeta.rawKey})</span> | <strong>Decision:</strong> {strategyLatest?.decision?.status || hyperState?.latest?.decision?.status || 'SHADOW_TRACKING'}
       </div>
       <details style={{ marginTop: 8 }}>
         <summary>Recent open position events ({positions.length})</summary>
@@ -367,6 +395,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   const activeStrategyKey = latest.active_strategy_key || hstate.active_strategy_key
   const activeStrategyKeys = latest.active_strategy_keys || hstate.active_strategy_keys || (activeStrategyKey ? [activeStrategyKey] : [])
   const key = strategyKey || activeStrategyKey
+  const keyMeta = modeUiMeta(key, (hstate.strategy_registry || {})[key]?.label)
   const strategyLatest = (hstate.latest_by_strategy || {})[key] || {}
   const regime = strategyLatest.regime || latest.regime || {}
   const strategyEntry = (hstate.strategy_registry || {})[key] || {}
@@ -392,7 +421,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   return (
     <div className='panel' style={{ marginBottom: 12, borderColor: 'var(--border-strong)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Hyperliquid Futures Paper Track · {key}</h3>
+        <h3 style={{ margin: 0 }} title={`Internal key: ${keyMeta.rawKey}`}>Hyperliquid Futures Paper Track · {keyMeta.displayName}</h3>
         <span className='badge'>PAPER ONLY · NO LIVE EXECUTION</span>
       </div>
       <div style={{ fontSize: 12, marginTop: 6 }}>
@@ -402,7 +431,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
         <strong>Market source:</strong> {latest.market_source || 'unknown'} | <strong>Candles loaded:</strong> {candleCount}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        <strong>Strategy:</strong> {key || '-'} {activeStrategyKeys.includes(key) ? '(active)' : '(shadow)'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {effectiveStatus}
+        <strong>Strategy:</strong> <span title={`Internal key: ${keyMeta.rawKey}`}>{keyMeta.displayName}</span> <span style={{ opacity: 0.7 }}>({keyMeta.rawKey})</span> {activeStrategyKeys.includes(key) ? '(active)' : '(shadow)'} | <strong>Badge:</strong> {keyMeta.badge || '-'} | <strong>Family:</strong> {strategyEntry.family || '-'} | <strong>Status:</strong> {effectiveStatus}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10, fontSize: 12 }}>
         <div><strong>Leverage (default)</strong><div>{hstate.leverage_default}x</div></div>
@@ -543,7 +572,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
                     <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
                     <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
                     <td>{t.close_reason || '-'}</td>
-                    <td>{t.strategy_key || hstate.active_strategy_key || '-'}</td>
+                    <td>{(() => { const raw = t.strategy_key || hstate.active_strategy_key || '-'; const meta = modeUiMeta(raw, (hstate.strategy_registry || {})[raw]?.label); return <span title={`Internal key: ${raw}`}>{meta.displayName}<span style={{ opacity: 0.7 }}> ({raw})</span></span> })()}</td>
                     <td>{t.regime_label || t.market_regime || latest?.regime?.regime || '-'}</td>
                   </tr>
                 )
@@ -560,6 +589,7 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
 
 function ModePanel({ modeKey, m, onAck, showEvaluation = true, showTradeDetails = true, showLogs = true }) {
   const d = m?.latest_decision || {}
+  const uiMeta = modeUiMeta(modeKey, m?.mode_label)
   const modeRole = modeKey === 'btc_15m_conservative' ? 'baseline/reference' : 'autonomous learner'
   const isBaselineMode = modeKey === 'btc_15m_conservative'
   const comparatorVerdict = m?.comparator_verdict || m?.comparison_vs_baseline?.verdict || '-'
@@ -595,8 +625,12 @@ function ModePanel({ modeKey, m, onAck, showEvaluation = true, showTradeDetails 
 
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
-      <h3>{m?.mode_label || modeKey}</h3>
-      <div style={{ fontSize: 12, opacity: .8, marginTop: -6, marginBottom: 6 }}>Role: <strong>{modeRole}</strong></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h3 title={`Internal key: ${uiMeta.rawKey}`} style={{ margin: 0 }}>{uiMeta.displayName}</h3>
+        {uiMeta.badge && <span className='badge'>{uiMeta.badge}</span>}
+      </div>
+      <div style={{ fontSize: 12, opacity: .7, marginTop: 4, marginBottom: 2 }}>Internal key: {uiMeta.rawKey}</div>
+      <div style={{ fontSize: 12, opacity: .8, marginTop: -2, marginBottom: 6 }}>Role: <strong>{modeRole}</strong></div>
       <div style={{ fontSize: 12, opacity: .85 }}>Timeframe: {m?.timeframe} | Last scan: {fmtLA(m?.latest_scan_time)}</div>
       {m?.notify_user && (
         <div style={{ marginTop: 8, border: '1px solid var(--danger)', padding: 8, borderRadius: 6 }}>
@@ -730,7 +764,7 @@ function ModePanel({ modeKey, m, onAck, showEvaluation = true, showTradeDetails 
                       <tr key={i}>
                         <td>BTC/USD</td><td>{t.side || '-'}</td><td>{fmtLA(t.open_time || t.entry_time)}</td><td>{fmtLA(t.close_time)}</td><td>{fmt2(Number(t.entry_fill_price ?? t.entry_price ?? 0))}</td><td>{fmt2(Number(t.close_fill_price ?? t.close_price ?? 0))}</td>
                         <td>{t.qty ?? '-'}</td><td>{fmt2(entryNotional)}</td><td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td><td>{fmt2(feesPaid)}</td><td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
-                        <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td><td>{t.close_reason || '-'}</td><td>{t.strategy_key || m?.mode || modeKey}</td><td>{t.regime_label || t.market_regime || m?.current_regime?.regime || '-'}</td>
+                        <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td><td>{t.close_reason || '-'}</td><td>{(() => { const raw = t.strategy_key || m?.mode || modeKey; const meta = modeUiMeta(raw, m?.mode_label); return <span title={`Internal key: ${raw}`}>{meta.displayName}<span style={{ opacity: 0.7 }}> ({raw})</span></span> })()}</td><td>{t.regime_label || t.market_regime || m?.current_regime?.regime || '-'}</td>
                       </tr>
                     )
                   })}
@@ -843,8 +877,11 @@ export default function App() {
     const expectancy = Number(m?.strategy_metrics?.expectancy ?? 0)
     const feeDrag = Number(m?.strategy_metrics?.fee_drag_pct ?? 0)
     const scoreMeta = scoreMetaForMode(m)
+    const uiMeta = modeUiMeta(k, m?.mode_label)
     rows.push({
       key: k,
+      displayName: uiMeta.displayName,
+      badge: uiMeta.badge,
       family: m?.strategy_registry_entry?.family || '-',
       symbol: 'BTC/USD',
       status: prettyStatus(m?.strategy_status),
@@ -875,8 +912,11 @@ export default function App() {
     const feeDrag = Number(hm.fee_drag_pct ?? 0)
     const score = 50 + (expectancy * 120) - (feeDrag * 0.2) + (best?.ex > 0 ? 8 : -8)
     const status = hActiveKeys.includes(sk) ? 'active' : prettyStatus(hRegistry?.[sk]?.status || 'shadow')
+    const uiMeta = modeUiMeta(sk, hRegistry?.[sk]?.label)
     rows.push({
       key: sk,
+      displayName: uiMeta.displayName,
+      badge: uiMeta.badge,
       family: hRegistry?.[sk]?.family || 'trend_follow',
       symbol: hyperState?.symbol || 'ETH-PERP',
       status,
