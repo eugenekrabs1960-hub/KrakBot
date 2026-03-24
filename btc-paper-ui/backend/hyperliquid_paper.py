@@ -773,11 +773,7 @@ class HyperliquidFuturesPaperTrack:
 
         probe_phase = bool(proposal.get('probe_phase', False))
         probe_lev_cap = float(strategy_cfg.get('leverage_cap_during_probe_phase', 3.0) or 3.0)
-        escalation_gate_enabled = bool(strategy_cfg.get('leverage_escalation_gate_enabled', False))
-
         if probe_phase:
-            lev_cap = min(lev_cap, probe_lev_cap)
-        elif not escalation_gate_enabled and strategy_key == 'hl_15m_trend_follow_momo_gate_v1':
             lev_cap = min(lev_cap, probe_lev_cap)
 
         lev_target = 5.0 if high_conf_5x else self._adaptive_leverage(strategy_key, proposal, strategy_cfg, lev_cap)
