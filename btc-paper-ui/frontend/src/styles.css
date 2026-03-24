@@ -95,6 +95,26 @@ p { color: var(--text-secondary); }
   box-shadow: var(--shadow-soft);
 }
 
+.page-head {
+  margin-bottom: 10px;
+}
+
+.page-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.table-wrap .rows {
+  min-width: 860px;
+}
+
 .rows { border-collapse: collapse; }
 .rows th, .rows td {
   padding: 6px 8px;
