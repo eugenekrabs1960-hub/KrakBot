@@ -4,8 +4,9 @@ import { createChart } from 'lightweight-charts'
 const API = window.location.origin.includes('5173') ? 'http://127.0.0.1:8000' : window.location.origin
 const MODE_ORDER = ['btc_15m_conservative', 'btc_15m_conservative_netedge_v1']
 const POLL_MS = 30000
+const PAGES = ['Overview', 'Hyperliquid', 'Kraken', 'Research', 'News / Logs']
 
-function SharedChart({ state, theme }) {
+function SharedChart({ state, theme, compact = false }) {
   const ref = useRef(null)
   const [chartError, setChartError] = useState('')
   const baseMode = state?.modes?.btc_15m_breakout_retest?.market_data?.[0]?.ohlcv?.length
@@ -43,7 +44,7 @@ function SharedChart({ state, theme }) {
 
       const chart = createChart(container, {
         width: container.clientWidth || 900,
-        height: 320,
+        height: compact ? 220 : 320,
         layout: { background: { color: chartBg }, textColor: chartText },
         grid: { vertLines: { color: chartGrid }, horzLines: { color: chartGrid } }
       })
@@ -94,7 +95,7 @@ function SharedChart({ state, theme }) {
     } catch (e) {
       setChartError('Chart render failed.')
     }
-  }, [state, baseMode, theme])
+  }, [state, baseMode, theme, compact])
 
   const bid = baseMode?.market_data?.[0]?.bid
   const ask = baseMode?.market_data?.[0]?.ask
@@ -104,7 +105,7 @@ function SharedChart({ state, theme }) {
       <div style={{ fontSize: 12, marginBottom: 6 }}>
         BTC live: <strong>{last ?? '-'}</strong> | Bid/Ask: {bid ?? '-'} / {ask ?? '-'}
       </div>
-      <div ref={ref} style={{ minHeight: 320, width: '100%' }} />
+      <div ref={ref} style={{ minHeight: compact ? 220 : 320, width: '100%' }} />
       {chartError && <div style={{ marginTop: 8, color: 'var(--danger)' }}>{chartError}</div>}
     </div>
   )
@@ -151,12 +152,6 @@ function strategyConfidence({ closed = 0, bestRegimeSample = 0, expectancy = 0, 
   return Math.round((sampleScore * 0.4 + regimeScore * 0.3 + stability * 0.3) * 100)
 }
 
-function confidenceLabel(c) {
-  if (c >= 70) return 'high'
-  if (c >= 40) return 'medium'
-  return 'low'
-}
-
 function ScoreboardTable({ rows }) {
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
@@ -200,13 +195,13 @@ function RuntimePanel({ state }) {
   )
 }
 
-function NewsPanel({ news }) {
+function NewsPanel({ news, compact = false }) {
   if (!news) return null
   const btc = news.btc || {}
   const eth = news.eth || {}
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
-      <h3>News context (advisory)</h3>
+      <h3>{compact ? 'News advisory (compact)' : 'News context (advisory)'}</h3>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:12 }}>
         <div style={{ background:'var(--cardSoft)', padding:8, borderRadius:6, border:'1px solid var(--border)' }}>
           <strong>BTC</strong>
@@ -222,7 +217,35 @@ function NewsPanel({ news }) {
         </div>
       </div>
       <div style={{ marginTop:8, fontSize:12 }}><strong>Summary:</strong> {news.summary || '-'}</div>
-      <div style={{ marginTop:4, fontSize:12 }}><strong>Why it matters:</strong> {news.why_it_matters || '-'}</div>
+      {!compact && <div style={{ marginTop:4, fontSize:12 }}><strong>Why it matters:</strong> {news.why_it_matters || '-'}</div>}
+    </div>
+  )
+}
+
+function AlertStrip({ state, onAck }) {
+  const alerts = MODE_ORDER
+    .map((k) => ({ mode: k, msg: state?.modes?.[k]?.notify_user?.message }))
+    .filter((x) => x.msg)
+
+  if (!alerts.length) {
+    return (
+      <div className='panel' style={{ marginBottom: 12, fontSize: 12 }}>
+        <strong>Alerts:</strong> no active alerts.
+      </div>
+    )
+  }
+
+  return (
+    <div className='panel' style={{ marginBottom: 12, borderColor: 'var(--danger)' }}>
+      <strong style={{ fontSize: 12 }}>Alerts</strong>
+      <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+        {alerts.map((a) => (
+          <div key={a.mode} style={{ fontSize: 12 }}>
+            <strong style={{ color: 'var(--danger)' }}>{a.mode}:</strong> {a.msg}
+            <button style={{ marginLeft: 8 }} onClick={() => onAck(a.mode)}>Ack</button>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -425,11 +448,9 @@ function HyperliquidPanel({ hstate, strategyKey, onScan, onMockOpen }) {
   )
 }
 
-function ModePanel({ modeKey, m, onAck }) {
+function ModePanel({ modeKey, m, onAck, showEvaluation = true, showTradeDetails = true, showLogs = true }) {
   const d = m?.latest_decision || {}
-  const modeRole = modeKey === 'btc_15m_conservative'
-    ? 'baseline/reference'
-    : 'autonomous learner'
+  const modeRole = modeKey === 'btc_15m_conservative' ? 'baseline/reference' : 'autonomous learner'
   const isBaselineMode = modeKey === 'btc_15m_conservative'
   const comparatorVerdict = m?.comparator_verdict || m?.comparison_vs_baseline?.verdict || '-'
   const modeReview = m?.mode_review_recommendation?.recommended_status || '-'
@@ -445,21 +466,10 @@ function ModePanel({ modeKey, m, onAck }) {
   const tradeAge = openPos?.open_time ? Math.max(0, Math.floor((Date.now() - new Date(openPos.open_time).getTime()) / 60000)) : null
   const bid = m?.market_data?.[0]?.bid ?? 0
   const ask = m?.market_data?.[0]?.ask ?? 0
-  const spread = m?.market_data?.[0]?.spread ?? 0
   const spreadPct = m?.market_data?.[0]?.spread_pct ?? 0
   const realized = m?.current_pnl?.realized ?? 0
   const unrealized = m?.current_pnl?.unrealized ?? 0
-  const grossRealized = m?.current_pnl?.gross_realized ?? m?.mode_stats?.gross_realized_pnl ?? realized
-  const grossUnrealized = m?.current_pnl?.gross_unrealized ?? m?.mode_stats?.gross_unrealized_pnl ?? unrealized
-  const totalFees = m?.current_pnl?.total_fees ?? m?.mode_stats?.total_fees ?? 0
-  const feeModel = m?.current_pnl?.fee_model ?? m?.mode_stats?.fee_model ?? '-'
-  const feePct = m?.current_pnl?.fee_pct ?? m?.mode_stats?.fee_pct ?? 0
   const feeDragPct = m?.current_pnl?.fee_drag_pct_of_gross_pnl ?? m?.mode_stats?.fee_drag_pct_of_gross_pnl ?? 0
-  const totalPnl = Number(realized) + Number(unrealized)
-  const equity = 10000 + totalPnl
-  const cash = 10000 + realized
-  const posQty = openPos?.qty ?? 0
-  const notional = openPos ? (openPos.qty * openPos.entry_fill_price) : 0
   const allHistory = m?.history || []
   const lifecycleRows = allHistory.filter(r => ['PAPER_TRADE_OPEN', 'PAPER_TRADE_CLOSED'].includes(r?.status))
   const diagRows = allHistory.filter(r => ['WAIT', 'REJECT'].includes(r?.status))
@@ -472,6 +482,7 @@ function ModePanel({ modeKey, m, onAck }) {
   }, {})
   const diagTop = Object.entries(diagCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
   const pnlColor = (v) => (Number(v) > 0 ? 'var(--success)' : Number(v) < 0 ? 'var(--danger)' : 'inherit')
+
   return (
     <div className='panel' style={{ marginBottom: 12 }}>
       <h3>{m?.mode_label || modeKey}</h3>
@@ -501,160 +512,151 @@ function ModePanel({ modeKey, m, onAck }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
-        <strong>Evaluation summary</strong>
-        {isBaselineMode ? (
-          <div style={{ marginTop: 6, opacity: 0.85 }}>Baseline reference mode (comparator target).</div>
-        ) : (
-          <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div><strong>Comparator verdict</strong><div>{comparatorVerdict}</div></div>
-            <div><strong>Mode review</strong><div>{modeReview}</div></div>
-            <div><strong>Policy confidence</strong><div>{policyConfidence}</div></div>
-            <div><strong>Preferred regimes</strong><div>{formatRegimes(preferredRegimes)}</div></div>
-            <div><strong>Caution regimes</strong><div>{formatRegimes(cautionRegimes)}</div></div>
-            <div><strong>Avoid regimes</strong><div>{formatRegimes(avoidRegimes)}</div></div>
-            <div style={{ gridColumn: '1 / span 2' }}><strong>Inconclusive regimes</strong><div>{formatRegimes(inconclusiveRegimes)}</div></div>
-          </div>
-        )}
-      </div>
-
-      <details style={{ marginTop: 8 }}>
-        <summary>Mode details</summary>
-        <div style={{ fontSize: 12, marginTop: 8 }}>
-          <strong>Latest executable decision</strong>
-          <div>Side: {d.side || '-'}</div>
-          <div>Entry: {d.entry_price || 0}</div>
-          <div>Stop Loss: {d.stop_loss || 0}</div>
-          <div>Take Profit: {d.take_profit || 0}</div>
-          <div>Invalidation: {d.invalidation || '-'}</div>
-          <div>Risk/Reward: {d.risk_reward_ratio || 0}</div>
-          <div>Reason: {d.reason || '-'}</div>
-          <div>Latest scan time: {fmtLA(m?.latest_scan_time)}</div>
-          <div>Latest decision time: {fmtLA(m?.latest_decision_time)}</div>
-
-          <div style={{ marginTop: 8 }}><strong>Open trade</strong></div>
-          {openPos ? (
-            <>
-              <div>Fill price: {openPos.entry_fill_price}</div>
-              <div>Entry fee: {openPos.entry_fee ?? '-'}</div>
-              <div>Gross unrealized PnL: {openPos.gross_unrealized_pnl ?? '-'}</div>
-              <div>Net unrealized PnL: {openPos.net_unrealized_pnl ?? openPos.unrealized_pnl ?? '-'}</div>
-              <div>Unrealized PnL (net): {openPos.unrealized_pnl}</div>
-              <div>Open time: {fmtLA(openPos.open_time)}</div>
-              <div>Age: {tradeAge} min</div>
-            </>
-          ) : <div>None</div>}
-
-          <div style={{ marginTop: 8 }}><strong>Latest closed trade</strong></div>
-          {latestClosed ? (
-            <>
-              <div>Entry: {latestClosed.entry_fill_price}</div>
-              <div>Exit: {latestClosed.close_fill_price}</div>
-              <div>Gross realized PnL: {latestClosed.gross_realized_pnl ?? '-'}</div>
-              <div>Net realized PnL: {latestClosed.net_realized_pnl ?? latestClosed.realized_pnl}</div>
-              <div>Entry fee: {latestClosed.entry_fee ?? '-'}</div>
-              <div>Close fee: {latestClosed.close_fee ?? '-'}</div>
-              <div>Total fees: {latestClosed.total_fees ?? '-'}</div>
-              <div>Close time: {fmtLA(latestClosed.close_time)}</div>
-              <div>Close reason: {latestClosed.close_reason}</div>
-            </>
-          ) : <div>None</div>}
+      {showEvaluation && (
+        <div style={{ marginTop: 8, fontSize: 12, background: 'var(--cardSoft)', padding: 8, borderRadius: 6, border: '1px solid var(--border)' }}>
+          <strong>Evaluation summary</strong>
+          {isBaselineMode ? (
+            <div style={{ marginTop: 6, opacity: 0.85 }}>Baseline reference mode (comparator target).</div>
+          ) : (
+            <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div><strong>Comparator verdict</strong><div>{comparatorVerdict}</div></div>
+              <div><strong>Mode review</strong><div>{modeReview}</div></div>
+              <div><strong>Policy confidence</strong><div>{policyConfidence}</div></div>
+              <div><strong>Preferred regimes</strong><div>{formatRegimes(preferredRegimes)}</div></div>
+              <div><strong>Caution regimes</strong><div>{formatRegimes(cautionRegimes)}</div></div>
+              <div><strong>Avoid regimes</strong><div>{formatRegimes(avoidRegimes)}</div></div>
+              <div style={{ gridColumn: '1 / span 2' }}><strong>Inconclusive regimes</strong><div>{formatRegimes(inconclusiveRegimes)}</div></div>
+            </div>
+          )}
         </div>
-      </details>
+      )}
 
-      <details style={{ marginTop: 6 }}>
-        <summary>Recent lifecycle history ({lifecycleRows.length})</summary>
-        <table className='rows' style={{ width: '100%' }}>
-          <thead><tr><th>Time</th><th>Status</th><th>Regime</th><th>R:R</th></tr></thead>
-          <tbody>
-            {lifecycleRows.slice(-8).reverse().map((r, i) => (
-              <tr key={i}><td>{fmtLA(r.timestamp)}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+      {showTradeDetails && (
+        <>
+          <details style={{ marginTop: 8 }}>
+            <summary>Mode details</summary>
+            <div style={{ fontSize: 12, marginTop: 8 }}>
+              <strong>Latest executable decision</strong>
+              <div>Side: {d.side || '-'}</div>
+              <div>Entry: {d.entry_price || 0}</div>
+              <div>Stop Loss: {d.stop_loss || 0}</div>
+              <div>Take Profit: {d.take_profit || 0}</div>
+              <div>Invalidation: {d.invalidation || '-'}</div>
+              <div>Risk/Reward: {d.risk_reward_ratio || 0}</div>
+              <div>Reason: {d.reason || '-'}</div>
+              <div>Latest scan time: {fmtLA(m?.latest_scan_time)}</div>
+              <div>Latest decision time: {fmtLA(m?.latest_decision_time)}</div>
 
-      <details style={{ marginTop: 6 }}>
-        <summary>Scan diagnostics (WAIT/REJECT summary)</summary>
-        <div style={{ fontSize: 12, marginTop: 8 }}>
-          <div>Window size: {allHistory.length}</div>
-          <div>WAIT count: {diagRows.filter(r => r.status === 'WAIT').length} | REJECT count: {diagRows.filter(r => r.status === 'REJECT').length}</div>
-          <div style={{ marginTop: 6 }}><strong>Top reasons</strong></div>
-          <ul style={{ margin: '4px 0 0 18px' }}>
-            {diagTop.length ? diagTop.map(([k, v], idx) => {
-              const [status, reason] = k.split('|')
-              return <li key={idx}>{status}: {reason} ({v})</li>
-            }) : <li>No WAIT/REJECT rows in current window.</li>}
-          </ul>
-        </div>
-      </details>
+              <div style={{ marginTop: 8 }}><strong>Open trade</strong></div>
+              {openPos ? (
+                <>
+                  <div>Fill price: {openPos.entry_fill_price}</div>
+                  <div>Entry fee: {openPos.entry_fee ?? '-'}</div>
+                  <div>Gross unrealized PnL: {openPos.gross_unrealized_pnl ?? '-'}</div>
+                  <div>Net unrealized PnL: {openPos.net_unrealized_pnl ?? openPos.unrealized_pnl ?? '-'}</div>
+                  <div>Unrealized PnL (net): {openPos.unrealized_pnl}</div>
+                  <div>Open time: {fmtLA(openPos.open_time)}</div>
+                  <div>Age: {tradeAge} min</div>
+                </>
+              ) : <div>None</div>}
 
-      <details style={{ marginTop: 6 }}>
-        <summary>Open Kraken paper trades ({(m?.open_positions || []).length})</summary>
-        <table className='rows' style={{ width: '100%' }}>
-          <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Entry price</th><th>Qty</th><th>Entry notional</th><th>Current price</th><th>Unrealized PnL (net)</th><th>Current return %</th><th>TP</th><th>SL</th></tr></thead>
-          <tbody>
-            {(m?.open_positions || []).slice(-10).map((p, i) => {
-              const entryPrice = Number(p.entry_fill_price ?? p.entry_price ?? 0)
-              const qty = Number(p.qty ?? 0)
-              const entryNotional = Number(p.entry_notional ?? (entryPrice * qty))
-              const currentPrice = Number(m?.market_data?.[0]?.ohlcv?.slice(-1)[0]?.close ?? m?.market_data?.[0]?.bid ?? 0)
-              const unrl = Number(p.net_unrealized_pnl ?? p.unrealized_pnl ?? 0)
-              const retPct = entryNotional > 0 ? (unrl / entryNotional) * 100 : null
-              return (
-                <tr key={i}>
-                  <td>BTC/USD</td>
-                  <td>{p.side}</td>
-                  <td>{fmtLA(p.open_time)}</td>
-                  <td>{fmt2(entryPrice)}</td>
-                  <td>{p.qty}</td>
-                  <td>{fmt2(entryNotional)}</td>
-                  <td>{fmt2(currentPrice)}</td>
-                  <td style={{ color: pnlColor(unrl), fontWeight: 700 }}>{fmt2(unrl)}</td>
-                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
-                  <td>{p.take_profit ?? '-'}</td>
-                  <td>{p.stop_loss ?? '-'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </details>
+              <div style={{ marginTop: 8 }}><strong>Latest closed trade</strong></div>
+              {latestClosed ? (
+                <>
+                  <div>Entry: {latestClosed.entry_fill_price}</div>
+                  <div>Exit: {latestClosed.close_fill_price}</div>
+                  <div>Gross realized PnL: {latestClosed.gross_realized_pnl ?? '-'}</div>
+                  <div>Net realized PnL: {latestClosed.net_realized_pnl ?? latestClosed.realized_pnl}</div>
+                  <div>Entry fee: {latestClosed.entry_fee ?? '-'}</div>
+                  <div>Close fee: {latestClosed.close_fee ?? '-'}</div>
+                  <div>Total fees: {latestClosed.total_fees ?? '-'}</div>
+                  <div>Close time: {fmtLA(latestClosed.close_time)}</div>
+                  <div>Close reason: {latestClosed.close_reason}</div>
+                </>
+              ) : <div>None</div>}
+            </div>
+          </details>
 
-      <details style={{ marginTop: 6 }}>
-        <summary>Closed Kraken paper trades ({closedTrades.length})</summary>
-        <table className='rows' style={{ width: '100%' }}>
-          <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Entry notional</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th></tr></thead>
-          <tbody>
-            {closedTrades.slice(-12).reverse().map((t, i) => {
-              const gross = Number(t.gross_realized_pnl ?? 0)
-              const feesPaid = Number(t.total_fees ?? t.estimated_total_fees ?? ((t.entry_fee ?? 0) + (t.close_fee ?? 0)))
-              const net = Number(t.net_realized_pnl ?? t.realized_pnl ?? 0)
-              const entryNotional = Number(t.entry_notional ?? (Number(t.entry_fill_price ?? 0) * Number(t.qty ?? 0)))
-              const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
-              return (
-                <tr key={i}>
-                  <td>BTC/USD</td>
-                  <td>{t.side || '-'}</td>
-                  <td>{fmtLA(t.open_time || t.entry_time)}</td>
-                  <td>{fmtLA(t.close_time)}</td>
-                  <td>{fmt2(Number(t.entry_fill_price ?? t.entry_price ?? 0))}</td>
-                  <td>{fmt2(Number(t.close_fill_price ?? t.close_price ?? 0))}</td>
-                  <td>{t.qty ?? '-'}</td>
-                  <td>{fmt2(entryNotional)}</td>
-                  <td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td>
-                  <td>{fmt2(feesPaid)}</td>
-                  <td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
-                  <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
-                  <td>{t.close_reason || '-'}</td>
-                  <td>{t.strategy_key || m?.mode || modeKey}</td>
-                  <td>{t.regime_label || t.market_regime || m?.current_regime?.regime || '-'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </details>
+          <details style={{ marginTop: 6 }}>
+            <summary>Open Kraken paper trades ({(m?.open_positions || []).length})</summary>
+            <table className='rows' style={{ width: '100%' }}>
+              <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Entry price</th><th>Qty</th><th>Entry notional</th><th>Current price</th><th>Unrealized PnL (net)</th><th>Current return %</th><th>TP</th><th>SL</th></tr></thead>
+              <tbody>
+                {(m?.open_positions || []).slice(-10).map((p, i) => {
+                  const entryPrice = Number(p.entry_fill_price ?? p.entry_price ?? 0)
+                  const qty = Number(p.qty ?? 0)
+                  const entryNotional = Number(p.entry_notional ?? (entryPrice * qty))
+                  const currentPrice = Number(m?.market_data?.[0]?.ohlcv?.slice(-1)[0]?.close ?? m?.market_data?.[0]?.bid ?? 0)
+                  const unrl = Number(p.net_unrealized_pnl ?? p.unrealized_pnl ?? 0)
+                  const retPct = entryNotional > 0 ? (unrl / entryNotional) * 100 : null
+                  return (
+                    <tr key={i}>
+                      <td>BTC/USD</td><td>{p.side}</td><td>{fmtLA(p.open_time)}</td><td>{fmt2(entryPrice)}</td><td>{p.qty}</td><td>{fmt2(entryNotional)}</td><td>{fmt2(currentPrice)}</td>
+                      <td style={{ color: pnlColor(unrl), fontWeight: 700 }}>{fmt2(unrl)}</td>
+                      <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td>
+                      <td>{p.take_profit ?? '-'}</td><td>{p.stop_loss ?? '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </details>
+
+          <details style={{ marginTop: 6 }}>
+            <summary>Closed Kraken paper trades ({closedTrades.length})</summary>
+            <table className='rows' style={{ width: '100%' }}>
+              <thead><tr><th>Symbol</th><th>Side</th><th>Entry time</th><th>Close time</th><th>Entry price</th><th>Close price</th><th>Qty</th><th>Entry notional</th><th>Gross PnL</th><th>Fees</th><th>Net PnL</th><th>Return %</th><th>Close reason</th><th>Strategy</th><th>Regime</th></tr></thead>
+              <tbody>
+                {closedTrades.slice(-12).reverse().map((t, i) => {
+                  const gross = Number(t.gross_realized_pnl ?? 0)
+                  const feesPaid = Number(t.total_fees ?? t.estimated_total_fees ?? ((t.entry_fee ?? 0) + (t.close_fee ?? 0)))
+                  const net = Number(t.net_realized_pnl ?? t.realized_pnl ?? 0)
+                  const entryNotional = Number(t.entry_notional ?? (Number(t.entry_fill_price ?? 0) * Number(t.qty ?? 0)))
+                  const retPct = entryNotional > 0 ? (net / entryNotional) * 100 : null
+                  return (
+                    <tr key={i}>
+                      <td>BTC/USD</td><td>{t.side || '-'}</td><td>{fmtLA(t.open_time || t.entry_time)}</td><td>{fmtLA(t.close_time)}</td><td>{fmt2(Number(t.entry_fill_price ?? t.entry_price ?? 0))}</td><td>{fmt2(Number(t.close_fill_price ?? t.close_price ?? 0))}</td>
+                      <td>{t.qty ?? '-'}</td><td>{fmt2(entryNotional)}</td><td style={{ color: pnlColor(gross) }}>{fmt2(gross)}</td><td>{fmt2(feesPaid)}</td><td style={{ color: pnlColor(net), fontWeight: 700 }}>{fmt2(net)}</td>
+                      <td style={{ color: pnlColor(retPct ?? 0) }}>{retPct == null ? '-' : `${fmt2(retPct)}%`}</td><td>{t.close_reason || '-'}</td><td>{t.strategy_key || m?.mode || modeKey}</td><td>{t.regime_label || t.market_regime || m?.current_regime?.regime || '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </details>
+        </>
+      )}
+
+      {showLogs && (
+        <>
+          <details style={{ marginTop: 6 }}>
+            <summary>Recent lifecycle history ({lifecycleRows.length})</summary>
+            <table className='rows' style={{ width: '100%' }}>
+              <thead><tr><th>Time</th><th>Status</th><th>Regime</th><th>R:R</th></tr></thead>
+              <tbody>
+                {lifecycleRows.slice(-8).reverse().map((r, i) => (
+                  <tr key={i}><td>{fmtLA(r.timestamp)}</td><td>{r.status}</td><td>{r.regime_label}</td><td>{r.risk_reward_ratio}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+
+          <details style={{ marginTop: 6 }}>
+            <summary>Scan diagnostics (WAIT/REJECT summary)</summary>
+            <div style={{ fontSize: 12, marginTop: 8 }}>
+              <div>Window size: {allHistory.length}</div>
+              <div>WAIT count: {diagRows.filter(r => r.status === 'WAIT').length} | REJECT count: {diagRows.filter(r => r.status === 'REJECT').length}</div>
+              <div style={{ marginTop: 6 }}><strong>Top reasons</strong></div>
+              <ul style={{ margin: '4px 0 0 18px' }}>
+                {diagTop.length ? diagTop.map(([k, v], idx) => {
+                  const [status, reason] = k.split('|')
+                  return <li key={idx}>{status}: {reason} ({v})</li>
+                }) : <li>No WAIT/REJECT rows in current window.</li>}
+              </ul>
+            </div>
+          </details>
+        </>
+      )}
     </div>
   )
 }
@@ -665,6 +667,7 @@ export default function App() {
   const [newsState, setNewsState] = useState(null)
   const [err, setErr] = useState('')
   const [theme, setTheme] = useState('dark')
+  const [activePage, setActivePage] = useState('Overview')
 
   const load = async () => {
     try {
@@ -775,6 +778,56 @@ export default function App() {
   const primaryHlKeys = ['hl_15m_trend_follow', 'hl_15m_trend_follow_momo_gate_v1']
   const hlPanelKeys = primaryHlKeys.filter(k => (hyperState?.strategy_registry || {})[k])
 
+  const renderPage = () => {
+    if (activePage === 'Overview') {
+      return (
+        <>
+          <RuntimePanel state={state} />
+          <AlertStrip state={state} onAck={ack} />
+          <NewsPanel news={newsState} compact />
+          <ScoreboardTable rows={rows} />
+          <SharedChart state={state} theme={theme} compact />
+        </>
+      )
+    }
+
+    if (activePage === 'Hyperliquid') {
+      return (
+        <>
+          <div className='panel' style={{ marginBottom: 8 }}><strong>Hyperliquid Track</strong> <span className='badge'>reference + autonomous learner</span></div>
+          {hlPanelKeys.map((k) => (
+            <HyperliquidPanel key={k} hstate={hyperState} strategyKey={k} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
+          ))}
+        </>
+      )
+    }
+
+    if (activePage === 'Kraken') {
+      return (
+        <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} showEvaluation={false} showTradeDetails showLogs={false} />)}
+        </div>
+      )
+    }
+
+    if (activePage === 'Research') {
+      return (
+        <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} showEvaluation showTradeDetails={false} showLogs={false} />)}
+        </div>
+      )
+    }
+
+    return (
+      <>
+        <NewsPanel news={newsState} />
+        <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
+          {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} showEvaluation={false} showTradeDetails={false} showLogs />)}
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className={`wrap theme-${theme}`}>
       <div className='top'>
@@ -786,27 +839,18 @@ export default function App() {
           <button onClick={toggleAuto}>{state.auto_scan ? 'Pause Auto' : 'Resume Auto'}</button>
         </div>
       </div>
-      {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
-      <RuntimePanel state={state} />
-      <NewsPanel news={newsState} />
-      <div className='grid' style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 12 }}>
-        <div>
-          <div className='panel' style={{ marginBottom: 8 }}><strong>Kraken Track</strong> <span className='badge'>baseline + autonomous learner</span></div>
-          <SharedChart state={state} theme={theme} />
-        </div>
-        <div>
-          <div className='panel' style={{ marginBottom: 8 }}><strong>Hyperliquid Track</strong> <span className='badge'>reference + autonomous learner</span></div>
-          {hlPanelKeys.map((k) => (
-            <HyperliquidPanel key={k} hstate={hyperState} strategyKey={k} onScan={runHyperScan} onMockOpen={mockHyperOpen} />
+
+      <div className='app-shell'>
+        <aside className='panel side-nav'>
+          {PAGES.map((page) => (
+            <button key={page} className={`nav-btn ${activePage === page ? 'active' : ''}`} onClick={() => setActivePage(page)}>{page}</button>
           ))}
-          <div className='panel' style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-            Retired Hyperliquid variants are hidden from default UI/runtime and kept in backend archives/metrics.
-          </div>
-        </div>
-      </div>
-      <ScoreboardTable rows={rows} />
-      <div className='grid' style={{ gridTemplateColumns: '1fr 1fr' }}>
-        {MODE_ORDER.map(k => <ModePanel key={k} modeKey={k} m={state?.modes?.[k]} onAck={ack} />)}
+        </aside>
+
+        <main>
+          {err && <div className='panel' style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>{err}</div>}
+          {renderPage()}
+        </main>
       </div>
     </div>
   )
